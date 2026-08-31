@@ -90,6 +90,7 @@ Quantitative-Fund-auto/
 │   ├── analysis/                # 分析层
 │   │   ├── fund_scorer.py       #   基金质量筛选（三色评级）
 │   │   ├── thermometer.py       #   市场温度计（5维+分歧检测+风格判断）
+│   │   ├── backtest.py          #   严谨回测引擎 v3（防未来函数/多基准/t检验）
 │   │   ├── portfolio.py         #   持仓跟踪
 │   │   ├── strategy_engine.py   #   策略引擎（月频+温度阈值）
 │   │   ├── rebalance_advisor.py #   调仓建议
@@ -102,7 +103,8 @@ Quantitative-Fund-auto/
 │   ├── web/                     # 🌐 Web 仪表盘
 │   │   ├── app.py               #   Flask 后端 API
 │   │   └── templates/           #   前端页面
-│   └── main.py                  # 🚀 主入口（CLI）
+│   └── main.py                  # 🚀 主入口（CLI 分发，命令在 src/cli/）
+├── tests/                       # ✅ 单元测试（34 个用例）
 ├── data/                        # 数据库文件（gitignore）
 ├── requirements.txt
 └── README.md
