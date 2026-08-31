@@ -1,0 +1,78 @@
+# ===========================================
+# 自动化基金量化系统 - 配置文件
+# ===========================================
+# 修改此文件即可调整策略参数，无需改代码
+
+# --- 基金评分器: 6因子权重 (总和=1.0) ---
+scorer:
+  momentum_weight: 0.25       # 动量因子（近3/6/12月收益率）
+  sharpe_weight: 0.25         # 风险调整收益（夏普比率）
+  drawdown_weight: 0.20       # 回撤控制（近1年最大回撤）
+  fee_weight: 0.15            # 费率因子（管理费+托管费）
+  size_weight: 0.10           # 规模因子（2-50亿最佳）
+  manager_weight: 0.05        # 经理稳定性（任职年限）
+
+  # 评分排除规则
+  exclude:
+    min_age_months: 12        # 成立不足12个月的基金不评分
+    min_size_yi: 0.5          # 规模小于5000万的不评分（亿元）
+    exclude_suspended: true   # 暂停申购的排除
+
+# --- 市场温度计: 5维度权重 (总和=1.0) ---
+thermometer:
+  pe_percentile_weight: 0.30    # 沪深300 PE分位数
+  pb_percentile_weight: 0.20    # 沪深300 PB分位数
+  erp_weight: 0.25              # 股债性价比(ERP = 1/PE - 国债收益率)
+  volume_weight: 0.15           # 市场成交量
+  sentiment_weight: 0.10        # 新发基金情绪
+
+  # 温度分级阈值
+  temp_levels:
+    cold_max: 20       # 0-20: 极冷
+    cool_max: 40       # 20-40: 偏冷
+    warm_max: 60       # 40-60: 适中
+    hot_max: 80        # 60-80: 偏热
+                        # 80-100: 过热
+
+# --- 仓位映射: 基于温度计 ---
+allocation:
+  # 权益仓位上限（剩余仓位配债券/货币）
+  cold_max_equity: 0.70     # 极冷: 最多70%
+  cool_max_equity: 0.55     # 偏冷: 最多55%
+  normal_equity: 0.35       # 适中: 约35%
+  warm_max_equity: 0.20     # 偏热: 最多20%
+  hot_max_equity: 0.05      # 过热: 最多5%
+
+  # 单只基金最大仓位
+  max_single_fund_pct: 0.50  # 单只基金不超过总仓位50%
+
+  # 最大回撤约束
+  max_drawdown_limit: 0.25   # 组合最大回撤不超过25%
+
+# --- 数据配置 ---
+data:
+  db_path: "data/fund_quant.db"
+  lookback_years: 3          # 回看历史数据年数
+  collect_on_startup: true   # 启动时是否自动采集数据
+
+# --- 策略配置 ---
+strategy:
+  # 基金池: 分析哪些类型的基金
+  fund_types:
+    - "股票型"
+    - "混合型"
+    - "指数型"
+    - "债券型"
+
+  # 推荐的参考基准
+  benchmark: "000300"         # 沪深300指数代码
+
+  # 每周推荐基金数量
+  top_n_recommend: 5          # 推荐Top5基金
+
+# --- 输出配置 ---
+output:
+  use_color: true             # 终端彩色输出
+  show_top_n: 10              # 显示Top N评分的基金
+  save_report: true           # 是否保存报告到文件
+  report_dir: "reports"       # 报告保存目录
