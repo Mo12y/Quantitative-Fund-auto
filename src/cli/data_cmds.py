@@ -1,32 +1,14 @@
 """
-CLI 命令模块（由 main.py 拆分而来）。
+数据采集命令：test / init / index / collect / nav / enrich / hithink。
 """
 
-import os
-import subprocess
-import sys
-import threading
 import time
-import webbrowser
 
 import akshare as ak
-import numpy as np
-import pandas as pd
 
-from src.data.database import Database
 from src.data.collector import DataCollector, quick_test
-from src.data.hithink_collector import HiThinkCollector, quick_test as hithink_quick_test
-from src.analysis.backtest import RigorousBacktest
-from src.analysis.fund_scorer import FundScorer, FundScreener
-from src.analysis.historical_recommender import HistoricalRecommender
-from src.analysis.investment_plan import get_plan, get_progress
-from src.analysis.portfolio import PortfolioTracker
-from src.analysis.rebalance_advisor import RebalanceAdvisor
-from src.analysis.sector_analyzer import SectorAnalyzer
-from src.analysis.sentiment_monitor import SentimentMonitor, quick_scan as sentiment_quick_scan
-from src.analysis.strategy_engine import StrategyEngine
-from src.analysis.thermometer import MarketThermometer
-from src.output.reporter import WeeklyReporter
+from src.data.database import Database
+from src.data.hithink_collector import quick_test as hithink_quick_test
 
 
 # 同花顺 API Key（从 .env 读取）
@@ -195,7 +177,6 @@ def cmd_nav():
     采集净值历史+基金详情: 从各类型基金中分层采样。
     同时获取基金详细信息(规模/经理/成立日)以支撑质量筛选。
     """
-    import sqlite3
     db = Database("data/fund_quant.db")
     collector = DataCollector(db)
     cur = db.conn.cursor()
@@ -267,7 +248,6 @@ def cmd_enrich():
     快速补充: 为已有净值的基金补充详细信息(规模/经理/成立日)。
     只采集profile不重新采集净值，速度快。
     """
-    import sqlite3
     db = Database("data/fund_quant.db")
     collector = DataCollector(db)
     cur = db.conn.cursor()

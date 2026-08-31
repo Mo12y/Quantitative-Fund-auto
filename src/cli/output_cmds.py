@@ -1,47 +1,17 @@
 """
-CLI 命令模块（由 main.py 拆分而来）。
+输出与操作命令：report / buy / sell / web / schedule。
 """
 
-import os
-import subprocess
-import sys
 import threading
 import time
 import webbrowser
 
-import akshare as ak
-import numpy as np
-import pandas as pd
-
-from src.data.database import Database
-from src.data.collector import DataCollector, quick_test
-from src.data.hithink_collector import HiThinkCollector, quick_test as hithink_quick_test
-from src.analysis.backtest import RigorousBacktest
-from src.analysis.fund_scorer import FundScorer, FundScreener
-from src.analysis.historical_recommender import HistoricalRecommender
-from src.analysis.investment_plan import get_plan, get_progress
+from src.analysis.fund_scorer import FundScreener
 from src.analysis.portfolio import PortfolioTracker
-from src.analysis.rebalance_advisor import RebalanceAdvisor
-from src.analysis.sector_analyzer import SectorAnalyzer
-from src.analysis.sentiment_monitor import SentimentMonitor, quick_scan as sentiment_quick_scan
-from src.analysis.strategy_engine import StrategyEngine
+from src.analysis.sentiment_monitor import SentimentMonitor
 from src.analysis.thermometer import MarketThermometer
+from src.data.database import Database
 from src.output.reporter import WeeklyReporter
-
-
-# 同花顺 API Key（从 .env 读取）
-def _load_api_key():
-    try:
-        with open(".env") as f:
-            for line in f:
-                if line.startswith("HITHINK_API_KEY="):
-                    return line.split("=", 1)[1].strip()
-    except FileNotFoundError:
-        pass
-    return ""
-
-
-HITHINK_KEY = _load_api_key()
 
 
 def cmd_report():
