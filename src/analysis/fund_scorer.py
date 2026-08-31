@@ -261,9 +261,7 @@ class FundScreener:
 
     def _get_funds_with_nav(self) -> set:
         """获取有净值数据的基金代码集合"""
-        cur = self.db.conn.cursor()
-        cur.execute("SELECT DISTINCT fund_code FROM fund_nav")
-        return {row[0] for row in cur.fetchall()}
+        return self.db.get_all_fund_codes()
 
     def get_pool_summary(self, df: pd.DataFrame) -> dict:
         """获取筛选池的统计摘要"""

@@ -251,6 +251,12 @@ class Database:
         row = cursor.fetchone()
         return row["latest"] if row else None
 
+    def get_all_fund_codes(self) -> set:
+        """获取所有有净值数据的基金代码集合（供分析层复用，避免裸 SQL）"""
+        cursor = self.conn.cursor()
+        cursor.execute("SELECT DISTINCT fund_code FROM fund_nav")
+        return {row[0] for row in cursor.fetchall()}
+
     # ========== 指数数据操作 ==========
 
     def upsert_index_valuation(self, val: dict):

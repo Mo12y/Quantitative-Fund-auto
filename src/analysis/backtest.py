@@ -333,13 +333,12 @@ class RigorousBacktest:
         temp_map = self._get_temp_map()
 
         # 2. 基金池（注意：存续基金，存在幸存者偏差）
-        cur = self.db.conn.cursor()
-        cur.execute("SELECT DISTINCT fund_code FROM fund_nav")
-        all_codes = [r[0] for r in cur.fetchall()]
+        all_codes = list(self.db.get_all_fund_codes())
         if not all_codes:
             return {"error": "无净值数据"}
 
         # 3. 时间范围
+        cur = self.db.conn.cursor()
         cur.execute("SELECT MAX(nav_date), MIN(nav_date) FROM fund_nav")
         max_date, min_date = cur.fetchone()
         end_date = max_date
