@@ -217,9 +217,7 @@ class HistoricalRecommender:
         return bond[:60] + equity[:60]
 
     def _get_monthly_dates(self, lookback_years: int) -> list:
-        cur = self.db.conn.cursor()
-        cur.execute("SELECT MAX(nav_date) FROM fund_nav")
-        max_date = cur.fetchone()[0]
+        max_date = self.db.get_latest_nav_date()
         if not max_date:
             return []
 

@@ -14,10 +14,10 @@ from src.data.database import Database
 
 def cmd_backtest():
     """
-    简单回测: 用历史3年数据验证评分模型。
+    ⚠️ LEGACY 回测 v1: 每周换仓 Top3。
 
-    策略: 每周按评分买Top3基金，持有1周后换仓。
-    对比: 我们的策略 vs 等权持有沪深300
+    已被严谨回测 v3（backtest3）取代（v1 存在未来函数且交易成本模拟粗糙），
+    保留此命令仅用于兼容。
     """
     import pandas as pd
     import numpy as np
