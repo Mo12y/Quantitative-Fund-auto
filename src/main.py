@@ -13,6 +13,7 @@
     python src/main.py buy/sell     # 买入/卖出记录
     python src/main.py plan         # 投资计划+进度
     python src/main.py web          # 启动Web仪表盘
+    python src/main.py schedule     # 定时调度(每周日自动生成周报)
     python src/main.py init           # 一键初始化(首次使用)
     python src/main.py collect/nav/enrich  # 分步数据采集
 """
@@ -90,6 +91,27 @@ def cmd_init():
     print("=" * 60)
     print("✅ 初始化完成！现在运行 python src/main.py 查看周报")
     print("=" * 60)
+
+
+def cmd_schedule():
+    """定时调度: 每周日 20:00 自动生成周报（依赖 schedule 库）"""
+    try:
+        import schedule
+        import time
+    except ImportError:
+        print("❌ 未安装 schedule 库，请先执行: pip install schedule")
+        return
+
+    print("⏰ 定时调度已启动")
+    print("   每周日 20:00 自动生成周报")
+    print("   按 Ctrl+C 停止")
+    print()
+
+    schedule.every().sunday.at("20:00").do(cmd_report)
+
+    while True:
+        schedule.run_pending()
+        time.sleep(60)
 
 
 def cmd_index():
@@ -1150,6 +1172,7 @@ def main():
     commands = {
         "test": cmd_test,
         "init": cmd_init,
+        "schedule": cmd_schedule,
         "collect": cmd_collect,
         "index": cmd_index,
         "nav": cmd_nav,

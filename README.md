@@ -224,7 +224,7 @@ python -m unittest discover tests
 
 既然你通过支付宝买场外基金:
 
-1. **每周日**运行 `python src/main.py` 查看报告
+1. **每周日**运行 `python src/main.py` 查看报告（或 `python src/main.py schedule` 定时自动生成）
 2. 如果市场温度低+推荐基金评分高 → 考虑在支付宝买入
 3. 如果市场温度高 → 减少买入或赎回部分转货币基金
 4. 用 `python src/main.py buy/sell` 记录操作，跟踪收益
