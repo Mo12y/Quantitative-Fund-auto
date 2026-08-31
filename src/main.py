@@ -763,6 +763,39 @@ def cmd_backtest3():
     db.close()
 
 
+def cmd_backtest4():
+    """策略对比研究: 买入持有 vs 现状 vs 温度自适应选基（验证改进假设）"""
+    db = Database("data/fund_quant.db")
+    engine = RigorousBacktest(db)
+
+    print("🔬 策略对比研究")
+    print("=" * 60)
+    print("  假设: 现状策略牛市跑输，源于选基权重过度防御")
+    print("  对照: 买入持有(基线) | 温度阈值调仓(现状) | 温度自适应选基(改进)")
+    print()
+
+    result = engine.compare_strategies(lookback_years=5)
+
+    for name, r in result.items():
+        if "error" in r:
+            print(f"❌ {name}: {r['error']}")
+            continue
+        s = r["strategy"]
+        a300 = r.get("alpha_vs_sh000300", {})
+        a905 = r.get("alpha_vs_sh000905", {})
+        print(f"\n📌 {name}（调仓 {r['trades']} 次）:")
+        print(f"   年化 {s['annual_return']:+.1f}% | 夏普 {s['sharpe']:.2f} | "
+              f"回撤 {s['max_drawdown']:.1f}% | 月胜率 {s['win_rate']:.0f}%")
+        for label, a in [("沪深300", a300), ("中证500", a905)]:
+            if a.get("t_stat") is not None:
+                sig = "✅显著" if a["significant"] else "❌不显著"
+                print(f"   vs {label}: alpha {a['mean_alpha']:+.2f}%/月 | p={a['p_value']} | {sig}")
+
+    print("\n📊 结论: 对比三组年化收益/alpha 显著性，判断改进假设是否成立")
+    print("=" * 60)
+    db.close()
+
+
 def cmd_strategy():
     """v2策略建议: 月频评估，判断是否应调仓"""
     db = Database("data/fund_quant.db")
@@ -1244,6 +1277,7 @@ def main():
         "backtest": cmd_backtest,
         "backtest2": cmd_backtest2,
         "backtest3": cmd_backtest3,
+        "backtest4": cmd_backtest4,
         "strategy": cmd_strategy,
         "report": cmd_report,
         "portfolio": cmd_portfolio,

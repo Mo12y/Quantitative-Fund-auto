@@ -158,6 +158,19 @@ class RigorousBacktest:
     def __init__(self, db: Database, cost_model: Optional[CostModel] = None):
         self.db = db
         self.cost = cost_model or CostModel()
+        # 数据缓存：多次回测只拉取一次 akshare 数据
+        self._temp_map: Optional[Dict[str, float]] = None
+        self._benchmarks: Optional[Dict[str, Optional[pd.Series]]] = None
+
+    def _get_temp_map(self) -> Dict[str, float]:
+        if self._temp_map is None:
+            self._temp_map = self.get_pe_temperature_series()
+        return self._temp_map
+
+    def _get_benchmarks(self, symbols: tuple) -> Dict[str, Optional[pd.Series]]:
+        if self._benchmarks is None:
+            self._benchmarks = {sym: self._load_benchmark(sym) for sym in symbols}
+        return self._benchmarks
 
     # ------------------------------------------------------------------
     # 无未来函数的 PE 温度序列
@@ -210,8 +223,11 @@ class RigorousBacktest:
     # 点选基金（只用 <= date 的数据）
     # ------------------------------------------------------------------
 
-    def select_top_n_at(self, all_codes: List[str], date_str: str, top_n: int = 3) -> List[str]:
-        """在 date_str 当日选出 TopN 基金（动量 + 波动 + 回撤打分）"""
+    def select_top_n_at(
+        self, all_codes: List[str], date_str: str,
+        top_n: int = 3, weights: tuple = (0.4, 0.3, 0.3),
+    ) -> List[str]:
+        """在 date_str 当日选出 TopN 基金（权重可配：动量 / 低波动 / 低回撤）"""
         scores = []
         for code in all_codes:
             navs = self.db.get_fund_nav(code, end_date=date_str)
@@ -234,8 +250,9 @@ class RigorousBacktest:
                 # 近1年最大回撤
                 dd = compute_max_drawdown(nav_series[-252:]) if len(nav_series) >= 252 else compute_max_drawdown(nav_series)
 
-                # 打分：动量40% + 低波动30% + 低回撤30%
-                score = mom * 0.4 + (100 - min(ann_vol, 100)) * 0.3 + (50 - dd) * 0.3
+                # 打分：权重可配（默认 动量40% + 低波动30% + 低回撤30%）
+                w_mom, w_vol, w_dd = weights
+                score = mom * w_mom + (100 - min(ann_vol, 100)) * w_vol + (50 - dd) * w_dd
                 scores.append((code, score))
             except Exception:
                 continue
@@ -278,19 +295,27 @@ class RigorousBacktest:
         self,
         lookback_years: int = 5,
         benchmark_symbols: tuple = ("sh000300", "sh000905"),
+        selection_weights: tuple = (0.4, 0.3, 0.3),
+        adaptive_weights: bool = False,
+        temp_threshold: int = 15,
+        buy_and_hold: bool = False,
     ) -> Dict:
         """
-        运行严谨回测。
+        运行严谨回测（策略参数可配，用于改进假设验证）。
 
         Args:
             lookback_years: 回测年数
             benchmark_symbols: 基准指数（akshare 代码）
+            selection_weights: 选基权重 (动量, 低波动, 低回撤)
+            adaptive_weights: 是否按温度自适应选基权重（冷市防御/热市动量）
+            temp_threshold: 温度变化调仓阈值
+            buy_and_hold: 买入持有模式（只在首月建仓，之后不调仓）
 
         Returns:
             dict: 完整回测报告
         """
-        # 1. 无未来函数的温度序列
-        temp_map = self.get_pe_temperature_series()
+        # 1. 无未来函数的温度序列（缓存复用）
+        temp_map = self._get_temp_map()
 
         # 2. 基金池（注意：存续基金，存在幸存者偏差）
         cur = self.db.conn.cursor()
@@ -306,8 +331,8 @@ class RigorousBacktest:
         start_date = (pd.to_datetime(max_date) - timedelta(days=365 * lookback_years)).strftime("%Y-%m-%d")
         months = self._month_grid(start_date, end_date)
 
-        # 4. 基准
-        benchmarks = {sym: self._load_benchmark(sym) for sym in benchmark_symbols}
+        # 4. 基准（缓存复用）
+        benchmarks = self._get_benchmarks(benchmark_symbols)
 
         # 5. 模拟
         portfolio_value = 100.0
@@ -322,9 +347,16 @@ class RigorousBacktest:
             temp = self._nearest_temp(temp_map, m)
 
             # --- 温度阈值触发调仓 ---
-            should_trade = (last_temp is None or abs(temp - last_temp) >= self.TEMP_CHANGE_THRESHOLD)
+            should_trade = (last_temp is None or abs(temp - last_temp) >= temp_threshold)
+            if buy_and_hold:
+                should_trade = (i == 0)  # 买入持有：只在首月建仓
+
             if should_trade:
-                new_picks = self.select_top_n_at(all_codes, m, self.TOP_N)
+                # 温度自适应权重：冷市防御(低波动/低回撤)，热市动量
+                weights = selection_weights
+                if adaptive_weights:
+                    weights = (0.2, 0.4, 0.4) if temp < 40 else (0.6, 0.2, 0.2)
+                new_picks = self.select_top_n_at(all_codes, m, self.TOP_N, weights=weights)
                 if new_picks:
                     # 卖出旧持仓：按持有天数收赎回费
                     sell_cost = 0.0
@@ -383,6 +415,12 @@ class RigorousBacktest:
         result = {
             "strategy": compute_metrics(sr),
             "trades": trade_log,
+            "params": {
+                "selection_weights": list(selection_weights),
+                "adaptive_weights": adaptive_weights,
+                "temp_threshold": temp_threshold,
+                "buy_and_hold": buy_and_hold,
+            },
             "note": "基金池为存续基金，存在幸存者偏差；温度分位数为扩展窗口（无未来函数）",
         }
 
@@ -425,3 +463,42 @@ class RigorousBacktest:
                     entry[f"{sym}"] = round((bnav[-1] - 1) * 100, 2)
             years.append(entry)
         return years
+
+    # ------------------------------------------------------------------
+    # 策略对比研究（改进假设验证）
+    # ------------------------------------------------------------------
+
+    def compare_strategies(self, lookback_years: int = 5) -> Dict:
+        """
+        策略对比研究：验证改进假设。
+
+        三组对照：
+        - 买入持有(基线)：首月建仓后不再调仓（无策略 vs 有策略）
+        - 温度阈值调仓(现状)：v3 原策略
+        - 温度自适应选基(改进假设)：冷市防御权重 / 热市动量权重
+
+        假设：现状策略在牛市跑输，源于选基权重过度防御
+        （低波动/低回撤权重过高），改进后应提升牛市收益。
+        """
+        variants = {
+            "买入持有(基线)": {"buy_and_hold": True},
+            "温度阈值调仓(现状)": {},
+            "温度自适应选基(改进)": {"adaptive_weights": True},
+        }
+        results = {}
+        for name, params in variants.items():
+            r = self.run(lookback_years=lookback_years, **params)
+            if "error" in r:
+                results[name] = {"error": r["error"]}
+                continue
+            entry = {
+                "strategy": r["strategy"],
+                "trades": len(r["trades"]),
+                "params": r["params"],
+            }
+            for sym in ["sh000300", "sh000905"]:
+                akey = f"alpha_vs_{sym}"
+                if akey in r:
+                    entry[f"alpha_vs_{sym}"] = r[akey]
+            results[name] = entry
+        return results
