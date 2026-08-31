@@ -216,8 +216,10 @@ class StrategyEngine:
         """
         回测 v2: 月频评估 + 温度阈值触发 + 交易成本模拟。
 
-        直接使用 akshare 获取 PE 历史数据作为温度代理，
-        而非依赖数据库中的 index_daily 表。
+        ⚠️ LEGACY：已被 src/analysis/backtest.py 的 RigorousBacktest（v3.0）取代。
+           v2 的 PE 温度分位数使用全历史数据（存在未来函数），
+           v3 改用扩展窗口分位数（无未来函数）并加入多基准/t检验。
+           本方法仅保留以兼容 backtest2 命令。
         """
         import akshare as ak
 
