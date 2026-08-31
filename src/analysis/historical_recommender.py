@@ -33,35 +33,8 @@ class HistoricalRecommender:
     # 主接口
     # =================================================================
 
-    def recommend(self, lookback_years: int = 3, top_n: int = 30) -> dict:
-        """
-        主入口: 历史回测 + 统计排名 → 推荐清单。
-
-        Returns:
-            dict with:
-            - proven_winners: 持续被选中且收益好的基金
-            - current_picks: 当前模型选出的基金(含历史表现)
-            - stats: 回测统计摘要
-        """
-        # 1. 获取所有候选基金的净值
-        all_codes = self._get_candidates()
-        if len(all_codes) < 20:
-            return {"error": f"净值数据不足, 仅有 {len(all_codes)} 只有效基金"}
-
-        # 2. 确定回测日期点 (每月底)
-        dates = self._get_monthly_dates(lookback_years)
-        if len(dates) < 3:
-            return {"error": "数据时间范围不足"}
-
-        # 3. 预加载所有基金的净值数据为tuple列表 (纯Python, 无pandas, 无C扩展)
-        print(f"    加载 {len(all_codes)} 只基金净值...")
-        nav_cache = {}
-        for i, code in enumerate(all_codes):
-            nav_cache[code] = self._load_nav_tuples(code)
-            if (i+1) % 30 == 0:
-                print(f"      加载: {i+1}/{len(all_codes)}")
-
-        # 4. 逐月打分
+    def _run_monthly_backtest(self, nav_cache: dict, dates: list, top_n: int) -> tuple:
+        """逐月回测：对每月打分选 TopN，统计每只基金被选中次数与后续收益"""
         print(f"    回测 ({len(dates)}个月)...")
         monthly_picks = {}
         fund_stats = defaultdict(lambda: {
@@ -91,25 +64,32 @@ class HistoricalRecommender:
 
                 monthly_picks[date].append({
                     "code": code, "score": round(score, 1),
-                    "actual_1m": round(a1m,1) if a1m is not None else None,
-                    "actual_3m": round(a3m,1) if a3m is not None else None,
-                    "actual_6m": round(a6m,1) if a6m is not None else None,
+                    "actual_1m": round(a1m, 1) if a1m is not None else None,
+                    "actual_3m": round(a3m, 1) if a3m is not None else None,
+                    "actual_6m": round(a6m, 1) if a6m is not None else None,
                 })
                 st = fund_stats[code]
                 st["times_picked"] += 1
                 st["total_score"] += score
-                if st["first_pick"] is None: st["first_pick"] = date
+                if st["first_pick"] is None:
+                    st["first_pick"] = date
                 st["last_pick"] = date
-                if a1m is not None: st["returns_1m"].append(a1m)
-                if a3m is not None: st["returns_3m"].append(a3m)
-                if a6m is not None: st["returns_6m"].append(a6m)
+                if a1m is not None:
+                    st["returns_1m"].append(a1m)
+                if a3m is not None:
+                    st["returns_3m"].append(a3m)
+                if a6m is not None:
+                    st["returns_6m"].append(a6m)
 
             scores.clear()
 
-            if (i+1) % 4 == 0:
+            if (i + 1) % 4 == 0:
                 print(f"      进度: {i+1}/{len(dates)}个月")
 
-        # 4. 计算每个基金的综合表现
+        return monthly_picks, fund_stats
+
+    def _compile_proven_winners(self, fund_stats: dict, dates: list) -> list:
+        """统计被频繁选中且后续收益好的基金，按综合分排序"""
         proven = []
         for code, st in fund_stats.items():
             if st["times_picked"] < max(3, len(dates) * 0.1):  # 至少被选中3次或10%的月份
@@ -126,24 +106,18 @@ class HistoricalRecommender:
             freq_score = min(100, st["times_picked"] / len(dates) * 100)
             ret_score = max(0, min(100, (avg_3m + 10) * 3))  # -10%→0分, +20%→90分
             win_score = win_3m * 0.7 + win_1m * 0.3
-            score_weight = min(100, avg_score * 1.2)  # 模型评分归一化
+            score_weight = min(100, avg_score * 1.2)
 
             composite = (
-                freq_score * 0.30 +
-                ret_score * 0.30 +
-                win_score * 0.20 +
-                score_weight * 0.20
+                freq_score * 0.30 + ret_score * 0.30 +
+                win_score * 0.20 + score_weight * 0.20
             )
 
-            # 获取基金基本信息
             info = self._get_fund_info(code)
-            name = info.get("fund_name", "") if info else ""
-            ftype = info.get("fund_type", "") if info else ""
-
             proven.append({
                 "code": code,
-                "name": name,
-                "type": ftype,
+                "name": info.get("fund_name", "") if info else "",
+                "type": info.get("fund_type", "") if info else "",
                 "composite_score": round(composite, 1),
                 "times_picked": st["times_picked"],
                 "pick_rate": round(st["times_picked"] / len(dates) * 100, 1),
@@ -158,9 +132,10 @@ class HistoricalRecommender:
             })
 
         proven.sort(key=lambda x: x["composite_score"], reverse=True)
+        return proven
 
-        # 5. 当前推荐: 取最新一期的 picks, 附带历史表现
-        latest_date = dates[-1]
+    def _build_current_picks(self, monthly_picks: dict, fund_stats: dict, latest_date: str) -> list:
+        """当前推荐：取最新一期 picks，附带历史表现"""
         current = []
         if latest_date in monthly_picks:
             for pick in monthly_picks[latest_date][:20]:
@@ -176,8 +151,46 @@ class HistoricalRecommender:
                     "hist_avg_3m": round(np.mean(rets), 1) if rets else None,
                     "hist_win_3m": round((np.array(rets) > 0).sum() / max(len(rets), 1) * 100, 0) if rets else None,
                 })
+        return current
 
-        # 统计摘要
+    def recommend(self, lookback_years: int = 3, top_n: int = 30) -> dict:
+        """
+        主入口: 历史回测 + 统计排名 → 推荐清单。
+
+        流程: 加载净值 → 逐月回测 → 综合表现 → 当前推荐 → 统计摘要。
+        各阶段逻辑见 _run_monthly_backtest / _compile_proven_winners / _build_current_picks。
+
+        Returns:
+            dict with proven_winners / current_picks / stats
+        """
+        # 1. 获取所有候选基金的净值
+        all_codes = self._get_candidates()
+        if len(all_codes) < 20:
+            return {"error": f"净值数据不足, 仅有 {len(all_codes)} 只有效基金"}
+
+        # 2. 确定回测日期点 (每月底)
+        dates = self._get_monthly_dates(lookback_years)
+        if len(dates) < 3:
+            return {"error": "数据时间范围不足"}
+
+        # 3. 预加载所有基金的净值数据为 tuple 列表 (纯Python, 无pandas, 无C扩展)
+        print(f"    加载 {len(all_codes)} 只基金净值...")
+        nav_cache = {}
+        for i, code in enumerate(all_codes):
+            nav_cache[code] = self._load_nav_tuples(code)
+            if (i + 1) % 30 == 0:
+                print(f"      加载: {i+1}/{len(all_codes)}")
+
+        # 4. 逐月回测
+        monthly_picks, fund_stats = self._run_monthly_backtest(nav_cache, dates, top_n)
+
+        # 5. 综合表现 → 历史验证最强
+        proven = self._compile_proven_winners(fund_stats, dates)
+
+        # 6. 当前推荐（附历史表现）
+        current = self._build_current_picks(monthly_picks, fund_stats, dates[-1])
+
+        # 7. 统计摘要
         n_good = sum(1 for p in proven if p["avg_return_3m"] > 0)
         n_bad = sum(1 for p in proven if p["avg_return_3m"] <= 0)
         top10_avg_3m = np.mean([p["avg_return_3m"] for p in proven[:10]]) if proven else 0
