@@ -13,9 +13,8 @@ v1 → v2 核心变化:
 """
 
 import pandas as pd
-import numpy as np
-from datetime import datetime, timedelta
-from typing import Optional, Tuple
+from datetime import datetime
+from typing import Tuple
 from ..data.database import Database
 from .fund_scorer import FundScreener
 from .thermometer import MarketThermometer

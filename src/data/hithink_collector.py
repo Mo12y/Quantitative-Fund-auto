@@ -21,8 +21,6 @@ import time
 import requests
 from datetime import datetime, timedelta
 from typing import Optional
-import pandas as pd
-import numpy as np
 
 from .database import Database
 
@@ -392,7 +390,6 @@ class HiThinkCollector:
             self._insert_index_batch(records)
 
     def _insert_index_batch(self, records: list):
-        import sqlite3
         cursor = self.db.conn.cursor()
         cursor.executemany("""
             INSERT OR IGNORE INTO index_daily

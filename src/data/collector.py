@@ -15,11 +15,7 @@ Phase 0 的首要任务就是验证这些接口的可用性。
 """
 
 import pandas as pd
-import numpy as np
 import time
-import re
-from datetime import datetime, timedelta
-from typing import Optional
 
 try:
     import akshare as ak
@@ -510,7 +506,6 @@ class DataCollector:
 
     def _insert_index_daily_batch(self, records: list):
         """批量插入指数日线数据"""
-        import sqlite3
         cursor = self.db.conn.cursor()
         cursor.executemany("""
             INSERT OR IGNORE INTO index_daily

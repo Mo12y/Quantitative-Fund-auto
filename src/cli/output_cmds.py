@@ -109,7 +109,6 @@ def cmd_sell():
 
 def cmd_web():
     """启动本地仪表盘 (http://localhost:5020)"""
-    import subprocess
     import webbrowser
     print("🚀 启动仪表盘...")
     print("   http://localhost:5020")

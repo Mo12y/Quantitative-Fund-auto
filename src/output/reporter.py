@@ -10,13 +10,11 @@ v2→v3 变化:
 
 import pandas as pd
 from datetime import datetime, timedelta
-from typing import Optional
 
 try:
     from rich.console import Console
     from rich.table import Table
     from rich.panel import Panel
-    from rich.text import Text
     from rich import box
     RICH_AVAILABLE = True
 except ImportError:
@@ -25,7 +23,6 @@ except ImportError:
 
 
 from ..data.database import Database
-from ..analysis.fund_scorer import FundScreener
 from ..analysis.thermometer import MarketThermometer
 from ..analysis.portfolio import PortfolioTracker
 

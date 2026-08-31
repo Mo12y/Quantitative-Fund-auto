@@ -10,10 +10,8 @@ v2→v3:
 判断标准: 这条信息能让你做出比"什么都不做"更好的决策吗？
 """
 
-import re
-from datetime import datetime, timedelta
-from dataclasses import dataclass, field
-from typing import Optional
+from datetime import datetime
+from dataclasses import dataclass
 
 try:
     import akshare as ak

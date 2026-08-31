@@ -16,7 +16,7 @@
 
 import numpy as np
 import pandas as pd
-from datetime import datetime, timedelta
+from datetime import timedelta
 from typing import Optional
 from collections import defaultdict
 
