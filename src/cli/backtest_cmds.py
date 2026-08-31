@@ -253,26 +253,20 @@ def cmd_backtest():
 
 def cmd_backtest2():
     """
-    回测 v2: 月频评估 + 温度阈值触发 + 交易成本模拟。
+    回测 v2（LEGACY）: 月频评估 + 温度阈值触发。
 
-    与 v1(每周换仓)的核心区别:
-    - 每月评估一次（而非每周）
-    - 温度变化<15°不调仓（减少摩擦）
-    - 模拟申购/赎回费用
+    已统一委托给 RigorousBacktest（v3.0）——v2 原实现用全历史 PE 分位数
+    （存在未来函数），已被严谨回测引擎取代。此命令保留仅用于兼容输出。
     """
     db = Database("data/fund_quant.db")
-    engine = StrategyEngine(db)
+    engine = RigorousBacktest(db)
 
-    print("📊 回测 v2: 月频 + 温度阈值 + 交易成本")
+    print("📊 回测 v2（LEGACY → 已委托严谨回测 v3 引擎）")
     print("=" * 60)
-    print("   策略规则:")
-    print("   - 每月评估一次市场温度")
-    print("   - 温度变化 ≥ 15° 才调仓")
-    print("   - 冷市重动量选股，热市重回撤防御")
-    print("   - 模拟申购费0.15% + 赎回费0.5%")
+    print("   规则: 月频评估 + 温度变化 ≥15° 才调仓 + 完整交易成本")
     print()
 
-    result = engine.backtest_v2(lookback_years=3, trading_cost_enabled=True)
+    result = engine.run(lookback_years=3)
 
     if "error" in result:
         print(f"   ❌ {result['error']}")
@@ -283,7 +277,7 @@ def cmd_backtest2():
     print("=" * 60)
     print("📊 回测结果 (近3年, 月频)")
     print("=" * 60)
-    print(f"\n🎯 v2策略 (月频+阈值触发):")
+    print(f"\n🎯 策略 (月频+阈值触发):")
     print(f"   总收益率:    {s['total_return']:+.1f}%")
     print(f"   年化收益率:  {s['annual_return']:+.1f}%")
     print(f"   年化波动率:  {s['annual_volatility']:.1f}%")
@@ -291,22 +285,20 @@ def cmd_backtest2():
     print(f"   最大回撤:    {s['max_drawdown']:.1f}%")
     print(f"   月胜率:      {s['win_rate']:.0f}%")
     print(f"   回测月数:    {s['months']}")
-    print(f"   温度触发次数:{s.get('temp_changes', 'N/A')} 次")
 
-    if "benchmark" in result:
-        b = result["benchmark"]
-        alpha = result.get("alpha", 0)
-        print(f"\n📉 沪深300基准:")
-        print(f"   总收益率:    {b['total_return']:+.1f}%")
-        print(f"   年化收益率:  {b['annual_return']:+.1f}%")
-        print(f"\n⚖️ 超额收益 (Alpha): {alpha:+.1f}%/年")
-        if alpha > 0:
-            print(f"   ✅ 策略跑赢基准 {alpha:.1f}% 每年")
-        else:
-            print(f"   ⚠️ 策略跑输基准 {abs(alpha):.1f}% 每年")
+    for sym in ["sh000300", "sh000905"]:
+        bkey, akey = f"benchmark_{sym}", f"alpha_vs_{sym}"
+        if bkey in result:
+            b = result[bkey]
+            print(f"\n📉 基准 {sym}:")
+            print(f"   年化收益率: {b['annual_return']:+.1f}%")
+            a = result.get(akey, {})
+            if a.get("t_stat") is not None:
+                sig = "✅显著" if a["significant"] else "❌不显著"
+                print(f"   Alpha: {a['mean_alpha']:+.2f}%/月 | p={a['p_value']} | {sig}")
 
     print()
-    print("⚠️ 回测局限性: 过去表现不代表未来 / 仅覆盖有净值数据的基金")
+    print("⚠️ 注意: v2 原实现已弃用，本输出来自严谨回测 v3 引擎")
     print("=" * 60)
     db.close()
 
