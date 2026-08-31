@@ -16,6 +16,7 @@
     python src/main.py schedule     # 定时调度(每周日自动生成周报)
     python src/main.py init           # 一键初始化(首次使用)
     python src/main.py collect/nav/enrich  # 分步数据采集
+    python src/main.py backtest3   # 严谨回测v3(防未来函数/多基准/显著性)
 """
 
 import sys
@@ -39,6 +40,7 @@ from src.analysis.fund_scorer import FundScorer, FundScreener
 from src.analysis.thermometer import MarketThermometer
 from src.analysis.portfolio import PortfolioTracker
 from src.analysis.strategy_engine import StrategyEngine
+from src.analysis.backtest import RigorousBacktest
 from src.analysis.rebalance_advisor import RebalanceAdvisor
 from src.analysis.sentiment_monitor import SentimentMonitor, quick_scan as sentiment_quick_scan
 from src.analysis.sector_analyzer import SectorAnalyzer
@@ -703,6 +705,64 @@ def cmd_backtest2():
     db.close()
 
 
+def cmd_backtest3():
+    """严谨回测 v3.0: 防未来函数 + 完整交易成本 + 多基准 + 显著性检验"""
+    db = Database("data/fund_quant.db")
+    engine = RigorousBacktest(db)
+
+    print("📊 严谨回测 v3.0")
+    print("=" * 60)
+    print("  改进: 扩展窗口分位数(无未来函数) / 完整交易成本 / 多基准 / t检验")
+    print("  局限: 存续基金池(幸存者偏差)")
+    print()
+
+    result = engine.run(lookback_years=5)
+
+    if "error" in result:
+        print(f"❌ {result['error']}")
+        db.close()
+        return
+
+    s = result["strategy"]
+    print("🎯 策略表现 (月频 · 温度阈值调仓 · Top3等权 · 含交易成本):")
+    print(f"   总收益率:    {s['total_return']:+.1f}%")
+    print(f"   年化收益率:  {s['annual_return']:+.1f}%")
+    print(f"   年化波动率:  {s['annual_volatility']:.1f}%")
+    print(f"   夏普比率:    {s['sharpe']:.2f}")
+    print(f"   最大回撤:    {s['max_drawdown']:.1f}%")
+    print(f"   Calmar:      {s['calmar']:.2f}")
+    print(f"   月胜率:      {s['win_rate']:.0f}%")
+    print(f"   回测月数:    {s['months']}")
+
+    for sym in ["sh000300", "sh000905"]:
+        bkey, akey, rkey = f"benchmark_{sym}", f"alpha_vs_{sym}", f"regression_vs_{sym}"
+        if bkey not in result:
+            continue
+        b = result[bkey]
+        print(f"\n📉 基准 {sym}:")
+        print(f"   年化: {b['annual_return']:+.1f}%  夏普: {b['sharpe']:.2f}  回撤: {b['max_drawdown']:.1f}%")
+        a = result.get(akey, {})
+        if a.get("t_stat") is not None:
+            sig = "✅ 显著" if a["significant"] else "❌ 不显著"
+            print(f"   Alpha: {a['mean_alpha']:+.2f}%/月 | t={a['t_stat']} | p={a['p_value']} | {sig}")
+        r = result.get(rkey, {})
+        if r.get("beta") is not None:
+            print(f"   Beta: {r['beta']} | 年化Alpha: {r['alpha_annual']:+.2f}%")
+
+    print("\n📅 逐年一致性:")
+    for y in result.get("yearly", []):
+        parts = [f"策略 {y['strategy_return']:+.1f}%"]
+        for sym in ["sh000300", "sh000905"]:
+            if sym in y:
+                parts.append(f"{sym} {y[sym]:+.1f}%")
+        print(f"   {y['period']}: {' | '.join(parts)}")
+
+    print(f"\n⚠️ 调仓次数: {len(result['trades'])} 次")
+    print("⚠️ 局限: 存续基金池存在幸存者偏差; 未模拟 T+1 确认延迟")
+    print("=" * 60)
+    db.close()
+
+
 def cmd_strategy():
     """v2策略建议: 月频评估，判断是否应调仓"""
     db = Database("data/fund_quant.db")
@@ -1183,6 +1243,7 @@ def main():
         "sentiment": cmd_sentiment,
         "backtest": cmd_backtest,
         "backtest2": cmd_backtest2,
+        "backtest3": cmd_backtest3,
         "strategy": cmd_strategy,
         "report": cmd_report,
         "portfolio": cmd_portfolio,
