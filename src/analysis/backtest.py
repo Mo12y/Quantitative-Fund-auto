@@ -396,17 +396,8 @@ class RigorousBacktest:
 
             # --- 月度持仓收益 ---
             if holdings:
-                month_rets = []
-                for h in holdings:
-                    nb = self.db.get_fund_nav(h["code"], end_date=m)
-                    na = self.db.get_fund_nav(h["code"], end_date=next_m)
-                    if nb and na:
-                        b = float(nb[-1]["unit_nav"])
-                        a = float(na[-1]["unit_nav"])
-                        if b > 0:
-                            month_rets.append((a / b - 1) * 100)
-                if month_rets:
-                    ret = float(np.mean(month_rets))
+                ret = self._compute_monthly_return(holdings, m, next_m)
+                if ret is not None:
                     portfolio_value *= (1 + ret / 100)
                     # 管理费月度摊销（年化/12）
                     portfolio_value *= (1 - self.cost.management_fee_annual / 12)
@@ -424,34 +415,60 @@ class RigorousBacktest:
         if len(strategy_monthly) < 6:
             return {"error": "回测数据不足，请扩大回看年数或补充净值数据"}
 
-        # 6. 指标计算
-        sr = np.array(strategy_monthly)
-        result = {
-            "strategy": compute_metrics(sr),
-            "trades": trade_log,
-            "params": {
+        # 6. 汇总报告（指标 + 多基准对比 + 显著性 + 逐年一致性）
+        return self._build_report(
+            strategy_monthly, benchmark_monthly, trade_log,
+            params={
                 "selection_weights": list(selection_weights),
                 "adaptive_weights": adaptive_weights,
                 "temp_threshold": temp_threshold,
                 "buy_and_hold": buy_and_hold,
             },
+        )
+
+    # ------------------------------------------------------------------
+    # 回测辅助方法
+    # ------------------------------------------------------------------
+
+    def _compute_monthly_return(self, holdings, m: str, next_m: str) -> Optional[float]:
+        """计算当月持仓的平均收益（%）"""
+        month_rets = []
+        for h in holdings:
+            nb = self.db.get_fund_nav(h["code"], end_date=m)
+            na = self.db.get_fund_nav(h["code"], end_date=next_m)
+            if nb and na:
+                b = float(nb[-1]["unit_nav"])
+                a = float(na[-1]["unit_nav"])
+                if b > 0:
+                    month_rets.append((a / b - 1) * 100)
+        if month_rets:
+            return float(np.mean(month_rets))
+        return None
+
+    def _build_report(
+        self,
+        strategy_monthly: list,
+        benchmark_monthly: Dict[str, List[float]],
+        trade_log: list,
+        params: dict,
+    ) -> Dict:
+        """汇总回测报告：策略指标 + 多基准对比 + alpha 显著性 + 逐年一致性"""
+        sr = np.array(strategy_monthly)
+        result = {
+            "strategy": compute_metrics(sr),
+            "trades": trade_log,
+            "params": params,
             "note": "基金池为存续基金，存在幸存者偏差；温度分位数为扩展窗口（无未来函数）",
         }
-
-        # 基准对比
         for sym, rets in benchmark_monthly.items():
             if len(rets) >= len(sr):
                 br = np.array(rets[: len(sr)])
                 metrics = compute_metrics(br)
                 metrics["name"] = sym
                 result[f"benchmark_{sym}"] = metrics
-                # alpha 显著性
                 result[f"alpha_vs_{sym}"] = alpha_t_test(sr, br)
                 result[f"regression_vs_{sym}"] = compute_beta_and_alpha(sr, br)
-
-        # 7. 逐年一致性
         result["yearly"] = self._yearly_breakdown(sr, benchmark_monthly)
-
         return result
 
     # ------------------------------------------------------------------
