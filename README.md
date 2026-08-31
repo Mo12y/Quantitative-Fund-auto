@@ -81,6 +81,12 @@ Quantitative-Fund-auto/
 │   │   ├── collector.py         #   akshare/efinance 数据采集
 │   │   ├── hithink_collector.py #   同花顺官方 API 采集
 │   │   └── database.py          #   SQLite 数据库
+│   ├── cli/                     # CLI 命令包（按职责拆分）
+│   │   ├── data_cmds.py         #   数据采集命令
+│   │   ├── analysis_cmds.py     #   分析命令
+│   │   ├── backtest_cmds.py     #   回测命令
+│   │   └── output_cmds.py       #   输出/操作命令
+│   ├── config.py                # 配置中心（settings.yaml 类型化访问）
 │   ├── analysis/                # 分析层
 │   │   ├── fund_scorer.py       #   基金质量筛选（三色评级）
 │   │   ├── thermometer.py       #   市场温度计（5维+分歧检测+风格判断）
