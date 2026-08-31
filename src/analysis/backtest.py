@@ -21,6 +21,7 @@ from typing import Dict, List, Optional
 import numpy as np
 import pandas as pd
 
+from ..config import get_config
 from ..data.database import Database
 
 
@@ -151,8 +152,6 @@ def compute_beta_and_alpha(strategy_ret: np.ndarray, benchmark_ret: np.ndarray) 
 class RigorousBacktest:
     """严谨回测引擎 v3.0"""
 
-    TEMP_CHANGE_THRESHOLD = 15  # 温度变化超过此值才调仓
-    TOP_N = 3                   # 持仓基金数量（等权）
     MIN_HISTORY_DAYS = 90       # 选基所需最少历史天数
 
     def __init__(self, db: Database, cost_model: Optional[CostModel] = None):
@@ -161,6 +160,14 @@ class RigorousBacktest:
         # 数据缓存：多次回测只拉取一次 akshare 数据
         self._temp_map: Optional[Dict[str, float]] = None
         self._benchmarks: Optional[Dict[str, Optional[pd.Series]]] = None
+        # 从配置中心读取回测默认参数（可被 run() 参数覆盖）
+        cfg = get_config().section("backtest")
+        self.TEMP_CHANGE_THRESHOLD: int = cfg.get("temp_threshold", 15)
+        self.TOP_N: int = cfg.get("top_n", 3)
+        self.SELECTION_WEIGHTS: tuple = tuple(cfg.get("selection_weights", [0.4, 0.3, 0.3]))
+        self.ADAPTIVE_COLD_WEIGHTS: tuple = tuple(cfg.get("adaptive_cold_weights", [0.2, 0.4, 0.4]))
+        self.ADAPTIVE_HOT_WEIGHTS: tuple = tuple(cfg.get("adaptive_hot_weights", [0.6, 0.2, 0.2]))
+        self.LOOKBACK_YEARS: int = cfg.get("lookback_years", 5)
 
     def _get_temp_map(self) -> Dict[str, float]:
         if self._temp_map is None:
@@ -293,27 +300,35 @@ class RigorousBacktest:
 
     def run(
         self,
-        lookback_years: int = 5,
+        lookback_years: Optional[int] = None,
         benchmark_symbols: tuple = ("sh000300", "sh000905"),
-        selection_weights: tuple = (0.4, 0.3, 0.3),
+        selection_weights: Optional[tuple] = None,
         adaptive_weights: bool = False,
-        temp_threshold: int = 15,
+        temp_threshold: Optional[int] = None,
         buy_and_hold: bool = False,
     ) -> Dict:
         """
-        运行严谨回测（策略参数可配，用于改进假设验证）。
+        运行严谨回测（策略参数可配，默认值来自 config/settings.yaml 的 backtest 段）。
 
         Args:
-            lookback_years: 回测年数
+            lookback_years: 回测年数（默认取配置）
             benchmark_symbols: 基准指数（akshare 代码）
             selection_weights: 选基权重 (动量, 低波动, 低回撤)
             adaptive_weights: 是否按温度自适应选基权重（冷市防御/热市动量）
-            temp_threshold: 温度变化调仓阈值
+            temp_threshold: 温度变化调仓阈值（默认取配置）
             buy_and_hold: 买入持有模式（只在首月建仓，之后不调仓）
 
         Returns:
             dict: 完整回测报告
         """
+        # 从配置解析默认参数（未显式传入时）
+        if lookback_years is None:
+            lookback_years = self.LOOKBACK_YEARS
+        if selection_weights is None:
+            selection_weights = self.SELECTION_WEIGHTS
+        if temp_threshold is None:
+            temp_threshold = self.TEMP_CHANGE_THRESHOLD
+
         # 1. 无未来函数的温度序列（缓存复用）
         temp_map = self._get_temp_map()
 
@@ -355,7 +370,7 @@ class RigorousBacktest:
                 # 温度自适应权重：冷市防御(低波动/低回撤)，热市动量
                 weights = selection_weights
                 if adaptive_weights:
-                    weights = (0.2, 0.4, 0.4) if temp < 40 else (0.6, 0.2, 0.2)
+                    weights = self.ADAPTIVE_COLD_WEIGHTS if temp < 40 else self.ADAPTIVE_HOT_WEIGHTS
                 new_picks = self.select_top_n_at(all_codes, m, self.TOP_N, weights=weights)
                 if new_picks:
                     # 卖出旧持仓：按持有天数收赎回费
@@ -468,7 +483,7 @@ class RigorousBacktest:
     # 策略对比研究（改进假设验证）
     # ------------------------------------------------------------------
 
-    def compare_strategies(self, lookback_years: int = 5) -> Dict:
+    def compare_strategies(self, lookback_years: Optional[int] = None) -> Dict:
         """
         策略对比研究：验证改进假设。
 
@@ -480,6 +495,8 @@ class RigorousBacktest:
         假设：现状策略在牛市跑输，源于选基权重过度防御
         （低波动/低回撤权重过高），改进后应提升牛市收益。
         """
+        if lookback_years is None:
+            lookback_years = self.LOOKBACK_YEARS
         variants = {
             "买入持有(基线)": {"buy_and_hold": True},
             "温度阈值调仓(现状)": {},

@@ -76,3 +76,12 @@ output:
   show_top_n: 10              # 显示Top N评分的基金
   save_report: true           # 是否保存报告到文件
   report_dir: "reports"       # 报告保存目录
+
+# --- 严谨回测配置 (v3.0) ---
+backtest:
+  lookback_years: 5            # 默认回测年数
+  selection_weights: [0.4, 0.3, 0.3]   # 选基权重 (动量, 低波动, 低回撤)
+  adaptive_cold_weights: [0.2, 0.4, 0.4]  # 冷市自适应权重（防御）
+  adaptive_hot_weights: [0.6, 0.2, 0.2]   # 热市自适应权重（动量）
+  temp_threshold: 15           # 温度变化调仓阈值
+  top_n: 3                     # 持仓基金数量（等权）
