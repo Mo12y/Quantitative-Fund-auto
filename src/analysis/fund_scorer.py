@@ -111,9 +111,100 @@ class FundScreener:
 
         return df.head(max_results)
 
+
+    # ------------------------------------------------------------------
+    # 单项质量检查（提取自 _screen_single_fund，每项返回 (check_text, warning, *metrics)）
+    # ------------------------------------------------------------------
+
+    def _check_age(self, fund_info: dict) -> tuple:
+        """成立时间检查 → (check_text, warning)"""
+        est = fund_info.get("establish_date", "")
+        if not est:
+            return "⚠️ 无数据", None
+        try:
+            e = pd.to_datetime(est)
+            months = (pd.Timestamp.now() - e).days / 30
+            if months >= self.THRESHOLDS["min_age_months"]:
+                return "✅ 通过", None
+            return f"❌ 仅{months:.0f}个月", f"成立仅{months:.0f}个月，不足{self.THRESHOLDS['min_age_months']}个月"
+        except Exception:
+            return "⚠️ 未知", None
+
+    def _check_size(self, fund_info: dict) -> tuple:
+        """规模检查 → (check_text, warning, size_yi)"""
+        size = float(fund_info.get("fund_size") or 0)
+        if size == 0:
+            return "✅ 无数据(跳过检查)", None, size
+        if size < self.THRESHOLDS["min_size_yi"]:
+            return f"❌ 仅{size:.2f}亿(清盘风险)", f"规模仅{size:.2f}亿，有清盘风险", size
+        if size > self.THRESHOLDS["max_size_yi"]:
+            return f"⚠️ {size:.1f}亿(偏大)", None, size
+        return f"✅ {size:.1f}亿", None, size
+
+    def _check_fee(self, fund_info: dict) -> tuple:
+        """费率检查 → (check_text, warning, total_fee)"""
+        mgt = float(fund_info.get("mgt_fee") or 0)
+        cust = float(fund_info.get("custodian_fee") or 0)
+        total = mgt + cust
+        if mgt == 0 and cust == 0:
+            return "⊘ 无数据", None, total
+        if total > self.THRESHOLDS["max_total_fee"]:
+            return f"❌ {total:.2f}%(过高)", f"总费率{total:.2f}%过高，严重侵蚀长期收益", total
+        if total > self.THRESHOLDS["warn_total_fee"]:
+            return f"⚠️ {total:.2f}%(偏高)", None, total
+        return f"✅ {total:.2f}%", None, total
+
+    def _check_drawdown(self, nav_series) -> tuple:
+        """近1年最大回撤检查 → (check_text, warning, max_dd)"""
+        if len(nav_series) < 60:
+            return "⚠️ 数据不足", None, None
+        recent = nav_series.iloc[-252:] if len(nav_series) >= 252 else nav_series
+        peak = recent.iloc[0]
+        max_dd = 0
+        for p in recent.values:
+            if p > peak:
+                peak = p
+            dd = (peak - p) / peak * 100
+            if dd > max_dd:
+                max_dd = dd
+        if max_dd > self.THRESHOLDS["max_drawdown_1y"]:
+            return f"❌ {max_dd:.0f}%(过大)", f"近1年最大回撤{max_dd:.0f}%，超过{self.THRESHOLDS['max_drawdown_1y']}%阈值", round(max_dd, 1)
+        if max_dd > 25:
+            return f"⚠️ {max_dd:.0f}%(偏高)", None, round(max_dd, 1)
+        return f"✅ {max_dd:.0f}%", None, round(max_dd, 1)
+
+    def _check_momentum(self, nav_series) -> tuple:
+        """追涨风险检查 → (check_text, warning, mom_3m)"""
+        if len(nav_series) < 63:
+            return "⚠️ 数据不足", None, None
+        mom = (nav_series.iloc[-1] / nav_series.iloc[-63] - 1) * 100
+        if mom > self.THRESHOLDS["momentum_warning"]:
+            return f"🔴 近3月涨{mom:.0f}%(追涨!)", f"近3月涨幅{mom:.0f}%过高，此时买入有追涨风险", round(mom, 1)
+        if mom > 25:
+            return f"⚠️ 近3月涨{mom:.0f}%", None, round(mom, 1)
+        if mom < -20:
+            return f"💡 近3月跌{abs(mom):.0f}%(可能超跌)", None, round(mom, 1)
+        return f"✅ 近3月{mom:+.0f}%", None, round(mom, 1)
+
+    def _check_sharpe(self, nav_series) -> tuple:
+        """风险调整收益检查 → (check_text, warning, sharpe, ann_vol)"""
+        if len(nav_series) < 60:
+            return "⚠️ 数据不足", None, None, None
+        daily = nav_series.pct_change().dropna().values
+        if len(daily) < 20:
+            return "⚠️ 数据不足", None, None, None
+        ann_ret = np.mean(daily) * 252
+        ann_vol = np.std(daily, ddof=1) * np.sqrt(252)
+        sharpe = (ann_ret - self.risk_free_rate) / ann_vol if ann_vol > 0 else 0
+        if sharpe < 0:
+            return "❌ 夏普为负", "夏普比率为负，承担风险但没有获得相应回报", round(sharpe, 2), round(ann_vol * 100, 1)
+        if sharpe < 0.3:
+            return "⚠️ 夏普偏低", None, round(sharpe, 2), round(ann_vol * 100, 1)
+        return f"✅ {sharpe:.2f}", None, round(sharpe, 2), round(ann_vol * 100, 1)
+
     def _screen_single_fund(self, fund_code: str, fund_info: dict) -> Optional[dict]:
         """
-        对单只基金进行质量检查。
+        对单只基金进行质量检查（6 个维度，各维度逻辑见 _check_* 方法）。
 
         Returns:
             dict with risk_label, risk_reasons, quality_checks, metrics
@@ -126,127 +217,63 @@ class FundScreener:
         df_nav = pd.DataFrame(nav_records)
         df_nav["nav_date"] = pd.to_datetime(df_nav["nav_date"])
         df_nav = df_nav.sort_values("nav_date")
-
-        # 计算指标
         nav_series = df_nav.set_index("nav_date")["unit_nav"]
+
         metrics = {}
         checks = {}
         warnings = []
 
         # ---- 检查1: 成立时间 ----
-        est = fund_info.get("establish_date", "")
-        age_ok = True
-        if est:
-            try:
-                e = pd.to_datetime(est)
-                months = (pd.Timestamp.now() - e).days / 30
-                metrics["age_months"] = round(months, 0)
-                age_ok = months >= self.THRESHOLDS["min_age_months"]
-                checks["成立时间"] = "✅ 通过" if age_ok else f"❌ 仅{months:.0f}个月"
-            except Exception:
-                checks["成立时间"] = "⚠️ 未知"
-        else:
-            checks["成立时间"] = "⚠️ 无数据"
+        checks["成立时间"], w = self._check_age(fund_info)
+        if w:
+            warnings.append(w)
 
         # ---- 检查2: 规模 ----
-        size = float(fund_info.get("fund_size") or 0)
+        checks["基金规模"], w, size = self._check_size(fund_info)
+        if w:
+            warnings.append(w)
         metrics["fund_size_yi"] = size
-        if size == 0:
-            checks["基金规模"] = "✅ 无数据(跳过检查)"
-        elif size < self.THRESHOLDS["min_size_yi"]:
-            checks["基金规模"] = f"❌ 仅{size:.2f}亿(清盘风险)"
-            warnings.append(f"规模仅{size:.2f}亿，有清盘风险")
-        elif size > self.THRESHOLDS["max_size_yi"]:
-            checks["基金规模"] = f"⚠️ {size:.1f}亿(偏大)"
-        else:
-            checks["基金规模"] = f"✅ {size:.1f}亿"
 
         # ---- 检查3: 费率 ----
-        mgt_fee = float(fund_info.get("mgt_fee") or 0)
-        cust_fee = float(fund_info.get("custodian_fee") or 0)
-        total_fee = mgt_fee + cust_fee
+        checks["费率"], w, total_fee = self._check_fee(fund_info)
+        if w:
+            warnings.append(w)
         metrics["total_fee"] = total_fee
-        # 如果数据库没有费率数据（=0），不妄加判断
-        if mgt_fee == 0 and cust_fee == 0:
-            checks["费率"] = "⊘ 无数据"
-        elif total_fee > self.THRESHOLDS["max_total_fee"]:
-            checks["费率"] = f"❌ {total_fee:.2f}%(过高)"
-            warnings.append(f"总费率{total_fee:.2f}%过高，严重侵蚀长期收益")
-        elif total_fee > self.THRESHOLDS["warn_total_fee"]:
-            checks["费率"] = f"⚠️ {total_fee:.2f}%(偏高)"
-        else:
-            checks["费率"] = f"✅ {total_fee:.2f}%"
 
         # ---- 检查4: 回撤 ----
-        if len(nav_series) >= 60:
-            recent = nav_series.iloc[-252:] if len(nav_series) >= 252 else nav_series
-            peak = recent.iloc[0]
-            max_dd = 0
-            for p in recent.values:
-                if p > peak:
-                    peak = p
-                dd = (peak - p) / peak * 100
-                if dd > max_dd:
-                    max_dd = dd
-            metrics["max_drawdown_1y"] = round(max_dd, 1)
-            if max_dd > self.THRESHOLDS["max_drawdown_1y"]:
-                checks["回撤控制"] = f"❌ {max_dd:.0f}%(过大)"
-                warnings.append(f"近1年最大回撤{max_dd:.0f}%，超过{self.THRESHOLDS['max_drawdown_1y']}%阈值")
-            elif max_dd > 25:
-                checks["回撤控制"] = f"⚠️ {max_dd:.0f}%(偏高)"
-            else:
-                checks["回撤控制"] = f"✅ {max_dd:.0f}%"
-        else:
-            checks["回撤控制"] = "⚠️ 数据不足"
+        checks["回撤控制"], w, max_dd = self._check_drawdown(nav_series)
+        if w:
+            warnings.append(w)
+        if max_dd is not None:
+            metrics["max_drawdown_1y"] = max_dd
 
         # ---- 检查5: 动量(追涨风险) ----
-        if len(nav_series) >= 63:
-            mom_3m = (nav_series.iloc[-1] / nav_series.iloc[-63] - 1) * 100
-            metrics["momentum_3m"] = round(mom_3m, 1)
-            if mom_3m > self.THRESHOLDS["momentum_warning"]:
-                checks["追涨风险"] = f"🔴 近3月涨{mom_3m:.0f}%(追涨!)"
-                warnings.append(f"近3月涨幅{mom_3m:.0f}%过高，此时买入有追涨风险")
-            elif mom_3m > 25:
-                checks["追涨风险"] = f"⚠️ 近3月涨{mom_3m:.0f}%"
-            elif mom_3m < -20:
-                checks["追涨风险"] = f"💡 近3月跌{abs(mom_3m):.0f}%(可能超跌)"
-            else:
-                checks["追涨风险"] = f"✅ 近3月{mom_3m:+.0f}%"
-        else:
-            checks["追涨风险"] = "⚠️ 数据不足"
+        checks["追涨风险"], w, mom = self._check_momentum(nav_series)
+        if w:
+            warnings.append(w)
+        if mom is not None:
+            metrics["momentum_3m"] = mom
 
         # ---- 检查6: 夏普比率 ----
-        if len(nav_records) >= 60:
-            daily_returns = nav_series.pct_change().dropna().values
-            if len(daily_returns) >= 20:
-                ann_ret = np.mean(daily_returns) * 252
-                ann_vol = np.std(daily_returns, ddof=1) * np.sqrt(252)
-                sharpe = (ann_ret - self.risk_free_rate) / (ann_vol) if ann_vol > 0 else 0
-                metrics["sharpe"] = round(sharpe, 2)
-                metrics["ann_vol"] = round(ann_vol * 100, 1)
-                if sharpe < 0:
-                    checks["风险调整收益"] = "❌ 夏普为负"
-                    warnings.append("夏普比率为负，承担风险但没有获得相应回报")
-                elif sharpe < 0.3:
-                    checks["风险调整收益"] = "⚠️ 夏普偏低"
-                else:
-                    checks["风险调整收益"] = f"✅ {sharpe:.2f}"
-            else:
-                checks["风险调整收益"] = "⚠️ 数据不足"
+        checks["风险调整收益"], w, sharpe, ann_vol = self._check_sharpe(nav_series)
+        if w:
+            warnings.append(w)
+        if sharpe is not None:
+            metrics["sharpe"] = sharpe
+            metrics["ann_vol"] = ann_vol
 
         # ---- 判定风险标签 ----
-        # "⊘ 无数据" 和 "✅ 无数据(跳过检查)" 不计入警告
         fail_count = sum(1 for v in checks.values() if v.startswith("❌"))
-        warn_count = sum(1 for v in checks.values()
-                        if (v.startswith("⚠️") or v.startswith("🔴") or v.startswith("💡"))
-                        and not v.startswith("⚠️ 无数据"))
+        warn_count = sum(
+            1 for v in checks.values()
+            if (v.startswith("⚠️") or v.startswith("🔴") or v.startswith("💡"))
+            and not v.startswith("⚠️ 无数据")
+        )
 
         if fail_count >= 2:
             risk_label = "不合格"
         elif fail_count >= 1:
             risk_label = "🔴 高风险"
-        elif warn_count >= 2:
-            risk_label = "🟡 注意"
         elif warn_count >= 1:
             risk_label = "🟡 注意"
         else:
