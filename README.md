@@ -108,6 +108,57 @@ Quantitative-Fund-auto/
 └── README.md
 ```
 
+## 系统架构
+
+```mermaid
+flowchart TD
+    subgraph DS[数据源]
+        A1[akshare<br/>主数据源]
+        A2[efinance<br/>备用数据源]
+        A3[同花顺 HiThink<br/>官方 API]
+    end
+
+    subgraph DL[数据层 src/data]
+        B1[DataCollector]
+        B2[HiThinkCollector]
+        B3[(SQLite<br/>fund_quant.db)]
+    end
+
+    subgraph AL[分析层 src/analysis]
+        C1[FundScreener<br/>基金质量筛选]
+        C2[MarketThermometer<br/>市场温度计]
+        C3[SectorAnalyzer<br/>31行业分析]
+        C4[StrategyEngine<br/>策略引擎]
+        C5[RebalanceAdvisor<br/>调仓建议]
+        C6[PortfolioTracker<br/>持仓跟踪]
+        C7[SentimentMonitor<br/>消息面监控]
+    end
+
+    subgraph OL[输出层 src/output · src/web]
+        D1[WeeklyReporter<br/>CLI 周报]
+        D2[Flask Web<br/>仪表盘]
+    end
+
+    A1 --> B1
+    A2 --> B1
+    A3 --> B2
+    B1 & B2 --> B3
+    B3 --> C1 & C2 & C3 & C4 & C5 & C6 & C7
+    C1 & C2 & C3 & C4 & C5 & C6 & C7 --> D1
+    C1 & C2 & C3 & C5 & C6 --> D2
+```
+
+## 技术选型
+
+| 组件 | 选型 | 理由 |
+|------|------|------|
+| 数据源 | akshare（主）+ efinance（备）+ 同花顺 HiThink API | akshare 免费开源、覆盖全市场基金/指数/行业；efinance 作降级备用；HiThink 官方 API 数据质量更高 |
+| 存储 | SQLite | 单机个人使用，零配置零运维；563 只基金 × 净值历史的量级完全够用 |
+| 语言 | Python 3.10+ | 金融数据生态成熟（pandas / numpy） |
+| CLI | rich | 终端彩色输出、表格、进度条，报告可读性好 |
+| Web | Flask | 轻量，单文件即可起服务，适合个人工具 |
+| 配置 | YAML | 策略参数（因子权重、温度阈值、仓位映射）与代码分离 |
+
 ## 评分模型
 
 基金评分使用6个因子，加权计算:
@@ -130,6 +181,42 @@ Quantitative-Fund-auto/
 | 40-60°C | 🌤️ 适中 | 保持定投 |
 | 60-80°C | 🔥 偏热 | 减少买入 |
 | 80-100°C | ☀️ 过热 | 考虑减仓 |
+
+## 运行示例
+
+**市场温度计**（`python src/main.py temp`）：
+
+```
+🌡️ 市场温度计 v2.0
+  [███████████░░░░░░░░░] 56.7°C
+  状态: 🌤️ 适中   建议: 正常水平，保持定投
+  建议权益仓位: 29.8%
+
+  📊 五维分解:
+    PE估值分位数:  63°    PB估值分位数:  30°
+    股债性价比:    49°    成交量热度:    91°
+    市场情绪:      40°
+
+  🔍 估值分歧度: 显著分歧
+  🎨 市场风格: 小盘成长（小盘跑赢大盘 4.4%）
+```
+
+**基金质量筛选**（`python src/main.py score`）：
+
+```
+🔍 基金质量筛选 v3.0
+🌡️ 当前市场温度: 56.7°C — 🌤️ 适中
+📊 筛选结果: 30只通过质量筛选
+   🟢 稳健: 30只
+
+🟢 稳健:
+  002010 中欧瑾通灵活配置混合C  费率0.00%  近3月-1%  回撤3%
+  001818 易方达瑞兴混合E       费率0.00%  近3月+1%  回撤2%
+  002119 广发安盈混合C         费率0.00%  近3月-0%  回撤1%
+  ...
+```
+
+**Web 仪表盘**（`python src/main.py web`）：浏览器打开 http://localhost:5020，可视化查看市场温度、仓位建议、基金质量池、31 行业排名等。
 
 ## 你的使用场景
 
