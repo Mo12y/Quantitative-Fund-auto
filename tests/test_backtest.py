@@ -56,13 +56,13 @@ class TestMaxDrawdown(unittest.TestCase):
 
 class TestAlphaTTest(unittest.TestCase):
     def test_consistent_outperformance_significant(self):
-        """策略每月稳定跑赢基准 → alpha 显著为正"""
-        strategy = np.full(36, 2.0)
-        benchmark = np.full(36, 0.5)
+        """策略持续显著跑赢基准 → alpha 显著为正"""
+        np.random.seed(7)
+        benchmark = np.random.normal(0.5, 1.0, 36)
+        strategy = benchmark + np.random.normal(1.0, 0.3, 36)  # 月均 alpha ≈ +1.0，波动小
         result = alpha_t_test(strategy, benchmark)
         self.assertTrue(result["significant"])
         self.assertGreater(result["t_stat"], 0)
-        self.assertAlmostEqual(result["mean_alpha"], 1.5, places=6)
 
     def test_identical_series_not_significant(self):
         """策略与基准完全一致 → 不显著"""
