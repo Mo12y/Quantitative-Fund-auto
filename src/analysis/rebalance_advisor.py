@@ -100,22 +100,14 @@ class RebalanceAdvisor:
     # 核心逻辑
     # =================================================================
 
-    def _generate_instructions(self, holdings, temp, current_eq, target_eq,
-                                total_cap, port_value, cash):
-        instructions = []
-        if total_cap == 0:
-            return instructions
-
-        gap_amount = (target_eq - current_eq) / 100 * total_cap
-
-        # 对每只持仓做风险评估
+    def _assess_holdings(self, holdings: list) -> list:
+        """逐只持仓做风险评估并排序：高风险+亏损优先处理"""
         fund_risks = []
         for h in holdings:
             info = self._get_fund_info(h["fund_code"])
             result = self.screener._screen_single_fund(h["fund_code"], info) if info else None
             risk = result if result else {"risk_label": "未知", "risk_reasons": [], "metrics": {}}
 
-            # 计算当前市值和盈亏
             shares = h.get("shares", 0)
             bought = h["buy_amount"]
             latest_nav = self._get_latest_nav(h["fund_code"])
@@ -131,121 +123,145 @@ class RebalanceAdvisor:
                 "days_held": self._days_held(h["buy_date"]),
             })
 
-        # 按风险排序: 高风险+亏损 → 优先卖
         risk_order = {"🔴 高风险": 0, "🟡 注意": 1, "🟢 稳健": 2, "未知": 3}
         fund_risks.sort(key=lambda x: (
             risk_order.get(x["risk"].get("risk_label", "未知"), 3),
-            x["pnl_pct"],  # 亏损大的优先处理
+            x["pnl_pct"],
         ))
+        return fund_risks
 
-        # === 情况1: 权益过多，需要减仓 ===
-        if gap_amount < -5:  # 超过5%偏差
-            sell_needed = abs(gap_amount)
+    def _build_reduce_instructions(self, fund_risks: list, gap_amount: float,
+                                   total_cap: float, current_eq: float, target_eq: float) -> list:
+        """减仓指令：权益过多时按风险排序卖出，多余资金转入固收"""
+        instructions = []
+        sell_needed = abs(gap_amount)
 
-            for fr in fund_risks:
-                if sell_needed <= 5:  # 少于5元就不调了
-                    break
+        for fr in fund_risks:
+            if sell_needed <= 5:  # 少于5元就不调了
+                break
 
-                h = fr["holding"]
-                risk_label = fr["risk"].get("risk_label", "未知")
-                reasons = fr["risk"].get("risk_reasons", [])
+            h = fr["holding"]
+            risk_label = fr["risk"].get("risk_label", "未知")
+            reasons = fr["risk"].get("risk_reasons", [])
 
-                # 确定卖多少
-                if risk_label == "🔴 高风险":
-                    sell_ratio = 0.8  # 高风险卖80%
-                elif risk_label == "🟡 注意":
-                    sell_ratio = 0.5
-                elif fr["pnl_pct"] < -10:
-                    sell_ratio = 0.4  # 深度亏损也要考虑减
-                else:
-                    sell_ratio = 0.3  # 稳健的少卖
+            if risk_label == "🔴 高风险":
+                sell_ratio = 0.8
+            elif risk_label == "🟡 注意":
+                sell_ratio = 0.5
+            elif fr["pnl_pct"] < -10:
+                sell_ratio = 0.4
+            else:
+                sell_ratio = 0.3
 
-                sell_amount = min(fr["current_value"] * sell_ratio, sell_needed)
-                sell_amount = max(sell_amount, 10)  # 最少10元起卖(手续费考虑)
+            sell_amount = min(fr["current_value"] * sell_ratio, sell_needed)
+            sell_amount = max(sell_amount, 10)  # 最少10元起卖(手续费考虑)
 
-                reason_parts = []
-                if risk_label in ("🔴 高风险", "🟡 注意"):
-                    reason_parts.append(f"{risk_label}基金")
-                if reasons:
-                    reason_parts.append(reasons[0])
-                if fr["pnl_pct"] < -5:
-                    reason_parts.append(f"已亏损{fr['pnl_pct']:.0f}%, 减仓控制风险")
-                if fr["days_held"] < 7:
-                    reason_parts.append("持有<7天, 赎回费1.5%——如果不急, 建议等满7天再卖")
+            reason_parts = []
+            if risk_label in ("🔴 高风险", "🟡 注意"):
+                reason_parts.append(f"{risk_label}基金")
+            if reasons:
+                reason_parts.append(reasons[0])
+            if fr["pnl_pct"] < -5:
+                reason_parts.append(f"已亏损{fr['pnl_pct']:.0f}%, 减仓控制风险")
+            if fr["days_held"] < 7:
+                reason_parts.append("持有<7天, 赎回费1.5%——如果不急, 建议等满7天再卖")
 
-                instructions.append(RebalanceInstruction(
-                    action="卖出",
-                    fund_code=h["fund_code"],
-                    fund_name=h.get("fund_name", h["fund_code"]),
-                    amount=round(sell_amount, 0),
-                    current_pct=round(fr["current_value"] / total_cap * 100, 1),
-                    target_pct=round((fr["current_value"] - sell_amount) / total_cap * 100, 1),
-                    reason="; ".join(reason_parts) if reason_parts else "降低权益仓位至目标水平",
-                    priority=1 if risk_label == "🔴 高风险" else 2,
-                ))
+            instructions.append(RebalanceInstruction(
+                action="卖出",
+                fund_code=h["fund_code"],
+                fund_name=h.get("fund_name", h["fund_code"]),
+                amount=round(sell_amount, 0),
+                current_pct=round(fr["current_value"] / total_cap * 100, 1),
+                target_pct=round((fr["current_value"] - sell_amount) / total_cap * 100, 1),
+                reason="; ".join(reason_parts) if reason_parts else "降低权益仓位至目标水平",
+                priority=1 if risk_label == "🔴 高风险" else 2,
+            ))
 
-                sell_needed -= sell_amount
+            sell_needed -= sell_amount
 
-            if sell_needed > 5:
-                instructions.append(RebalanceInstruction(
-                    action="卖出",
-                    fund_code="—",
-                    fund_name="(剩余需卖出)",
-                    amount=round(sell_needed, 0),
-                    current_pct=round(current_eq, 1),
-                    target_pct=target_eq,
-                    reason=f"还需减仓约{sell_needed:.0f}元以达到目标权益仓位{target_eq}%",
-                    priority=3,
-                ))
+        if sell_needed > 5:
+            instructions.append(RebalanceInstruction(
+                action="卖出",
+                fund_code="—",
+                fund_name="(剩余需卖出)",
+                amount=round(sell_needed, 0),
+                current_pct=round(current_eq, 1),
+                target_pct=target_eq,
+                reason=f"还需减仓约{sell_needed:.0f}元以达到目标权益仓位{target_eq}%",
+                priority=3,
+            ))
 
-            # 卖出后钱往哪放
-            if sum(i.amount for i in instructions if i.action == "卖出") > 10:
-                instructions.append(RebalanceInstruction(
-                    action="买入",
-                    fund_code="—",
-                    fund_name="余额宝 / 货币基金 / 短债基金",
-                    amount=round(sum(i.amount for i in instructions if i.action == "卖出"), 0),
-                    current_pct=0,
-                    target_pct=round(100 - target_eq, 1),
-                    reason="卖出权益基金的资金转入固收: 温度60°C偏热, 等待更好的入场时机",
-                    priority=3,
-                ))
-
-        # === 情况2: 权益不足, 可以加仓 ===
-        elif gap_amount > 5:
-            buy_amount = gap_amount
-            # 从质量筛选池挑🟢稳健的
-            pool = self.screener.screen_funds(max_results=10)
-            candidates = pool[pool["risk_label"] == "🟢 稳健"] if not pool.empty else pd.DataFrame()
-
-            if not candidates.empty:
-                best = candidates.iloc[0]
-                instructions.append(RebalanceInstruction(
-                    action="买入",
-                    fund_code=best["fund_code"],
-                    fund_name=best.get("fund_name", best["fund_code"]),
-                    amount=round(min(buy_amount, total_cap * 0.3), 0),
-                    current_pct=round(current_eq, 1),
-                    target_pct=target_eq,
-                    reason=f"温度{temp['temperature']}°C, 权益仓位不足, 建议适度加仓。优先选🟢稳健的{best['fund_code']}",
-                    priority=1,
-                ))
-
-        # === 情况3: 偏差不大, 不动 ===
-        else:
-            for fr in fund_risks:
-                instructions.append(RebalanceInstruction(
-                    action="持有",
-                    fund_code=fr["holding"]["fund_code"],
-                    fund_name=fr["holding"].get("fund_name", fr["holding"]["fund_code"]),
-                    amount=fr["current_value"],
-                    current_pct=round(fr["current_value"] / total_cap * 100, 1),
-                    target_pct=round(fr["current_value"] / total_cap * 100, 1),
-                    reason="仓位在合理范围内, 继续持有",
-                    priority=3,
-                ))
+        # 卖出后钱往哪放
+        if sum(i.amount for i in instructions if i.action == "卖出") > 10:
+            instructions.append(RebalanceInstruction(
+                action="买入",
+                fund_code="—",
+                fund_name="余额宝 / 货币基金 / 短债基金",
+                amount=round(sum(i.amount for i in instructions if i.action == "卖出"), 0),
+                current_pct=0,
+                target_pct=round(100 - target_eq, 1),
+                reason="卖出权益基金的资金转入固收: 温度60°C偏热, 等待更好的入场时机",
+                priority=3,
+            ))
 
         return instructions
+
+    def _build_increase_instructions(self, gap_amount: float, total_cap: float,
+                                     temp: dict, current_eq: float, target_eq: float) -> list:
+        """加仓指令：权益不足时从🟢稳健筛选池挑一只买入"""
+        instructions = []
+        buy_amount = gap_amount
+        pool = self.screener.screen_funds(max_results=10)
+        candidates = pool[pool["risk_label"] == "🟢 稳健"] if not pool.empty else pd.DataFrame()
+
+        if not candidates.empty:
+            best = candidates.iloc[0]
+            instructions.append(RebalanceInstruction(
+                action="买入",
+                fund_code=best["fund_code"],
+                fund_name=best.get("fund_name", best["fund_code"]),
+                amount=round(min(buy_amount, total_cap * 0.3), 0),
+                current_pct=round(current_eq, 1),
+                target_pct=target_eq,
+                reason=f"温度{temp['temperature']}°C, 权益仓位不足, 建议适度加仓。优先选🟢稳健的{best['fund_code']}",
+                priority=1,
+            ))
+        return instructions
+
+    def _build_hold_instructions(self, fund_risks: list, total_cap: float) -> list:
+        """持有指令：仓位偏差不大时全部继续持有"""
+        instructions = []
+        for fr in fund_risks:
+            instructions.append(RebalanceInstruction(
+                action="持有",
+                fund_code=fr["holding"]["fund_code"],
+                fund_name=fr["holding"].get("fund_name", fr["holding"]["fund_code"]),
+                amount=fr["current_value"],
+                current_pct=round(fr["current_value"] / total_cap * 100, 1),
+                target_pct=round(fr["current_value"] / total_cap * 100, 1),
+                reason="仓位在合理范围内, 继续持有",
+                priority=3,
+            ))
+        return instructions
+
+    def _generate_instructions(self, holdings, temp, current_eq, target_eq,
+                                total_cap, port_value, cash):
+        """根据目标仓位与当前仓位的偏差生成买卖/持有指令。
+
+        分三档：偏差>5% 减仓 / 偏差<-5% 加仓 / 否则持有。
+        各档逻辑见 _build_reduce/_build_increase/_build_hold_instructions。
+        """
+        if total_cap == 0:
+            return []
+
+        gap_amount = (target_eq - current_eq) / 100 * total_cap
+        fund_risks = self._assess_holdings(holdings)
+
+        if gap_amount < -5:  # 权益过多，需要减仓
+            return self._build_reduce_instructions(fund_risks, gap_amount, total_cap, current_eq, target_eq)
+        if gap_amount > 5:  # 权益不足，可以加仓
+            return self._build_increase_instructions(gap_amount, total_cap, temp, current_eq, target_eq)
+        return self._build_hold_instructions(fund_risks, total_cap)
 
     # =================================================================
     # 摘要
