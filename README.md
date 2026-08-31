@@ -38,23 +38,17 @@
 pip install -r requirements.txt
 ```
 
-### 2. 测试数据接口（Phase 0: 最重要的一步！）
+### 2. 一键初始化（首次使用执行一次）
 
 ```bash
-python src/main.py test
+python src/main.py init
 ```
 
-这一步会测试 akshare 的各个数据接口是否可用。**全部通过后再进行下一步。**
+自动完成四步：测试数据接口 → 采集基金列表与指数估值 → 采集基金净值历史 → 补充基金详情（约 5-10 分钟）。
 
-### 3. 采集数据
+> 也可以分步执行：`python src/main.py test` / `collect` / `nav` / `enrich`
 
-```bash
-python src/main.py collect
-```
-
-采集全市场基金列表、指数估值、国债收益率等数据（首次运行需要几分钟）。
-
-### 4. 查看分析结果
+### 3. 查看分析结果
 
 ```bash
 # 生成完整周报
@@ -66,7 +60,7 @@ python src/main.py temp      # 市场温度
 python src/main.py portfolio # 持仓概览
 ```
 
-### 5. 记录你的操作
+### 4. 记录你的操作
 
 ```bash
 python src/main.py buy       # 记录买入（交互式）

@@ -13,7 +13,8 @@
     python src/main.py buy/sell     # 买入/卖出记录
     python src/main.py plan         # 投资计划+进度
     python src/main.py web          # 启动Web仪表盘
-    python src/main.py collect/nav/enrich  # 数据采集(首次)
+    python src/main.py init           # 一键初始化(首次使用)
+    python src/main.py collect/nav/enrich  # 分步数据采集
 """
 
 import sys
@@ -61,6 +62,34 @@ HITHINK_KEY = _load_api_key()
 def cmd_test():
     """Phase 0: 测试数据接口"""
     quick_test()
+
+
+def cmd_init():
+    """一键初始化: 测试接口 → 采集数据 → 采集净值 → 补充详情（首次使用执行一次）"""
+    print("=" * 60)
+    print("🚀 一键初始化（首次使用执行一次，约 5-10 分钟）")
+    print("=" * 60)
+    print()
+
+    print("步骤 1/4: 测试数据接口...")
+    cmd_test()
+    print()
+
+    print("步骤 2/4: 采集基金列表与指数估值...")
+    cmd_collect()
+    print()
+
+    print("步骤 3/4: 采集基金净值历史（最耗时，请耐心等待）...")
+    cmd_nav()
+    print()
+
+    print("步骤 4/4: 补充基金详情...")
+    cmd_enrich()
+    print()
+
+    print("=" * 60)
+    print("✅ 初始化完成！现在运行 python src/main.py 查看周报")
+    print("=" * 60)
 
 
 def cmd_index():
@@ -1120,6 +1149,7 @@ def main():
 
     commands = {
         "test": cmd_test,
+        "init": cmd_init,
         "collect": cmd_collect,
         "index": cmd_index,
         "nav": cmd_nav,
