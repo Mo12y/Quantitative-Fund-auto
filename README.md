@@ -212,6 +212,14 @@ flowchart TD
 
 **Web 仪表盘**（`python src/main.py web`）：浏览器打开 http://localhost:5020，可视化查看市场温度、仓位建议、基金质量池、31 行业排名等。
 
+## 测试
+
+```bash
+python -m unittest discover tests
+```
+
+覆盖市场温度计的温度分级、边界值、估值分歧检测等纯逻辑（9 个用例，基于标准库 unittest，无需数据库与网络）。
+
 ## 你的使用场景
 
 既然你通过支付宝买场外基金:
