@@ -13,6 +13,7 @@ from src.data.hithink_collector import quick_test as hithink_quick_test
 
 # 同花顺 API Key（从 .env 读取）
 def _load_api_key():
+    """从 .env 读取 HITHINK_API_KEY"""
     try:
         with open(".env") as f:
             for line in f:

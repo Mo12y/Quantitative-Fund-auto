@@ -25,16 +25,19 @@ _sectors_lock = threading.Lock()
 
 
 def get_db():
+    """创建数据库连接（每个请求独立连接）"""
     return Database(DB_PATH)
 
 
 @app.route("/")
 def index():
+    """仪表盘首页（渲染前端模板）"""
     return render_template("dashboard.html")
 
 
 @app.route("/api/all")
 def api_all():
+    """聚合 API：温度/基金池/持仓/消息面/调仓建议一次性返回"""
     db = get_db()
     result = {"temp": None, "funds": None, "portfolio": None, "sentiment": None, "plan": None}
 
@@ -287,6 +290,7 @@ def api_recommend():
 
 
 def main():
+    """启动 Flask 仪表盘（http://localhost:5020）"""
     print("=" * 50)
     print("🚀 量化基金仪表盘")
     print("   http://localhost:5020")

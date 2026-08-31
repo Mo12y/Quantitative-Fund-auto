@@ -170,11 +170,13 @@ class RigorousBacktest:
         self.LOOKBACK_YEARS: int = cfg.get("lookback_years", 5)
 
     def _get_temp_map(self) -> Dict[str, float]:
+        """获取温度序列（带缓存，多次回测只拉一次 akshare）"""
         if self._temp_map is None:
             self._temp_map = self.get_pe_temperature_series()
         return self._temp_map
 
     def _get_benchmarks(self, symbols: tuple) -> Dict[str, Optional[pd.Series]]:
+        """获取基准指数收盘序列（带缓存）"""
         if self._benchmarks is None:
             self._benchmarks = {sym: self._load_benchmark(sym) for sym in symbols}
         return self._benchmarks

@@ -324,6 +324,7 @@ class SentimentMonitor:
 
 
 def quick_scan():
+    """快速消息面扫描（PMI/LPR/基金公告），CLI 入口"""
     monitor = SentimentMonitor()
     result = monitor.full_scan()
 
