@@ -18,7 +18,6 @@ from .portfolio import PortfolioTracker
 
 # 频率 → 间隔天数
 FREQ_DAYS = {
-    "daily": 1,
     "weekly": 7,
     "biweekly": 14,
     "monthly": 30,
@@ -28,12 +27,52 @@ FREQ_DAYS = {
 class DcaManager:
     """定投计划管理器"""
 
+    _trade_dates_cache = None  # 类级缓存：A股交易日集合
+
+    @classmethod
+    def _get_trade_dates(cls):
+        """
+        获取 A 股交易日历（akshare，节假日准确；失败降级为 None → 只跳过周末）。
+
+        Returns:
+            set[str] 或 None（降级模式）
+        """
+        if cls._trade_dates_cache is None:
+            try:
+                import akshare as ak
+                df = ak.tool_trade_date_hist_sina()
+                dates = sorted(pd.to_datetime(df["trade_date"]).dt.strftime("%Y-%m-%d"))
+                cls._trade_dates_cache = set(dates)
+            except Exception:
+                cls._trade_dates_cache = "fallback"
+        return None if cls._trade_dates_cache == "fallback" else cls._trade_dates_cache
+
+    @classmethod
+    def _next_trading_day(cls, date_str: str) -> str:
+        """返回 date_str 之后的第一个交易日（跳过周末与法定节假日）"""
+        trade_dates = cls._get_trade_dates()
+        d = pd.to_datetime(date_str) + timedelta(days=1)
+        if trade_dates is None:
+            # 降级：只跳过周末
+            while d.weekday() >= 5:
+                d += timedelta(days=1)
+            return d.strftime("%Y-%m-%d")
+        while d.strftime("%Y-%m-%d") not in trade_dates:
+            d += timedelta(days=1)
+        return d.strftime("%Y-%m-%d")
+
     def __init__(self, db: Database):
         self.db = db
 
     @staticmethod
     def next_run_date(frequency: str, from_date: str) -> str:
-        """计算下一期日期（按频率间隔天数推进）"""
+        """
+        计算下一期日期：
+        - daily → 下一个交易日（跳过周末/节假日）
+        - 其他 → 按频率间隔天数推进
+        """
+        if frequency == "daily":
+            return DcaManager._next_trading_day(from_date)
         days = FREQ_DAYS.get(frequency, 7)
         return (pd.to_datetime(from_date) + timedelta(days=days)).strftime("%Y-%m-%d")
 

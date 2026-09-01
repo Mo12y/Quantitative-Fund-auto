@@ -9,6 +9,7 @@ import os
 import sys
 import tempfile
 import unittest
+from unittest import mock
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -17,10 +18,23 @@ from src.data.database import Database
 
 
 class TestNextRunDate(unittest.TestCase):
-    """频率 → 下一期日期计算（纯逻辑）"""
+    """频率 → 下一期日期计算（纯逻辑，mock 交易日历降级模式）"""
 
-    def test_daily(self):
-        self.assertEqual(DcaManager.next_run_date("daily", "2026-08-24"), "2026-08-25")
+    def test_daily_same_week(self):
+        """周一 → 次日周二"""
+        with mock.patch.object(DcaManager, "_get_trade_dates", return_value=None):
+            self.assertEqual(DcaManager.next_run_date("daily", "2026-08-24"), "2026-08-25")
+
+    def test_daily_skips_weekend(self):
+        """周五 08-28 → 跳过周末 → 下周一 08-31（不是 08-29 周六）"""
+        with mock.patch.object(DcaManager, "_get_trade_dates", return_value=None):
+            self.assertEqual(DcaManager.next_run_date("daily", "2026-08-28"), "2026-08-31")
+
+    def test_daily_uses_trade_calendar(self):
+        """有交易日历时按日历跳（国庆假期示例：09-30 后是 10-09）"""
+        trade_dates = {"2026-08-24", "2026-08-25", "2026-09-30", "2026-10-09"}
+        with mock.patch.object(DcaManager, "_get_trade_dates", return_value=trade_dates):
+            self.assertEqual(DcaManager.next_run_date("daily", "2026-09-30"), "2026-10-09")
 
     def test_weekly(self):
         self.assertEqual(DcaManager.next_run_date("weekly", "2026-08-24"), "2026-08-31")
