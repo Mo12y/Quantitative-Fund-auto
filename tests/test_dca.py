@@ -32,7 +32,7 @@ class TestNextRunDate(unittest.TestCase):
         self.assertEqual(DcaManager.next_run_date("monthly", "2026-08-24"), "2026-09-23")
 
     def test_unknown_frequency_defaults_weekly(self):
-        self.assertEqual(DcaManager.next_run_date("daily", "2026-08-24"), "2026-08-31")
+        self.assertEqual(DcaManager.next_run_date("yearly", "2026-08-24"), "2026-08-31")
 
 
 class TestDcaFlow(unittest.TestCase):
