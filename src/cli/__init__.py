@@ -33,6 +33,7 @@ from src.cli.output_cmds import (
     cmd_sell,
     cmd_update,
     cmd_delete,
+    cmd_dca,
     cmd_web,
     cmd_schedule,
 )
@@ -63,6 +64,7 @@ COMMANDS = {
     "sell": cmd_sell,
     "update": cmd_update,
     "delete": cmd_delete,
+    "dca": cmd_dca,
     "web": cmd_web,
     "schedule": cmd_schedule,
 }

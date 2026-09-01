@@ -146,6 +146,23 @@ class Database:
             )
         """)
 
+        # 定投计划表
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS dca_plans (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                fund_code TEXT NOT NULL,
+                fund_name TEXT,
+                amount_per_period REAL NOT NULL,
+                frequency TEXT DEFAULT 'weekly',
+                start_date TEXT NOT NULL,
+                next_run_date TEXT,
+                total_periods INTEGER DEFAULT 0,
+                total_amount REAL DEFAULT 0,
+                status TEXT DEFAULT 'active',
+                created_at TEXT DEFAULT (datetime('now','localtime'))
+            )
+        """)
+
         self.conn.commit()
 
     # ========== 基金信息操作 ==========
@@ -359,6 +376,50 @@ class Database:
         cursor = self.conn.cursor()
         cursor.execute("SELECT COALESCE(SUM(buy_amount), 0) as total FROM holdings WHERE status='holding'")
         return cursor.fetchone()["total"]
+
+    # ========== 定投计划操作 ==========
+
+    def add_dca_plan(self, plan: dict):
+        """新增定投计划"""
+        cursor = self.conn.cursor()
+        cursor.execute("""
+            INSERT INTO dca_plans (fund_code, fund_name, amount_per_period, frequency, start_date, next_run_date)
+            VALUES (?, ?, ?, ?, ?, ?)
+        """, (
+            plan["fund_code"],
+            plan.get("fund_name", plan["fund_code"]),
+            plan["amount_per_period"],
+            plan.get("frequency", "weekly"),
+            plan["start_date"],
+            plan.get("next_run_date"),
+        ))
+        self.conn.commit()
+
+    def get_dca_plans(self, status: str = None) -> list:
+        """获取定投计划列表"""
+        cursor = self.conn.cursor()
+        if status:
+            cursor.execute("SELECT * FROM dca_plans WHERE status = ? ORDER BY id", (status,))
+        else:
+            cursor.execute("SELECT * FROM dca_plans ORDER BY id")
+        return [dict(row) for row in cursor.fetchall()]
+
+    def update_dca_plan(self, plan_id: int, **fields) -> bool:
+        """更新定投计划字段（status / amount / frequency 等）"""
+        allowed = {"status", "amount_per_period", "frequency", "next_run_date", "total_periods", "total_amount"}
+        updates = []
+        params = []
+        for col, val in fields.items():
+            if col in allowed and val is not None:
+                updates.append(f"{col} = ?")
+                params.append(val)
+        if not updates:
+            return False
+        params.append(plan_id)
+        cursor = self.conn.cursor()
+        cursor.execute(f"UPDATE dca_plans SET {', '.join(updates)} WHERE id = ?", params)
+        self.conn.commit()
+        return cursor.rowcount > 0
 
     # ========== 信号记录 ==========
 

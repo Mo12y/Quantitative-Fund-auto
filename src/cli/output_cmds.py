@@ -7,6 +7,7 @@ import time
 import webbrowser
 
 from src.analysis.fund_scorer import FundScreener
+from src.analysis.dca import DcaManager
 from src.analysis.portfolio import PortfolioTracker
 from src.analysis.sentiment_monitor import SentimentMonitor
 from src.analysis.thermometer import MarketThermometer
@@ -34,7 +35,32 @@ def cmd_report():
         pass
 
     reporter.generate_full_report(screener, thermometer, portfolio, sentiment_data)
+
+    # 定投状态
+    _print_dca_status(db)
     db.close()
+
+
+def _print_dca_status(db):
+    """在周报末尾输出定投计划状态"""
+    try:
+        mgr = DcaManager(db)
+        plans = mgr.get_status()
+    except Exception:
+        return
+    if not plans:
+        return
+
+    print("\n📅 定投计划")
+    print("-" * 56)
+    any_due = False
+    for p in plans:
+        due_flag = "🔔 本周到期" if p["due"] else ""
+        any_due = any_due or p["due"]
+        print(f"  {p['fund_name'][:20]:<22} | 每期¥{p['amount_per_period']:.0f}/{p['frequency']} | "
+              f"已投{p['total_periods']}期 累计¥{p['total_amount']:.0f} | 下期 {p['next_run_date']} {due_flag}")
+    if any_due:
+        print("  💡 执行定投: python src/main.py dca run")
 
 
 def cmd_buy():
@@ -232,4 +258,117 @@ def cmd_schedule():
     while True:
         schedule.run_pending()
         time.sleep(60)
+
+
+def cmd_dca():
+    """定投管理: dca list / dca add / dca run / dca pause / dca resume"""
+    import sys as _sys
+
+    sub = _sys.argv[2] if len(_sys.argv) > 2 else "list"
+    db = Database("data/fund_quant.db")
+    mgr = DcaManager(db)
+
+    if sub == "add":
+        _dca_add(db)
+    elif sub == "run":
+        _dca_run(mgr)
+    elif sub == "pause":
+        _dca_set_status(mgr, paused=True)
+    elif sub == "resume":
+        _dca_set_status(mgr, paused=False)
+    else:
+        _dca_list(mgr)
+
+    db.close()
+
+
+def _dca_list(mgr: DcaManager):
+    """列出定投计划及到期状态"""
+    plans = mgr.get_status()
+    if not plans:
+        print("📋 暂无定投计划。添加: python src/main.py dca add")
+        return
+
+    print("📋 定投计划")
+    print("-" * 56)
+    for p in plans:
+        due_flag = "🔔 本周到期" if p["due"] else ""
+        print(f"  ID:{p['id']} {p['fund_name']} | 每期¥{p['amount_per_period']:.0f}/{p['frequency']} | "
+              f"已投{p['total_periods']}期 累计¥{p['total_amount']:.0f} | 下期 {p['next_run_date']} {due_flag}")
+    print()
+    print("  操作: dca run(执行到期期数) / dca pause|resume(暂停/恢复) / dca add(新增)")
+
+
+def _dca_add(db: Database):
+    """交互式新增定投计划"""
+    print("📝 新增定投计划")
+    print("-" * 40)
+    fund_code = input("基金代码: ").strip()
+    fund_name = input("基金名称: ").strip()
+    try:
+        amount = float(input("每期金额 (元): ").strip())
+    except ValueError:
+        print("❌ 金额格式错误")
+        return
+    freq = input("频率 (weekly周/biweekly双周/monthly月, 默认weekly): ").strip() or "weekly"
+    start = input("开始日期 (YYYY-MM-DD, 默认今天): ").strip()
+    if not start:
+        from datetime import date
+        start = date.today().isoformat()
+
+    db.add_dca_plan({
+        "fund_code": fund_code,
+        "fund_name": fund_name,
+        "amount_per_period": amount,
+        "frequency": freq,
+        "start_date": start,
+        "next_run_date": DcaManager.next_run_date(freq, start),
+    })
+    print(f"\n✅ 已添加定投: {fund_name}({fund_code}) 每期¥{amount:.0f}/{freq}，下期 {DcaManager.next_run_date(freq, start)}")
+
+
+def _dca_run(mgr: DcaManager):
+    """执行到期（或指定）定投期数：记录买入 + 推进下一期"""
+    plans = mgr.get_status()
+    due_plans = [p for p in plans if p["due"]]
+    if not due_plans:
+        print("✅ 当前没有到期的定投计划。")
+        _dca_list(mgr)
+        return
+
+    print(f"🔔 有 {len(due_plans)} 个定投计划到期:")
+    for p in due_plans:
+        print(f"  ID:{p['id']} {p['fund_name']} | 每期¥{p['amount_per_period']:.0f} | 下期日 {p['next_run_date']}")
+
+    try:
+        choice = input("\n执行哪些？(输入ID执行单期，输入 all 全部执行，回车跳过): ").strip().lower()
+    except (EOFError, KeyboardInterrupt):
+        print("\n已取消")
+        return
+
+    targets = due_plans if choice == "all" else [p for p in due_plans if str(p["id"]) == choice]
+    for p in targets:
+        result = mgr.execute_installment(p["id"])
+        if result.get("ok"):
+            print(f"✅ 已执行 {p['fund_name']} 第{result['period']}期 ¥{result['amount']:.0f}，下期 {result['next_run_date']}")
+        else:
+            print(f"❌ {p['fund_name']}: {result.get('error')}")
+
+
+def _dca_set_status(mgr: DcaManager, paused: bool):
+    """暂停/恢复定投计划"""
+    plans = mgr.get_status()
+    if not plans:
+        print("📋 暂无定投计划。")
+        return
+    print("📋 当前定投计划:")
+    for p in plans:
+        print(f"  ID:{p['id']} {p['fund_name']} | 每期¥{p['amount_per_period']:.0f}")
+    try:
+        plan_id = int(input(f"\n要{'暂停' if paused else '恢复'}的 ID: ").strip())
+    except ValueError:
+        print("❌ ID 格式错误")
+        return
+    ok = mgr.db.update_dca_plan(plan_id, status="paused" if paused else "active")
+    print(f"\n✅ 已{'暂停' if paused else '恢复'} ID={plan_id}" if ok else f"❌ 未找到 ID={plan_id}")
 
