@@ -325,6 +325,35 @@ class Database:
         """, (sell_date, sell_amount, holding_id))
         self.conn.commit()
 
+    def update_holding(self, holding_id: int, **fields) -> bool:
+        """
+        更新持仓记录的指定字段（如 buy_amount / buy_date / shares）。
+
+        Returns:
+            bool: 是否有记录被更新
+        """
+        allowed = {"buy_amount", "buy_date", "buy_nav", "shares", "notes"}
+        updates = []
+        params = []
+        for col, val in fields.items():
+            if col in allowed and val is not None:
+                updates.append(f"{col} = ?")
+                params.append(val)
+        if not updates:
+            return False
+        params.append(holding_id)
+        cursor = self.conn.cursor()
+        cursor.execute(f"UPDATE holdings SET {', '.join(updates)} WHERE id = ?", params)
+        self.conn.commit()
+        return cursor.rowcount > 0
+
+    def delete_holding(self, holding_id: int) -> bool:
+        """删除持仓记录（用于更正重复录入等）"""
+        cursor = self.conn.cursor()
+        cursor.execute("DELETE FROM holdings WHERE id = ?", (holding_id,))
+        self.conn.commit()
+        return cursor.rowcount > 0
+
     def get_total_invested(self) -> float:
         """计算总投资金额"""
         cursor = self.conn.cursor()

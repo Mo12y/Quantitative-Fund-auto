@@ -65,6 +65,8 @@ python src/main.py portfolio # 持仓概览
 ```bash
 python src/main.py buy       # 记录买入（交互式）
 python src/main.py sell      # 记录卖出（交互式）
+python src/main.py update    # 修改持仓（投入金额/买入日期）
+python src/main.py delete    # 删除持仓（处理重复录入）
 ```
 
 ## 项目结构

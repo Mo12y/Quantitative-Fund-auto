@@ -10,6 +10,8 @@
     python src/main.py sentiment    # 消息面监控
     python src/main.py portfolio    # 持仓盈亏
     python src/main.py buy/sell     # 买入/卖出记录
+    python src/main.py update       # 修改持仓（金额/日期）
+    python src/main.py delete       # 删除持仓（重复录入等）
     python src/main.py plan         # 投资计划+进度
     python src/main.py web          # 启动Web仪表盘
     python src/main.py schedule     # 定时调度(每周日自动生成周报)

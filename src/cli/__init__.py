@@ -31,6 +31,8 @@ from src.cli.output_cmds import (
     cmd_report,
     cmd_buy,
     cmd_sell,
+    cmd_update,
+    cmd_delete,
     cmd_web,
     cmd_schedule,
 )
@@ -59,6 +61,8 @@ COMMANDS = {
     "report": cmd_report,
     "buy": cmd_buy,
     "sell": cmd_sell,
+    "update": cmd_update,
+    "delete": cmd_delete,
     "web": cmd_web,
     "schedule": cmd_schedule,
 }

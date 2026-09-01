@@ -107,6 +107,91 @@ def cmd_sell():
     print(f"\n✅ 已记录: {sell_date} 卖出 持仓ID={holding_id}, ¥{sell_amount:,.2f}")
 
 
+def cmd_update():
+    """修改持仓记录：投入金额 / 买入日期（更正录入错误）"""
+    db = Database("data/fund_quant.db")
+    tracker = PortfolioTracker(db)
+
+    summary = tracker.get_portfolio_summary()
+    if not summary.get("has_holdings"):
+        print("📋 暂无持仓记录。")
+        db.close()
+        return
+
+    print("📋 当前持仓（选择要修改的 ID）:")
+    for d in summary["holdings_detail"]:
+        print(f"  ID:{d['holding_id']} | {d['fund_name'][:25]} | 买入{d['buy_date']} | ¥{d['buy_amount']:,.0f}")
+
+    try:
+        holding_id = int(input("\n要修改的持仓 ID: ").strip())
+    except ValueError:
+        print("❌ ID 格式错误")
+        db.close()
+        return
+
+    new_amount = input("新的投入金额（元，直接回车跳过）: ").strip()
+    new_date = input("新的买入日期（YYYY-MM-DD，直接回车跳过）: ").strip()
+
+    fields = {}
+    if new_amount:
+        try:
+            fields["buy_amount"] = float(new_amount)
+        except ValueError:
+            print("❌ 金额格式错误")
+            db.close()
+            return
+    if new_date:
+        fields["buy_date"] = new_date
+
+    if not fields:
+        print("ℹ️ 未输入任何修改，已取消")
+        db.close()
+        return
+
+    # 修改金额时，按记录的买入净值重算份额
+    if "buy_amount" in fields:
+        row = db.conn.cursor().execute("SELECT buy_nav FROM holdings WHERE id = ?", (holding_id,)).fetchone()
+        buy_nav = row["buy_nav"] if row else None
+        fields["shares"] = round(fields["buy_amount"] / buy_nav, 2) if buy_nav and buy_nav > 0 else 0
+
+    ok = db.update_holding(holding_id, **fields)
+    db.close()
+    print(f"\n✅ 已更新持仓 ID={holding_id}: {fields}" if ok else f"❌ 未找到 ID={holding_id}")
+
+
+def cmd_delete():
+    """删除持仓记录（处理重复录入等）"""
+    db = Database("data/fund_quant.db")
+    tracker = PortfolioTracker(db)
+
+    summary = tracker.get_portfolio_summary()
+    if not summary.get("has_holdings"):
+        print("📋 暂无持仓记录。")
+        db.close()
+        return
+
+    print("📋 当前持仓（选择要删除的 ID）:")
+    for d in summary["holdings_detail"]:
+        print(f"  ID:{d['holding_id']} | {d['fund_name'][:25]} | 买入{d['buy_date']} | ¥{d['buy_amount']:,.0f}")
+
+    try:
+        holding_id = int(input("\n要删除的持仓 ID: ").strip())
+    except ValueError:
+        print("❌ ID 格式错误")
+        db.close()
+        return
+
+    confirm = input(f"确认删除 ID={holding_id}？(y/N): ").strip().lower()
+    if confirm != "y":
+        print("已取消")
+        db.close()
+        return
+
+    ok = db.delete_holding(holding_id)
+    db.close()
+    print(f"\n✅ 已删除持仓 ID={holding_id}" if ok else f"❌ 未找到 ID={holding_id}")
+
+
 def cmd_web():
     """启动本地仪表盘 (http://localhost:5020)"""
     import webbrowser
