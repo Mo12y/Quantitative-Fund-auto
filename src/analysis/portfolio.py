@@ -18,7 +18,8 @@ class PortfolioTracker:
 
     def __init__(self, db: Database):
         self.db = db
-        self._live_nav_cache: dict = {}  # 进程内缓存：避免同一基金重复请求 akshare
+        self._live_nav_cache: dict = {}    # 进程内缓存：避免同一基金重复请求 akshare
+        self._history_cache: dict = {}     # 净值历史缓存（买入日期取净值用）
 
     def get_portfolio_summary(self) -> dict:
         """
@@ -236,38 +237,60 @@ class PortfolioTracker:
         return db_latest  # 兜底：数据库最新（即使过旧）
 
     def _get_nav_on_date(self, fund_code: str, target_date: str) -> Optional[float]:
-        """获取指定日期附近的净值：优先 DB（≤3天偏差），否则 akshare 实时拉取"""
-        nav_records = self.db.get_fund_nav(fund_code)
+        """
+        获取指定日期附近的净值：DB 与 akshare 各取最近，选更接近目标日期的那个。
+
+        修复：DB 净值过旧时（如停在 08-21 而买入日是 08-24），
+        仍用 akshare 拉到 08-24 当天的准确净值，保证份额计算正确。
+        """
         target = pd.to_datetime(target_date)
 
-        best = None
-        best_diff = float("inf")
-        for r in nav_records:
+        db_nav, db_diff = self._closest_db_nav(fund_code, target)
+        ak_nav, ak_diff = self._closest_akshare_nav(fund_code, target)
+
+        if db_nav is not None and (ak_nav is None or db_diff <= ak_diff):
+            return db_nav
+        if ak_nav is not None:
+            return ak_nav
+        return db_nav
+
+    def _closest_db_nav(self, fund_code: str, target) -> tuple:
+        """数据库中最接近目标日期的净值 → (nav, 偏差天数)"""
+        best, best_diff = None, float("inf")
+        for r in self.db.get_fund_nav(fund_code):
             try:
                 diff = abs((pd.to_datetime(r["nav_date"]) - target).days)
             except Exception:
                 continue
             if diff < best_diff:
                 best_diff = diff
-                best = r
+                best = r.get("unit_nav")
+        return (float(best), best_diff) if best is not None else (None, float("inf"))
 
-        if best is not None and best_diff <= 3:
-            return best.get("unit_nav")  # DB 有接近日期的净值
+    def _get_nav_history(self, fund_code: str):
+        """获取 akshare 净值历史（进程内缓存）"""
+        if fund_code not in self._history_cache:
+            try:
+                import akshare as ak
+                df = ak.fund_open_fund_info_em(symbol=fund_code, indicator="单位净值走势")
+                if df is not None and not df.empty:
+                    df = df.copy()
+                    df["净值日期"] = pd.to_datetime(df["净值日期"])
+                    self._history_cache[fund_code] = df
+                else:
+                    self._history_cache[fund_code] = None
+            except Exception:
+                self._history_cache[fund_code] = None
+        return self._history_cache.get(fund_code)
 
-        # DB 无接近数据 → akshare 拉取目标日期附近的净值
-        try:
-            import akshare as ak
-            df = ak.fund_open_fund_info_em(symbol=fund_code, indicator="单位净值走势")
-            if df is not None and not df.empty:
-                df = df.copy()
-                df["净值日期"] = pd.to_datetime(df["净值日期"])
-                diffs = (df["净值日期"] - target).abs()
-                idx = diffs.idxmin()
-                return float(df.loc[idx, "单位净值"])
-        except Exception:
-            pass
-
-        return best.get("unit_nav") if best else None
+    def _closest_akshare_nav(self, fund_code: str, target) -> tuple:
+        """akshare 历史中最接近目标日期的净值 → (nav, 偏差天数)"""
+        df = self._get_nav_history(fund_code)
+        if df is None or df.empty:
+            return None, float("inf")
+        diffs = (df["净值日期"] - target).abs()
+        idx = diffs.idxmin()
+        return float(df.loc[idx, "单位净值"]), int(diffs.min().days)
 
     def _get_fund_info(self, fund_code: str) -> Optional[dict]:
         """获取基金基本信息"""
