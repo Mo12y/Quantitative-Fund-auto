@@ -18,6 +18,7 @@ from .portfolio import PortfolioTracker
 
 # 频率 → 间隔天数
 FREQ_DAYS = {
+    "daily": 1,
     "weekly": 7,
     "biweekly": 14,
     "monthly": 30,

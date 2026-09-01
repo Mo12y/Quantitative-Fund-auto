@@ -55,7 +55,8 @@ def _print_dca_status(db):
     print("-" * 56)
     any_due = False
     for p in plans:
-        due_flag = "🔔 本周到期" if p["due"] else ""
+        due_label = "🔔 今日到期" if p["frequency"] == "daily" else "🔔 本周到期"
+        due_flag = due_label if p["due"] else ""
         any_due = any_due or p["due"]
         print(f"  {p['fund_name'][:20]:<22} | 每期¥{p['amount_per_period']:.0f}/{p['frequency']} | "
               f"已投{p['total_periods']}期 累计¥{p['total_amount']:.0f} | 下期 {p['next_run_date']} {due_flag}")
@@ -292,7 +293,8 @@ def _dca_list(mgr: DcaManager):
     print("📋 定投计划")
     print("-" * 56)
     for p in plans:
-        due_flag = "🔔 本周到期" if p["due"] else ""
+        due_label = "🔔 今日到期" if p["frequency"] == "daily" else "🔔 本周到期"
+        due_flag = due_label if p["due"] else ""
         print(f"  ID:{p['id']} {p['fund_name']} | 每期¥{p['amount_per_period']:.0f}/{p['frequency']} | "
               f"已投{p['total_periods']}期 累计¥{p['total_amount']:.0f} | 下期 {p['next_run_date']} {due_flag}")
     print()
@@ -310,7 +312,7 @@ def _dca_add(db: Database):
     except ValueError:
         print("❌ 金额格式错误")
         return
-    freq = input("频率 (weekly周/biweekly双周/monthly月, 默认weekly): ").strip() or "weekly"
+    freq = input("频率 (daily日/weekly周/biweekly双周/monthly月, 默认weekly): ").strip() or "weekly"
     start = input("开始日期 (YYYY-MM-DD, 默认今天): ").strip()
     if not start:
         from datetime import date

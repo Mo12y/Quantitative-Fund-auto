@@ -19,6 +19,9 @@ from src.data.database import Database
 class TestNextRunDate(unittest.TestCase):
     """频率 → 下一期日期计算（纯逻辑）"""
 
+    def test_daily(self):
+        self.assertEqual(DcaManager.next_run_date("daily", "2026-08-24"), "2026-08-25")
+
     def test_weekly(self):
         self.assertEqual(DcaManager.next_run_date("weekly", "2026-08-24"), "2026-08-31")
 
