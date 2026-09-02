@@ -300,6 +300,9 @@ python -m unittest discover tests
 - 量化模型可能失效
 - 投资有风险，入市需谨慎
 - 场外基金T+1确认，短线操作成本高
+- 🔒 **隐私说明**：`src/analysis/investment_plan.py` 中的投资计划为个人真实使用数据
+  （基金代码/金额/日期，无账号与身份信息）。若公开本仓库请注意此信息；
+  如需脱敏，可将真实计划抽到本地 gitignore 的配置文件（如 `config/investment_plan.local.yaml`）。
 
 ## License
 
