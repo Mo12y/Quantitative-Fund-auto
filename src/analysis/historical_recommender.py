@@ -174,10 +174,12 @@ class HistoricalRecommender:
             return {"error": "数据时间范围不足"}
 
         # 3. 预加载所有基金的净值数据为 tuple 列表 (纯Python, 无pandas, 无C扩展)
-        print(f"    加载 {len(all_codes)} 只基金净值...")
+        #    只加载回测窗口(+预热段)内历史，避免固定 LIMIT 截断造成早期月份“无历史”
+        since = (pd.to_datetime(dates[0]) - timedelta(days=150)).strftime("%Y-%m-%d")
+        print(f"    加载 {len(all_codes)} 只基金净值({since} 起)...")
         nav_cache = {}
         for i, code in enumerate(all_codes):
-            nav_cache[code] = self._load_nav_tuples(code)
+            nav_cache[code] = self._load_nav_tuples(code, since)
             if (i + 1) % 30 == 0:
                 print(f"      加载: {i+1}/{len(all_codes)}")
 
@@ -245,19 +247,19 @@ class HistoricalRecommender:
 
     # -------- 纯Python净值操作 (避开pandas C扩展Windows bug) --------
 
-    def _load_nav_tuples(self, code: str) -> list:
-        """加载净值数据: [(date_str, nav_float), ...], 最多300条, 按日期升序"""
+    def _load_nav_tuples(self, code: str, since: str = None) -> list:
+        """加载净值数据: [(date_str, nav_float), ...], 按日期升序。
+        可用 since(YYYY-MM-DD) 只加载回测窗口内及更早一小段(供动量/夏普预热)的历史，
+        避免固定 LIMIT 300 把多年回测的早期月份“截断成无历史”。"""
         cur = self.db.conn.cursor()
-        cur.execute("""
-            SELECT nav_date, unit_nav FROM fund_nav
-            WHERE fund_code = ? ORDER BY nav_date DESC LIMIT 300
-        """, (code,))
+        sql = ("SELECT nav_date, unit_nav FROM fund_nav "
+               "WHERE fund_code = ?" + (" AND nav_date >= ?" if since else "") +
+               " ORDER BY nav_date ASC LIMIT 8000")
+        params = [code] + ([since] if since else [])
+        cur.execute(sql, params)
         rows = cur.fetchall()
         if not rows or len(rows) < 60:
             return []
-        # reverse to ascending
-        rows = list(rows)
-        rows.reverse()
         return [(str(r[0]), float(r[1])) for r in rows]
 
     @staticmethod
@@ -320,15 +322,17 @@ class HistoricalRecommender:
         navs.sort(key=lambda x: x[0])
         return self._score_from_tuples(navs, date)
 
+    def _fund_types(self) -> dict:
+        """懒加载一次 fund_info -> {fund_code: row} 映射，避免逐基金全表扫描 O(F²)"""
+        if not hasattr(self, "_ftmap"):
+            self._ftmap = {f["fund_code"]: f for f in self.db.get_all_funds()}
+        return self._ftmap
+
     def _is_equity(self, code: str) -> bool:
         """判断是否为权益类基金(通过fund_info表)"""
-        info = self._get_fund_info(code)
+        info = self._fund_types().get(code)
         ftype = info.get("fund_type", "") if info else ""
         return any(kw in ftype for kw in ["股票", "混合", "指数", "QDII"])
 
     def _get_fund_info(self, code: str) -> Optional[dict]:
-        funds = self.db.get_all_funds()
-        for f in funds:
-            if f["fund_code"] == code:
-                return f
-        return {}
+        return self._fund_types().get(code, {})

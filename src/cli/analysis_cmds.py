@@ -2,7 +2,7 @@
 分析命令：score / temp / sentiment / portfolio / rebalance / sector / recommend / plan。
 """
 
-from src.analysis.fund_scorer import FundScreener
+from src.analysis.fund_scorer import FundScreener, format_fee
 from src.analysis.historical_recommender import HistoricalRecommender
 from src.analysis.investment_plan import get_plan, get_progress
 from src.analysis.portfolio import PortfolioTracker
@@ -49,7 +49,10 @@ def cmd_score():
                 mom = metrics.get("momentum_3m", 0) or 0
                 dd = metrics.get("max_drawdown_1y", 0) or 0
 
-                print(f"  {row['fund_code']} {str(row['fund_name'])[:28]:<30} 费率{row['mgt_fee']:.2f}%  近3月{mom:+.0f}%  回撤{dd:.0f}%")
+                # mgt_fee 缺失时（长历史基金很常见）必须显示"无数据"而不是 0.00%，
+                # 否则会被读成"零费率"
+                _fee_txt = format_fee(row.get("mgt_fee"))
+                print(f"  {row['fund_code']} {str(row['fund_name'])[:28]:<30} 费率{_fee_txt:<8} 近3月{mom:+.0f}%  回撤{dd:.0f}%")
 
                 reasons = row.get("risk_reasons", [])
                 for r in reasons:
@@ -77,12 +80,17 @@ def cmd_temp():
     print(f"  建议: {temp['action']}")
     print(f"  建议权益仓位: {temp['target_equity_pct']}%")
     print()
+    def _d(v):
+        return f"{v:.0f}°" if v is not None else "缺失"
+
     print("  📊 五维分解:")
-    print(f"    PE估值分位数:  {comp['pe_score']:.0f}°  (越高越贵)")
-    print(f"    PB估值分位数:  {comp['pb_score']:.0f}°  (越高越贵)")
-    print(f"    股债性价比:    {comp['erp_score']:.0f}°  (越高股票越贵)")
-    print(f"    成交量热度:    {comp['volume_score']:.0f}°  (天量=高温)")
-    print(f"    市场情绪:      {comp['sentiment_score']:.0f}°  (贪婪=高温)")
+    print(f"    PE估值分位数:  {_d(comp['pe_score'])}  (越高越贵)")
+    print(f"    PB估值分位数:  {_d(comp['pb_score'])}  (越高越贵)")
+    print(f"    股债性价比:    {_d(comp['erp_score'])}  (越高股票越贵)")
+    print(f"    成交量热度:    {_d(comp['volume_score'])}  (天量=高温)")
+    print(f"    市场情绪:      {_d(comp['sentiment_score'])}  (贪婪=高温)")
+    if temp.get("degraded_dimensions"):
+        print(f"    ⚠️ 数据缺失维度已剔除并按剩余权重归一化: {', '.join(temp['degraded_dimensions'])}")
 
     # 估值分歧
     div = temp.get("divergence", {})
@@ -115,7 +123,7 @@ def cmd_portfolio():
     db = Database("data/fund_quant.db")
     tracker = PortfolioTracker(db)
 
-    summary = tracker.get_portfolio_summary()
+    summary = tracker.get_portfolio_summary(reconcile=True)   # CLI 是显式动作，先对账再展示
 
     if not summary.get("has_holdings"):
         print("📋 暂无持仓记录。")
@@ -149,9 +157,7 @@ def cmd_rebalance():
     db = Database("data/fund_quant.db")
     advisor = RebalanceAdvisor(db)
 
-    # 计算总资金(持仓+估计的现金)
     holdings = db.get_current_holdings()
-    total_invested = sum(h["buy_amount"] for h in holdings)
 
     if not holdings:
         print("📋 暂无持仓。先录入:")
@@ -159,10 +165,15 @@ def cmd_rebalance():
         db.close()
         return
 
-    # 假设总资金 = 已投入 + 10%现金缓冲, 或提示用户输入
-    total_cap = total_invested * 1.1  # 留10%现金缓冲
+    # 总资金口径 = 持仓市值 + 投资计划的现金弹药（cash_reserve）。
+    # 旧版用 total_invested * 1.1 拍脑袋估算，与计划卡数字互相打架。
+    try:
+        plan = get_plan(db) or {}
+        cash_reserve = float(plan.get("cash_reserve") or 0)
+    except Exception:
+        cash_reserve = 0.0
 
-    result = advisor.analyze(total_capital=total_cap)
+    result = advisor.analyze(cash_reserve=cash_reserve)
 
     # === 输出 ===
     temp = result["temperature"]
@@ -391,3 +402,45 @@ def cmd_plan():
 
     db.close()
 
+
+
+def cmd_precompute():
+    """预计算并落 SQLite 快照（温度/筛选池/调仓/聚合总览/板块总榜）。
+
+    作用：Web 端点是「内存缓存 → SQLite 快照 → 现算」。跑一次本命令把快照填好，
+    之后即使重启服务，首屏与筛选池也是纯 SELECT（毫秒级），不必再等 3~8 秒冷算。
+    """
+    import time
+    from src.web import app as webapp
+
+    jobs = [
+        ("温度+持仓 总览", "overview", webapp._overview_compute),
+        ("基金质量筛选池", "funds", webapp._all_funds),
+        ("调仓建议", "rebalance", webapp._all_rebalance),
+        ("聚合总览", "__dash__", webapp._compute_dashboard),
+        ("板块总榜(默认)", "funds_board_20_300",
+         lambda: webapp._compute_board_pool(20, 300)),
+    ]
+    print("=" * 60)
+    print("预计算快照（写入 data/fund_quant.db 的 analysis_snapshot 表）")
+    print("=" * 60)
+    total = 0.0
+    for label, key, fn in jobs:
+        s = time.perf_counter()
+        try:
+            data, _src = webapp._cached_get(key, fn, fresh=True)
+            bad = (not data) or (isinstance(data, dict) and data.get("error"))
+        except Exception as e:
+            data, bad = None, True
+            print(f"  ❌ {label}: {e}")
+            continue
+        dt = time.perf_counter() - s
+        total += dt
+        if bad:
+            print(f"  ⚠️ {label}: 计算返回空/错误，未落快照 ({dt:.1f}s)")
+        else:
+            n = len(data.get("funds", [])) if key == "funds" else ""
+            print(f"  ✅ {label}: {dt:.1f}s {'('+str(n)+' 只)' if n != '' else ''}")
+    print("-" * 60)
+    print(f"合计 {total:.1f}s。快照有效期 6 小时，或在任何写操作（记买入/更新净值…）时自动失效。")
+    print("=" * 60)

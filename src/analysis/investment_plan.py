@@ -10,6 +10,9 @@
   - 每只基金的目标金额/比例 + 分笔建议，对照实际持仓算进度
 """
 
+import json
+from typing import Optional
+
 from ..data.database import Database
 
 # =================================================================
@@ -72,8 +75,8 @@ TEMP_RULES = {
 # 进度计算
 # =================================================================
 
-def get_plan() -> dict:
-    """返回计划定义"""
+def _fallback_plan() -> dict:
+    """硬编码计划（仅用于首次 seed 或库不可用时的兜底）"""
     return {
         "name": PLAN_NAME,
         "start_date": START_DATE,
@@ -84,12 +87,57 @@ def get_plan() -> dict:
     }
 
 
+def ensure_seed(db: Database) -> Optional[int]:
+    """把硬编码计划一次性写入库（若库中已有计划则不动作）"""
+    try:
+        return db.seed_plan_if_empty(
+            {"name": PLAN_NAME, "goal": "分4笔建仓，温度联动加减仓", "total_capital": TOTAL_CAPITAL,
+             "cash_reserve": CASH_RESERVE, "start_date": START_DATE, "horizon": "6个月",
+             "risk_pref": "稳健偏平衡", "notes": "2026-09-01 剔除纳斯达克，额度转入现金底仓"},
+            [{"fund_code": f["code"], "fund_name": f["name"], "role": f.get("role"),
+              "target_amount": f.get("target_amount"), "target_pct": f.get("target_pct"),
+              "dca_daily": f.get("dca_daily"), "tranches": json.dumps(f.get("tranches", []), ensure_ascii=False)}
+             for f in FUNDS])
+    except Exception:
+        return None
+
+
+def get_plan(db: Database = None) -> dict:
+    """返回计划定义：优先读库（可维护），无则回退硬编码常量。"""
+    if db is not None:
+        try:
+            p = db.get_active_plan()
+            if p:
+                funds = []
+                for it in p.get("items", []):
+                    try:
+                        tr = json.loads(it.get("tranches") or "[]")
+                    except Exception:
+                        tr = []
+                    funds.append({
+                        "code": it.get("fund_code"), "name": it.get("fund_name"),
+                        "role": it.get("role"), "target_amount": it.get("target_amount"),
+                        "target_pct": it.get("target_pct"), "tranches": tr,
+                        "dca_daily": it.get("dca_daily"), "item_id": it.get("id"),
+                    })
+                return {
+                    "id": p["id"], "name": p.get("name"), "goal": p.get("goal"),
+                    "start_date": p.get("start_date"), "total_capital": p.get("total_capital"),
+                    "cash_reserve": p.get("cash_reserve"), "horizon": p.get("horizon"),
+                    "risk_pref": p.get("risk_pref"), "notes": p.get("notes"),
+                    "funds": funds, "temp_rules": TEMP_RULES,
+                }
+        except Exception:
+            pass
+    return _fallback_plan()
+
+
 def get_invested_by_code(db: Database) -> dict:
-    """按基金代码汇总当前已投金额（status='holding'）"""
+    """按基金代码汇总已投金额（含待确认买入；未确认不代表钱没花）"""
     cur = db.conn.cursor()
     cur.execute("""
         SELECT fund_code, SUM(buy_amount) as invested
-        FROM holdings WHERE status='holding'
+        FROM holdings WHERE status IN ('holding','pending_confirm')
         GROUP BY fund_code
     """)
     return {r["fund_code"]: r["invested"] for r in cur.fetchall()}
@@ -102,14 +150,18 @@ def get_progress(db: Database) -> dict:
     Returns:
         dict: {funds: [{code,name,role,target,invested,remaining,pct,next}], ...}
     """
+    plan = get_plan(db)
+    plan_funds = plan.get("funds") or FUNDS
+    cash_reserve = plan.get("cash_reserve") or CASH_RESERVE
+    total_capital = plan.get("total_capital") or TOTAL_CAPITAL
     invested_map = get_invested_by_code(db)
 
     funds_progress = []
     total_invested = 0.0
 
-    for f in FUNDS:
-        target = f["target_amount"]
-        invested = invested_map.get(f["code"], 0.0)
+    for f in plan_funds:
+        target = f.get("target_amount") or 0.0
+        invested = invested_map.get(f.get("code"), 0.0)
         remaining = max(0.0, target - invested)
         pct = min(100.0, invested / target * 100) if target > 0 else 0
 
@@ -126,19 +178,19 @@ def get_progress(db: Database) -> dict:
         else:
             next_tranche = None
             cumulative = 0.0
-            for t in f["tranches"]:
-                cumulative += t["amount"]
+            for t in (f.get("tranches") or []):
+                cumulative += t.get("amount", 0)
                 if invested < cumulative - 0.01:  # 还没买够这一笔
-                    next_tranche = {"date": t["date"], "amount": round(cumulative - invested, 0)}
+                    next_tranche = {"date": t.get("date"), "amount": round(cumulative - invested, 0)}
                     break
 
         total_invested += invested
         funds_progress.append({
-            "code": f["code"],
-            "name": f["name"],
-            "role": f["role"],
+            "code": f.get("code"),
+            "name": f.get("name"),
+            "role": f.get("role"),
             "target": target,
-            "target_pct": f["target_pct"],
+            "target_pct": f.get("target_pct"),
             "invested": round(invested, 2),
             "remaining": round(remaining, 2),
             "progress_pct": round(pct, 1),
@@ -148,7 +200,7 @@ def get_progress(db: Database) -> dict:
     return {
         "funds": funds_progress,
         "total_invested": round(total_invested, 2),
-        "total_target": TOTAL_CAPITAL,
-        "cash_reserve": CASH_RESERVE,
-        "remaining_total": round(TOTAL_CAPITAL - total_invested - CASH_RESERVE, 2),
+        "total_target": total_capital,
+        "cash_reserve": cash_reserve,
+        "remaining_total": round(total_capital - total_invested - cash_reserve, 2),
     }

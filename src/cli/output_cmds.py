@@ -24,7 +24,7 @@ def cmd_report():
     reporter = WeeklyReporter(db)
 
     # 消息面扫描
-    holdings = portfolio.get_portfolio_summary()
+    holdings = portfolio.get_portfolio_summary(reconcile=True)   # 周报先对账，反映最新结算
     holding_codes = [h["fund_code"] for h in holdings.get("holdings_detail", [])]
 
     sentiment_data = None
@@ -98,7 +98,7 @@ def cmd_sell():
     tracker = PortfolioTracker(db)
 
     # 先显示当前持仓
-    summary = tracker.get_portfolio_summary()
+    summary = tracker.get_portfolio_summary(reconcile=True)   # 显式动作：先对账再列持仓
     if not summary.get("has_holdings"):
         print("📋 暂无持仓记录，无需卖出。")
         db.close()
@@ -178,8 +178,16 @@ def cmd_update():
     # 修改金额时，按记录的买入净值重算份额
     if "buy_amount" in fields:
         row = db.conn.cursor().execute("SELECT buy_nav FROM holdings WHERE id = ?", (holding_id,)).fetchone()
-        buy_nav = row["buy_nav"] if row else None
-        fields["shares"] = round(fields["buy_amount"] / buy_nav, 2) if buy_nav and buy_nav > 0 else 0
+        if not row:
+            print("❌ 未找到 ID=", holding_id)
+            db.close()
+            return
+        buy_nav = row["buy_nav"]
+        if buy_nav and buy_nav > 0:
+            fields["shares"] = round(fields["buy_amount"] / buy_nav, 2)
+        else:
+            # 买入净值未知(录入时可能缺净值)：不能可靠重算份额，避免把份额清成 0
+            print("⚠️ 该持仓买入净值未知，无法重算份额；已只更新金额")
 
     ok = db.update_holding(holding_id, **fields)
     db.close()
@@ -233,11 +241,10 @@ def cmd_web():
         time.sleep(1.5)
         webbrowser.open("http://localhost:5020")
     threading.Thread(target=_open, daemon=True).start()
-    # 预计算板块数据（后台线程，不阻塞启动）
-    from src.web.app import app, _precompute_sectors
-    threading.Thread(target=_precompute_sectors, daemon=True).start()
-    # Run Flask
-    app.run(host="0.0.0.0", port=5020, debug=False)
+    # 单一启动入口：app.main() 负责预计算板块(后台线程)+ 线程化 Flask(threaded=True)，
+    # 避免这里重复启动板块预计算、并用单线程模式阻塞异步卡片
+    from src.web import app as webapp
+    webapp.main()
 
 
 def cmd_schedule():

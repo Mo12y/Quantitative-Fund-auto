@@ -30,8 +30,7 @@ def cmd_backtest():
 
     # 1. 获取有净值数据的基金
     cur = db.conn.cursor()
-    cur.execute("SELECT DISTINCT fund_code FROM fund_nav")
-    all_codes = [r[0] for r in cur.fetchall()]
+    all_codes = sorted(db.get_all_fund_codes())
     print(f"   候选基金池: {len(all_codes)} 只")
 
     if len(all_codes) < 10:
@@ -278,7 +277,7 @@ def cmd_backtest3():
 
     print("📊 严谨回测 v3.0")
     print("=" * 60)
-    print("  改进: 扩展窗口分位数(无未来函数) / 完整交易成本 / 多基准 / t检验")
+    print("  改进: 扩展窗口分位数(无未来函数) / 交易成本已进指标(净收益) / 多基准按日期对齐 / t检验")
     print("  局限: 存续基金池(幸存者偏差)")
     print()
 
@@ -290,7 +289,7 @@ def cmd_backtest3():
         return
 
     s = result["strategy"]
-    print("🎯 策略表现 (月频 · 温度阈值调仓 · Top3等权 · 含交易成本):")
+    print("🎯 策略表现 (月频 · 温度阈值调仓 · Top3等权 · **净收益**: 已扣申购费/赎回费/管理费):")
     print(f"   总收益率:    {s['total_return']:+.1f}%")
     print(f"   年化收益率:  {s['annual_return']:+.1f}%")
     print(f"   年化波动率:  {s['annual_volatility']:.1f}%")
@@ -306,7 +305,8 @@ def cmd_backtest3():
             continue
         b = result[bkey]
         print(f"\n📉 基准 {sym}:")
-        print(f"   年化: {b['annual_return']:+.1f}%  夏普: {b['sharpe']:.2f}  回撤: {b['max_drawdown']:.1f}%")
+        print(f"   年化: {b['annual_return']:+.1f}%  夏普: {b['sharpe']:.2f}  回撤: {b['max_drawdown']:.1f}%"
+              f"  (与策略对齐 {b.get('aligned_months', '-')} 个月)")
         a = result.get(akey, {})
         if a.get("t_stat") is not None:
             sig = "✅ 显著" if a["significant"] else "❌ 不显著"
@@ -315,13 +315,20 @@ def cmd_backtest3():
         if r.get("beta") is not None:
             print(f"   Beta: {r['beta']} | 年化Alpha: {r['alpha_annual']:+.2f}%")
 
-    print("\n📅 逐年一致性:")
+    print("\n📅 逐年一致性 (按自然年分组):")
     for y in result.get("yearly", []):
         parts = [f"策略 {y['strategy_return']:+.1f}%"]
         for sym in ["sh000300", "sh000905"]:
             if sym in y:
                 parts.append(f"{sym} {y[sym]:+.1f}%")
-        print(f"   {y['period']}: {' | '.join(parts)}")
+        print(f"   {y['period']} ({y.get('months', '?')}个月): {' | '.join(parts)}")
+
+    cm = result.get("cost_model") or {}
+    if cm:
+        print(f"\n💸 成本模型: 申购 {cm['purchase_fee']*100:.2f}% · "
+              f"赎回 <7天 {cm['redemption_fee_lt7d']*100:.2f}% / ≥7天 {cm['redemption_fee_ge7d']*100:.2f}% · "
+              f"管理费年化 {cm['management_fee_annual']*100:.2f}%")
+        print(f"   费率真源: {cm.get('source', '')}")
 
     print(f"\n⚠️ 调仓次数: {len(result['trades'])} 次")
     print("⚠️ 局限: 存续基金池存在幸存者偏差; 未模拟 T+1 确认延迟")
@@ -392,7 +399,11 @@ def cmd_strategy():
         print(f"\n💰 预估交易成本:")
         print(f"   总成本约: ¥{cost['total_cost']:.2f}")
         for bd in cost.get("breakdown", []):
-            print(f"   - {bd['fund_name'][:20]}: 持{bd['days_held']}天, 赎回费{bd['fee_rate']} ≈ ¥{bd['sell_fee']:.2f}")
+            held = f"持{bd['days_held']}天, " if bd.get("days_held") is not None else ""
+            print(f"   - {bd['fund_name'][:20]}: {bd.get('action','')}{held}"
+                  f"{bd['fee_rate']} × ¥{bd.get('traded', 0):.2f} ≈ ¥{bd.get('fee', 0):.2f}")
+        if cost.get("note"):
+            print(f"   {cost['note']}")
 
     # 推荐基金
     df = suggestion.get("recommended_funds")

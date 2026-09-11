@@ -12,14 +12,14 @@
 
 import copy
 import os
+import sys
 from typing import Any, Dict, Optional
 
 import yaml
 
-_CONFIG_PATH = os.path.join(
-    os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-    "config", "settings.yaml",
-)
+_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+_CONFIG_PATH = os.path.join(_ROOT, "config", "settings.yaml")
 
 # 默认配置：settings.yaml 缺省时的兜底（新增配置段时在此补默认值）
 _DEFAULTS: Dict[str, Any] = {
@@ -53,9 +53,9 @@ class Config:
             with open(path, "r", encoding="utf-8") as f:
                 user = yaml.safe_load(f) or {}
             self._merge(self._data, user)
-        except Exception:
-            # 配置文件损坏时静默回退到默认值（不阻断启动）
-            pass
+        except Exception as e:
+            # 配置文件损坏时回退默认值（但仍提示，避免用户误以为自定义配置生效）
+            print(f"⚠️ 配置文件解析失败，已回退默认配置: {path}: {e}", file=sys.stderr)
 
     @staticmethod
     def _merge(base: Dict, override: Dict) -> None:
@@ -75,8 +75,11 @@ class Config:
         return self._data.get(section, {}).get(key, default)
 
     def get_db_path(self) -> str:
-        """数据库路径（相对项目根目录解析）"""
-        return self.get("data", "db_path", "data/fund_quant.db")
+        """数据库路径：相对路径基于项目根目录解析，避免随 CWD 漂移"""
+        p = self.get("data", "db_path", "data/fund_quant.db")
+        if not os.path.isabs(p):
+            return os.path.normpath(os.path.join(_ROOT, p))
+        return p
 
 
 # 模块级单例：所有模块共用同一份配置，避免重复加载

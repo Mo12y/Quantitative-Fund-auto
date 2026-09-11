@@ -3,9 +3,11 @@
 
 v1 → v2 核心变化:
 1. 调仓频率: 每周 → 每月（减少交易成本）
-2. 因子权重: 固定 → 根据市场状态动态调整
-3. 调仓触发: 每次都换 → 温度变化>15°才调仓
-4. 交易成本: 忽略 → 纳入申购/赎回费模拟
+2. 调仓触发: 每次都换 → 温度变化>15°才调仓（上次温度持久化，跨进程生效）
+3. 交易成本: 忽略 → 按**实际调仓成交额**估算（费率取自 portfolio 单一真源）
+
+说明: 基金选择走 FundScreener 的**质量筛选**（只排除有坑的），不做因子加权打分，
+因此不存在"按市场状态动态调整因子权重"这回事。
 
 核心理念:
   不追求"选到最好的基金"，而是追求"在合理的时间以合理的成本
@@ -18,14 +20,10 @@ from typing import Tuple
 from ..data.database import Database
 from .fund_scorer import FundScreener
 from .thermometer import MarketThermometer
+from .portfolio import redeem_fee_rate
 
-# 场外基金交易成本
-TRADING_COST = {
-    "purchase_fee": 0.0015,    # C类申购费 0.15%
-    "redemption_fee_7d": 0.015,  # 持有<7天赎回费 1.5%
-    "redemption_fee_30d": 0.005, # 持有7-30天赎回费 0.5%
-    "redemption_fee_normal": 0.0, # 持有>30天赎回免费
-}
+# 场外基金申购费（C类）；赎回费一律走 portfolio.redeem_fee_rate（单一真源）
+PURCHASE_FEE = 0.0015
 
 
 class StrategyEngine:
@@ -41,34 +39,9 @@ class StrategyEngine:
     # 调仓阈值
     TEMP_CHANGE_THRESHOLD = 15  # 温度变化超过此值才调仓
 
-    # 不同市场状态下的因子权重
-    MARKET_STATE_WEIGHTS = {
-        # 熊市(冷): 防御为主，重回撤和费率，轻动量
-        "cold": {
-            "momentum": 0.10, "sharpe": 0.20, "drawdown": 0.35,
-            "fee": 0.20, "size": 0.10, "manager": 0.05,
-        },
-        # 偏冷: 逐步加仓，均衡权重
-        "cool": {
-            "momentum": 0.15, "sharpe": 0.25, "drawdown": 0.25,
-            "fee": 0.15, "size": 0.15, "manager": 0.05,
-        },
-        # 适中: 均衡
-        "normal": {
-            "momentum": 0.20, "sharpe": 0.25, "drawdown": 0.20,
-            "fee": 0.15, "size": 0.15, "manager": 0.05,
-        },
-        # 偏热: 重动量(趋势跟踪)，但降低仓位
-        "warm": {
-            "momentum": 0.30, "sharpe": 0.20, "drawdown": 0.15,
-            "fee": 0.15, "size": 0.15, "manager": 0.05,
-        },
-        # 过热: 防御为主
-        "hot": {
-            "momentum": 0.10, "sharpe": 0.20, "drawdown": 0.35,
-            "fee": 0.20, "size": 0.10, "manager": 0.05,
-        },
-    }
+    # 上次评估状态的持久化键（存 analysis_snapshot，跨进程生效）
+    STATE_KEY = "strategy_last_temp"
+    STATE_MAX_AGE = 7 * 86400  # 7 天；超过视为过期，重新建立基准
 
     # 不同市场状态下的基金类型偏好
     MARKET_STATE_FUND_TYPES = {
@@ -85,10 +58,41 @@ class StrategyEngine:
         self.thermometer = MarketThermometer(db)
         self._last_temp = None
         self._last_rebalance_date = None
+        self._load_state()
+
+    def _load_state(self):
+        """从库里恢复上次评估的温度与日期（超过 STATE_MAX_AGE 视为过期）。"""
+        if self.db is None:
+            return
+        try:
+            st = self.db.get_analysis_snapshot(self.STATE_KEY, self.STATE_MAX_AGE)
+        except Exception:
+            st = None
+        if not st:
+            return
+        try:
+            self._last_temp = float(st["temp"])
+            self._last_rebalance_date = st.get("date")
+        except Exception:
+            self._last_temp = None
+
+    def _save_state(self):
+        """持久化上次评估状态（db=None 的纯逻辑用法下静默跳过）。"""
+        if self.db is None:
+            return
+        try:
+            self.db.set_analysis_snapshot(
+                self.STATE_KEY,
+                {"temp": self._last_temp, "date": self._last_rebalance_date})
+        except Exception:
+            pass
 
     def should_rebalance(self) -> Tuple[bool, str]:
         """
         判断当前是否应该调仓。
+
+        上次温度持久化到 DB（7 天内有效），因此阈值判断跨进程/跨次运行都成立 ——
+        不再出现"每次 CLI 都是首次评估"导致 15° 阈值永不触发。
 
         Returns:
             (是否调仓, 原因)
@@ -96,10 +100,11 @@ class StrategyEngine:
         temp_data = self.thermometer.get_temperature()
         current_temp = temp_data["temperature"]
 
-        # 首次运行，总是调仓
+        # 无历史基准（首跑 / 状态过期），总是调仓
         if self._last_temp is None:
             self._last_temp = current_temp
             self._last_rebalance_date = datetime.now().strftime("%Y-%m-%d")
+            self._save_state()
             return True, "首次评估，建立基准仓位"
 
         temp_change = abs(current_temp - self._last_temp)
@@ -108,6 +113,7 @@ class StrategyEngine:
             direction = "升温" if current_temp > self._last_temp else "降温"
             self._last_temp = current_temp
             self._last_rebalance_date = datetime.now().strftime("%Y-%m-%d")
+            self._save_state()
             return True, f"温度{direction}{temp_change:.0f}°(阈值≥{self.TEMP_CHANGE_THRESHOLD}°)，触发调仓"
 
         return False, f"温度变化{temp_change:.0f}°(阈值<{self.TEMP_CHANGE_THRESHOLD}°)，保持不动"
@@ -122,8 +128,7 @@ class StrategyEngine:
         temp_data = self.thermometer.get_temperature()
         level = temp_data["level"]  # cold/cool/normal/warm/hot
 
-        # 获取当前市场状态对应的因子权重
-        weights = self.MARKET_STATE_WEIGHTS.get(level, self.MARKET_STATE_WEIGHTS["normal"])
+        # 按市场状态收窄可投的基金类型（评分统一走质量筛选，不做权重加权）
         fund_types = self.MARKET_STATE_FUND_TYPES.get(level, ["混合型", "指数型", "股票型"])
 
         # 使用质量筛选（不再打分排名）
@@ -162,40 +167,92 @@ class StrategyEngine:
 
         return result
 
+    def _holding_market_value(self, h: dict) -> float:
+        """持仓市值 = 份额 × 最新单位净值；缺数据退回买入金额。"""
+        try:
+            shares = h.get("shares") or 0
+            if shares:
+                row = self.db.get_latest_fund_nav(h["fund_code"])
+                nav = float(row["unit_nav"]) if row and row.get("unit_nav") is not None else None
+                if nav:
+                    return shares * nav
+        except Exception:
+            pass
+        return float(h.get("buy_amount") or 0)
+
     def _estimate_rebalance_cost(self) -> dict:
-        """估算调仓的交易成本"""
+        """估算调仓的交易成本。
+
+        口径修正（旧版有两个错误）：
+        1. 费率：改用 portfolio.redeem_fee_rate 单一真源（<7 天 1.5%，≥7 天 0），
+           不再自建"7-30 天 0.5%"这张重复且与真实账务不一致的表。
+        2. 基数：只对**实际需要变动的成交额**（|目标权益% − 当前权益%| × 总市值）计费，
+           不再假设"把全部持仓卖一遍"。
+        """
         holdings = self.db.get_current_holdings()
         if not holdings:
-            return {"total_cost": 0, "breakdown": [], "note": "空仓，无卖出成本"}
+            return {"total_cost": 0, "breakdown": [], "note": "空仓，无交易成本"}
 
-        total_cost = 0
+        pos = [(h, self._holding_market_value(h)) for h in holdings]
+        total_mv = sum(mv for _, mv in pos)
+        if total_mv <= 0:
+            return {"total_cost": 0, "breakdown": [], "note": "无有效市值数据"}
+
+        temp_data = self.thermometer.get_temperature()
+        target_eq = float(temp_data.get("target_equity_pct") or 0)
+        equity_mv = sum(mv for h, mv in pos if self._is_equity(h.get("fund_code", "")))
+        current_eq = equity_mv / total_mv * 100
+        delta_pp = target_eq - current_eq
+        traded = abs(delta_pp) / 100.0 * total_mv   # 实际需要买卖的成交额
+
+        total_cost = 0.0
         breakdown = []
+        if traded <= 0:
+            return {"total_cost": 0, "breakdown": [], "note": "仓位已在目标附近，无交易成本"}
 
-        for h in holdings:
-            invested = h["buy_amount"]
-            days_held = self._days_held(h["buy_date"])
-
-            if days_held < 7:
-                fee_rate = TRADING_COST["redemption_fee_7d"]
-            elif days_held < 30:
-                fee_rate = TRADING_COST["redemption_fee_30d"]
-            else:
-                fee_rate = TRADING_COST["redemption_fee_normal"]
-
-            sell_cost = invested * fee_rate
-            total_cost += sell_cost
+        if delta_pp < 0:
+            # 减仓：按市值等比例卖出，逐只按真实持有天数计赎回费
+            for h, mv in pos:
+                if mv <= 0:
+                    continue
+                sell_amt = traded * (mv / total_mv)
+                days_held = self._days_held(h.get("buy_date"))
+                info = {}
+                try:
+                    info = self.db.get_fund_info(h["fund_code"]) or {}
+                except Exception:
+                    pass
+                rate = redeem_fee_rate(info.get("redeem_fee"), days_held)
+                cost = sell_amt * rate
+                total_cost += cost
+                breakdown.append({
+                    "fund_name": h.get("fund_name", h["fund_code"]),
+                    "action": "卖出",
+                    "traded": round(sell_amt, 2),
+                    "days_held": days_held,
+                    "fee_rate": f"{rate*100:.2f}%",
+                    "fee": round(cost, 2),
+                })
+        else:
+            # 加仓：按申购费对买入额计费
+            cost = traded * PURCHASE_FEE
+            total_cost += cost
             breakdown.append({
-                "fund_name": h.get("fund_name", h["fund_code"]),
-                "invested": invested,
-                "days_held": days_held,
-                "sell_fee": round(sell_cost, 2),
-                "fee_rate": f"{fee_rate*100:.1f}%",
+                "fund_name": "(按质量筛选池买入)",
+                "action": "买入",
+                "traded": round(traded, 2),
+                "days_held": None,
+                "fee_rate": f"{PURCHASE_FEE*100:.2f}%",
+                "fee": round(cost, 2),
             })
 
         return {
             "total_cost": round(total_cost, 2),
+            "traded_amount": round(traded, 2),
             "breakdown": breakdown,
-            "note": f"总交易成本约¥{total_cost:.2f}，占仓位{total_cost/10000*100 if sum(h['buy_amount'] for h in holdings) > 0 else 0:.2f}%",
+            "note": (f"按实际调仓成交额¥{traded:.2f}（目标权益{target_eq:.1f}% vs 当前{current_eq:.1f}%）"
+                     f"估算交易成本约¥{total_cost:.2f}，"
+                     f"占调仓成交额{total_cost/traded*100 if traded else 0:.2f}%"),
         }
 
     @staticmethod
@@ -206,3 +263,12 @@ class StrategyEngine:
             return (pd.Timestamp.now() - buy).days
         except Exception:
             return 999  # 无法解析视为长期持有
+
+    def _is_equity(self, fund_code: str) -> bool:
+        """是否为权益类基金（股票/混合/指数/QDII），用于权益仓位口径。"""
+        try:
+            info = self.db.get_fund_info(fund_code) or {}
+        except Exception:
+            return False
+        ftype = str(info.get("fund_type", "") or "")
+        return any(t in ftype for t in ("股票", "混合", "指数", "QDII"))

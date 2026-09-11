@@ -302,6 +302,12 @@ class DataCollector:
             except Exception as e:
                 results[code]["pb_error"] = str(e)
 
+            # 指数日线（含成交量）——失败不阻断，量能维度届时走降级路径
+            try:
+                results[code]["daily"] = self.collect_index_daily(info["daily_symbol"])
+            except Exception as e:
+                results[code]["daily_error"] = str(e)
+
             time.sleep(0.5)
 
         return results
@@ -387,6 +393,14 @@ class DataCollector:
         if fund.get("fund_size"):
             fund["fund_size"] = self._parse_size(fund["fund_size"])
 
+        # 赎回费率：详情接口的字段名不固定（"赎回费率"/"赎回费率(后端)"…），按关键字容忍匹配。
+        # 短期（<7天）赎回费是 C 类基金最容易被忽略的一笔成本，能采到就存下来，
+        # 采不到时 portfolio 会回退到监管下限 1.5%。
+        for k, v in (detail or {}).items():
+            if "赎回" in str(k) and "费" in str(k) and v:
+                fund["redeem_fee"] = str(v)
+                break
+
         # 更新到数据库
         if fund.get("establish_date"):
             update_data = {
@@ -398,6 +412,7 @@ class DataCollector:
                 "manager_name": fund.get("manager_name", ""),
                 "benchmark": fund.get("benchmark", ""),
                 "fund_type": fund.get("fund_type_detailed", ""),
+                "redeem_fee": fund.get("redeem_fee"),
             }
             self.db.upsert_fund_info(update_data)
 
@@ -411,24 +426,21 @@ class DataCollector:
         """
         records = []
         cols = list(df.columns)
+        # 按列名识别“累计净值”与“日增长率”，避免 akshare(无累计净值)把第3列日增长率误当累计净值。
+        acc_idx = next((i for i, c in enumerate(cols) if "累计" in str(c)), None)
+        ret_idx = next((i for i, c in enumerate(cols) if "日增长" in str(c) or "增长率" in str(c)), None)
 
         for _, row in df.iterrows():
             nav_date = str(row.iloc[0])
             unit_nav = self._to_float(row.iloc[1])
 
-            # 累计净值: 如果列数>=3且第3列看起来像净值（值>0且不是百分比）
-            acc_nav = 0.0
-            if len(cols) >= 3:
-                v3 = self._to_float(row.iloc[2])
-                if v3 > 0.5:  # 合理净值范围
-                    acc_nav = v3
+            acc_nav = self._to_float(row.iloc[acc_idx]) if acc_idx is not None else 0.0
+            # 累计净值应落在合理净值区间；异常(如日增长率被误判)则归 0，避免污染
+            acc_nav = acc_nav if 0.1 <= acc_nav < 100 else 0.0
 
-            # 日增长率: 最后一列
-            daily_return = 0.0
-            if len(cols) >= 3:
-                v_last = self._to_float(row.iloc[-1])
-                if -20 < v_last < 20:  # 日涨跌幅合理范围(%)
-                    daily_return = v_last
+            daily_return = self._to_float(row.iloc[ret_idx]) if ret_idx is not None else 0.0
+            if not (-20 < daily_return < 20):
+                daily_return = 0.0
 
             if nav_date and unit_nav:
                 records.append((str(fund_code), nav_date, unit_nav, acc_nav, daily_return))
@@ -436,13 +448,15 @@ class DataCollector:
         if records:
             self.db.insert_nav_batch(records)
 
-    def save_index_val_to_db(self, index_code: str, pe_df: pd.DataFrame, pb_df: pd.DataFrame):
+    def save_index_val_to_db(self, index_code: str, pe_df: pd.DataFrame, pb_df: pd.DataFrame,
+                             daily_df: pd.DataFrame = None):
         """
         将指数PE/PB数据清洗后存入 index_valuation 和 index_daily 表。
 
         PE列 (v1.18+): 日期, 指数, 等权静态市盈率, 静态市盈率, 静态市盈率中位数,
                        等权滚动市盈率, 滚动市盈率, 滚动市盈率中位数
         PB列 (v1.18+): 日期, 指数, 市净率, 等权市净率, 市净率中位数
+        daily_df: 指数日线（含 volume，来自 stock_zh_index_daily）；传入才会写入成交量。
 
         注意: akshare 不直接返回分位数，我们基于全部历史数据自己计算。
         """
@@ -484,6 +498,22 @@ class DataCollector:
                 "pe_pct": 0,  # 逐日分位计算太慢，先存0，后续优化
             }
 
+        # 成交量映射：指数日线自带 volume；缺它则温度计的量能维度走降级路径
+        vol_map = {}
+        if daily_df is not None and not daily_df.empty:
+            try:
+                cols = [str(c) for c in daily_df.columns]
+                date_col = cols.index("date") if "date" in cols else 0
+                vol_col = cols.index("volume") if "volume" in cols else None
+                if vol_col is not None:
+                    for _, row in daily_df.iterrows():
+                        d = str(row.iloc[date_col])[:10]
+                        v = self._to_float(row.iloc[vol_col])
+                        if v and v > 0:
+                            vol_map[d] = v
+            except Exception:
+                vol_map = {}
+
         records = []
         for _, row in pb_df.iterrows():
             date_str = str(row.iloc[0])
@@ -495,6 +525,7 @@ class DataCollector:
                 "index_code": index_code,
                 "trade_date": date_str,
                 "close": close_val,
+                "volume": vol_map.get(date_str),
                 "pe": pe_data.get("pe", 0) or 0,
                 "pb": pb_val,
                 "pe_percentile": pe_data.get("pe_pct", 0),
@@ -505,18 +536,26 @@ class DataCollector:
             self._insert_index_daily_batch(records)
 
     def _insert_index_daily_batch(self, records: list):
-        """批量插入指数日线数据"""
-        cursor = self.db.conn.cursor()
-        cursor.executemany("""
-            INSERT OR IGNORE INTO index_daily
-            (index_code, trade_date, close, pe, pb, pe_percentile, pb_percentile)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
-        """, [
-            (r["index_code"], r["trade_date"], r["close"],
-             r["pe"], r["pb"], r["pe_percentile"], r["pb_percentile"])
-            for r in records
-        ])
-        self.db.conn.commit()
+        """批量插入指数日线数据（自动提交模式下需显式包成一个事务）"""
+        if not records:
+            return
+        with self.db.immediate():
+            self.db.conn.executemany("""
+                INSERT OR IGNORE INTO index_daily
+                (index_code, trade_date, close, volume, pe, pb, pe_percentile, pb_percentile)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """, [
+                (r["index_code"], r["trade_date"], r["close"], r.get("volume"),
+                 r["pe"], r["pb"], r["pe_percentile"], r["pb_percentile"])
+                for r in records
+            ])
+            # 已存在的历史行（此前 volume 为 NULL）：只补成交量，绝不覆盖 close/pe/pb
+            has_vol = [r for r in records if r.get("volume")]
+            if has_vol:
+                self.db.conn.executemany(
+                    "UPDATE index_daily SET volume = ? "
+                    "WHERE index_code = ? AND trade_date = ? AND volume IS NULL",
+                    [(r["volume"], r["index_code"], r["trade_date"]) for r in has_vol])
 
     # =================================================================
     # 工具方法

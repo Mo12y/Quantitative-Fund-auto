@@ -74,12 +74,8 @@ class SectorAnalyzer:
         strongest = scored[:5]
         weakest = scored[-5:]
 
-        # 超跌反弹候选: 近1月跌>10% 但 近6月>0 且 在120日线附近
-        value_candidates = []
-        for s in scored:
-            if s["ret_1m"] < -8 and s["ma_ratio"] > 0.85:
-                value_candidates.append(s)
-        value_candidates.sort(key=lambda x: x["ret_1m"])
+        # 超跌反弹候选: 近1月跌超8% 但 近6月>0 且 站上120日线
+        value_candidates = self._pick_value_candidates(scored)
 
         # 动量领涨: 近3月>0 且 价格在60日线上方
         momentum_leaders = []
@@ -97,6 +93,27 @@ class SectorAnalyzer:
             "all_sectors": scored,
             "analyzed_at": datetime.now().strftime("%Y-%m-%d %H:%M"),
         }
+
+    # =================================================================
+    # 候选筛选（纯逻辑，可单测）
+    # =================================================================
+
+    @staticmethod
+    def _pick_value_candidates(scored: list) -> list:
+        """超跌反弹候选：近1月跌超8% **且** 近6月收益>0 **且** 站上120日均线。
+
+        三个条件缺一不可。旧实现只看"短期跌 + 价格高于 MA60 的 85%"，
+        会把**持续单边下跌**的板块当成反弹候选（接飞刀）——近6月>0 保证长期
+        趋势未坏，站上120日线确保未破位。
+        """
+        out = [
+            s for s in scored
+            if s.get("ret_1m", 0) < -8
+            and s.get("ret_6m", 0) > 0
+            and s.get("ma120_ratio", 1.0) > 1.0
+        ]
+        out.sort(key=lambda x: x["ret_1m"])
+        return out
 
     # =================================================================
     # 数据采集

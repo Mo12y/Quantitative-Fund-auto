@@ -2,6 +2,7 @@
 数据采集命令：test / init / index / collect / nav / enrich / hithink。
 """
 
+import os
 import time
 
 import akshare as ak
@@ -11,9 +12,12 @@ from src.data.database import Database
 from src.data.hithink_collector import quick_test as hithink_quick_test
 
 
-# 同花顺 API Key（从 .env 读取）
+# 同花顺 API Key（.env 或环境变量 HITHINK_API_KEY 皆可）
 def _load_api_key():
-    """从 .env 读取 HITHINK_API_KEY"""
+    """读取 HITHINK_API_KEY：优先环境变量，其次 .env"""
+    env_key = os.environ.get("HITHINK_API_KEY", "").strip()
+    if env_key:
+        return env_key
     try:
         with open(".env") as f:
             for line in f:
@@ -70,10 +74,17 @@ def cmd_index():
     print()
 
     indices = {
-        "000300": {"name": "沪深300", "pe_sym": "沪深300", "pb_sym": "沪深300"},
-        "000905": {"name": "中证500", "pe_sym": "中证500", "pb_sym": "中证500"},
-        "000016": {"name": "上证50",  "pe_sym": "上证50",  "pb_sym": "上证50"},
+        "000300": {"name": "沪深300", "pe_sym": "沪深300", "pb_sym": "沪深300", "daily_sym": "sh000300"},
+        "000905": {"name": "中证500", "pe_sym": "中证500", "pb_sym": "中证500", "daily_sym": "sh000905"},
+        "000016": {"name": "上证50",  "pe_sym": "上证50",  "pb_sym": "上证50",  "daily_sym": "sh000016"},
     }
+
+    def _fetch_daily(sym):
+        """指数日线（含 volume）——失败不阻断 PE/PB 入库，只让量能维度走降级路径"""
+        try:
+            return ak.stock_zh_index_daily(symbol=sym)
+        except Exception:
+            return None
 
     for code, info in indices.items():
         print(f"  [{info['name']}] 采集PE/PB ...")
@@ -86,7 +97,10 @@ def cmd_index():
             print(f"      PB: {len(pb_df)} 条 ({str(pb_df['日期'].iloc[0])[:10]} ~ {str(pb_df['日期'].iloc[-1])[:10]})")
             time.sleep(0.5)
 
-            collector.save_index_val_to_db(code, pe_df, pb_df)
+            daily_df = _fetch_daily(info["daily_sym"])
+            print(f"      日线(成交量): {len(daily_df) if daily_df is not None else 0} 条")
+
+            collector.save_index_val_to_db(code, pe_df, pb_df, daily_df)
             print(f"      ✅ 已入库")
         except Exception as e:
             # 重试一次
@@ -95,7 +109,8 @@ def cmd_index():
             try:
                 pe_df = ak.stock_index_pe_lg(symbol=info["pe_sym"])
                 pb_df = ak.stock_index_pb_lg(symbol=info["pb_sym"])
-                collector.save_index_val_to_db(code, pe_df, pb_df)
+                daily_df = _fetch_daily(info["daily_sym"])
+                collector.save_index_val_to_db(code, pe_df, pb_df, daily_df)
                 print(f"      ✅ 重试成功")
             except Exception as e2:
                 print(f"      ❌ 仍失败: {e2}")
@@ -152,7 +167,7 @@ def cmd_collect():
         index_results = collector.collect_all_index_valuations()
         for code, data in index_results.items():
             if "pe" in data and "pb" in data:
-                collector.save_index_val_to_db(code, data["pe"], data["pb"])
+                collector.save_index_val_to_db(code, data["pe"], data["pb"], data.get("daily"))
                 print(f"        ✅ {code} 指数估值已保存")
             else:
                 print(f"        ⚠️ {code} PE/PB数据不完整，跳过")
@@ -253,8 +268,7 @@ def cmd_enrich():
     collector = DataCollector(db)
     cur = db.conn.cursor()
 
-    cur.execute("SELECT DISTINCT fund_code FROM fund_nav")
-    existing_codes = [r[0] for r in cur.fetchall()]
+    existing_codes = sorted(db.get_all_fund_codes())
     print(f"📊 已有 {len(existing_codes)} 只有净值数据的基金")
     print(f"   为缺少详细信息的基金补充数据...")
     print()
@@ -286,6 +300,41 @@ def cmd_enrich():
     print(f"✅ 补充完成！新增: {success} 只, 已有: {skip} 只")
     print(f"   现在质量筛选可以区分🟢稳健和🟡注意了")
     print("=" * 60)
+
+
+def cmd_calendar():
+    """刷新交易日历（T+1 确认 / 定投跳过节假日用）"""
+    db = Database("data/fund_quant.db")
+    dates, src = [], None
+    try:
+        import akshare as ak
+        df = ak.tool_trade_date_hist_sina()
+        col = "trade_date" if "trade_date" in df.columns else df.columns[0]
+        dates = [str(x)[:10] for x in df[col].tolist()]
+        src = "akshare"
+    except Exception as e:
+        print(f"⚠️ akshare 交易日历获取失败: {str(e)[:80]}")
+
+    if not dates:
+        path = os.path.join("data", "trade_calendar.csv")
+        if os.path.exists(path):
+            try:
+                import csv
+                with open(path, newline="", encoding="utf-8") as f:
+                    rows = list(csv.reader(f))
+                dates = [r[0].strip()[:10] for r in rows[1:] if r and r[0].strip()]
+                src = path
+            except Exception as e:
+                print(f"⚠️ 读取 {path} 失败: {str(e)[:80]}")
+
+    if dates:
+        db.upsert_trade_dates(dates)
+        print(f"✅ 交易日历已更新: {len(dates)} 个交易日（来源: {src}）")
+        print(f"   覆盖: {min(dates)} ~ {max(dates)}")
+    else:
+        print("ℹ️ 未获取到交易日历；将回退为“跳过周末”规则（T+1 仍可用，只是不识别法定节假日）。")
+        print("   可放置 data/trade_calendar.csv（首行表头 trade_date）后重跑本命令。")
+    db.close()
 
 
 def cmd_hithink():

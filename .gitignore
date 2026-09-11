@@ -13,11 +13,29 @@ venv/
 env/
 
 # --- 数据库 ---
+# 只忽略 *.db 是不够的：SQLite 的 WAL/SHM 伴生文件里同样有真实数据
 data/*.db
+data/*.db-wal
+data/*.db-shm
+data/_snapshot_*.db
 *.db
+*.db-wal
+*.db-shm
+
+# --- data/ 下的运行时不入库（都能由脚本重跑 / 重新采集）---
+# _backup_rows 删行前的真实数据备份
+data/backups/
+# 行情缓存（sw_sector_daily.csv 单个就 7MB+）
+data/cache/
+data/trade_calendar.csv
+# 研究模块输出（vol / drawdown / portfolio / factor）
+data/*_results/
 
 # --- 运行时缓存 ---
 data/sectors_cache.json
+
+# --- 真实持仓截图（市值/盈亏/定投明细，直观程度高于 investment_plan.py）---
+docs/screenshots/
 
 # --- 报告输出 ---
 reports/

@@ -30,6 +30,11 @@ class RebalanceInstruction:
     priority: int     # 1=最优先, 2=其次, 3=最后
 
 
+# 触发调仓的权益仓位偏差阈值(百分点)。used by 指令生成 与 need_rebalance，二者一致，
+# 避免“指令建议调仓 但 need_rebalance=False”的矛盾。
+REBALANCE_PP = 5.0
+
+
 class RebalanceAdvisor:
     """辅助调仓顾问"""
 
@@ -42,12 +47,13 @@ class RebalanceAdvisor:
     # 主接口
     # =================================================================
 
-    def analyze(self, total_capital: float = None) -> dict:
+    def analyze(self, total_capital: float = None, cash_reserve: float = 0.0) -> dict:
         """
         分析当前持仓，生成调仓建议。
 
         Args:
-            total_capital: 总资金(含余额宝), 不传则用持仓总市值
+            total_capital: 总资金；不传则 = 持仓市值 + cash_reserve（投资计划的现金弹药）
+            cash_reserve: 计划里的现金底仓，作为未投资部分的资金
 
         Returns:
             dict: 包含完整的调仓方案
@@ -56,20 +62,21 @@ class RebalanceAdvisor:
         temp = self.thermometer.get_temperature()
         holdings = self.db.get_current_holdings()
 
-        if total_capital is None:
-            total_capital = sum(h["buy_amount"] for h in holdings)
-
-        # 2. 计算当前状态
+        # 2. 计算当前状态（总资金按"市值 + 现金弹药"口径，不再拍脑袋乘系数）
         portfolio_value = self._calc_portfolio_value(holdings)
-        cash = total_capital - sum(h["buy_amount"] for h in holdings)
+        if total_capital is None:
+            total_capital = portfolio_value + float(cash_reserve or 0)
+        cash = max(0.0, total_capital - portfolio_value)
 
-        current_equity_pct = 0
+        # 权益占比用**市值**（与持仓卡口径统一；旧版用成本 buy_amount，浮盈浮亏不进判断）
         equity_types = {"股票型", "混合型", "指数型", "QDII"}
+        equity_mv = 0.0
         for h in holdings:
             info = self._get_fund_info(h["fund_code"])
             ftype = info.get("fund_type", "") if info else ""
             if any(et in ftype for et in equity_types) or "股票" in ftype or "混合" in ftype:
-                current_equity_pct += (h.get("buy_amount", 0) / total_capital * 100) if total_capital > 0 else 0
+                equity_mv += self._holding_value(h)
+        current_equity_pct = (equity_mv / total_capital * 100) if total_capital > 0 else 0
 
         target_equity_pct = temp["target_equity_pct"]
 
@@ -89,7 +96,7 @@ class RebalanceAdvisor:
             "total_capital": total_capital,
             "portfolio_value": portfolio_value,
             "cash_available": cash,
-            "need_rebalance": abs(current_equity_pct - target_equity_pct) > 10,
+            "need_rebalance": abs(current_equity_pct - target_equity_pct) > REBALANCE_PP,
             "gap_pct": round(target_equity_pct - current_equity_pct, 1),
             "temperature": temp,
             "instructions": [self._serialize_instruction(i) for i in instructions],
@@ -108,10 +115,8 @@ class RebalanceAdvisor:
             result = self.screener._screen_single_fund(h["fund_code"], info) if info else None
             risk = result if result else {"risk_label": "未知", "risk_reasons": [], "metrics": {}}
 
-            shares = h.get("shares", 0)
             bought = h["buy_amount"]
-            latest_nav = self._get_latest_nav(h["fund_code"])
-            current_value = shares * latest_nav if shares and latest_nav else bought
+            current_value = self._holding_value(h)
             pnl_pct = (current_value - bought) / bought * 100 if bought else 0
 
             fund_risks.append({
@@ -154,7 +159,7 @@ class RebalanceAdvisor:
                 sell_ratio = 0.3
 
             sell_amount = min(fr["current_value"] * sell_ratio, sell_needed)
-            sell_amount = max(sell_amount, 10)  # 最少10元起卖(手续费考虑)
+            sell_amount = min(max(sell_amount, 10), sell_needed)  # ≥¥10起卖但不超过仍需卖出额
 
             reason_parts = []
             if risk_label in ("🔴 高风险", "🟡 注意"):
@@ -248,18 +253,19 @@ class RebalanceAdvisor:
                                 total_cap, port_value, cash):
         """根据目标仓位与当前仓位的偏差生成买卖/持有指令。
 
-        分三档：偏差>5% 减仓 / 偏差<-5% 加仓 / 否则持有。
-        各档逻辑见 _build_reduce/_build_increase/_build_hold_instructions。
+        触发条件基于权益仓位偏差(百分点)而非金额：|偏差|>REBALANCE_PP 才调仓，与 need_rebalance 一致。
+        否则持有。
         """
         if total_cap == 0:
             return []
 
-        gap_amount = (target_eq - current_eq) / 100 * total_cap
+        gap_pp = target_eq - current_eq                # 百分点偏差（正=权益不足需加仓）
+        gap_amount = gap_pp / 100.0 * total_cap        # 折算成金额(元)，供买卖量用
         fund_risks = self._assess_holdings(holdings)
 
-        if gap_amount < -5:  # 权益过多，需要减仓
+        if gap_pp < -REBALANCE_PP:   # 权益过多，需要减仓
             return self._build_reduce_instructions(fund_risks, gap_amount, total_cap, current_eq, target_eq)
-        if gap_amount > 5:  # 权益不足，可以加仓
+        if gap_pp > REBALANCE_PP:    # 权益不足，可以加仓
             return self._build_increase_instructions(gap_amount, total_cap, temp, current_eq, target_eq)
         return self._build_hold_instructions(fund_risks, total_cap)
 
@@ -303,24 +309,29 @@ class RebalanceAdvisor:
     # 工具
     # =================================================================
 
+    def _holding_value(self, h: dict) -> float:
+        """持仓市值 = 份额 × 最新净值；缺数据退回买入金额。"""
+        nav = self._get_latest_nav(h["fund_code"])
+        shares = h.get("shares", 0)
+        return float(shares * nav) if nav and shares else float(h["buy_amount"])
+
     def _calc_portfolio_value(self, holdings):
-        total = 0
-        for h in holdings:
-            nav = self._get_latest_nav(h["fund_code"])
-            shares = h.get("shares", 0)
-            total += shares * nav if nav and shares else h["buy_amount"]
-        return round(total, 2)
+        return round(sum(self._holding_value(h) for h in holdings), 2)
 
     def _get_fund_info(self, code):
-        funds = self.db.get_all_funds()
-        for f in funds:
-            if f["fund_code"] == code:
-                return f
-        return {}
+        """单行主键查询（原先每次调 get_all_funds() 全表扫 27,852 行，46 次 ≈ 9s）"""
+        try:
+            return self.db.get_fund_info(code) or {}
+        except Exception:
+            return {}
 
     def _get_latest_nav(self, code):
-        navs = self.db.get_fund_nav(code)
-        return float(navs[-1]["unit_nav"]) if navs else None
+        """LIMIT 1 取最新净值，不再把整段历史读进内存"""
+        try:
+            row = self.db.get_latest_fund_nav(code)
+        except Exception:
+            return None
+        return float(row["unit_nav"]) if row and row.get("unit_nav") is not None else None
 
     def _days_held(self, buy_date):
         try:

@@ -25,6 +25,7 @@ except ImportError:
 from ..data.database import Database
 from ..analysis.thermometer import MarketThermometer
 from ..analysis.portfolio import PortfolioTracker
+from ..analysis.fund_scorer import FundScreener, format_fee
 
 
 class WeeklyReporter:
@@ -43,10 +44,9 @@ class WeeklyReporter:
     ) -> str:
         """生成完整的周度报告。温度稳定则输出极简报告。"""
         temp_data = thermometer.get_temperature()
-        fund_pool = fund_screener.screen_funds(max_results=30)
-        portfolio_data = portfolio.get_portfolio_summary()
+        portfolio_data = portfolio.get_portfolio_summary(reconcile=True)   # 报告前先对账
 
-        # 极简模式: 温度稳定 + 无持仓 + 无重要信号
+        # 极简模式: 温度稳定 + 无持仓 + 无重要信号（先判定再跑昂贵的筛选，省掉多余计算）
         no_holdings = not portfolio_data.get("has_holdings", False)
         no_alerts = not sentiment_data or sentiment_data.get("all_clear", True)
 
@@ -56,6 +56,9 @@ class WeeklyReporter:
             else:
                 print(self._generate_minimal_plain(temp_data))
             return ""
+
+        # 只有真正需要完整报告时才跑质量筛选池
+        fund_pool = fund_screener.screen_funds(max_results=30)
 
         if RICH_AVAILABLE:
             return self._generate_rich_report(temp_data, fund_pool, portfolio_data, fund_screener, sentiment_data)
@@ -171,12 +174,20 @@ class WeeklyReporter:
 
         # 详细分解
         comp = temp_data["components"]
+
+        def _d(v):
+            return f"{v:.0f}°" if v is not None else "缺失"
+
         self.console.print()
-        self.console.print(f"  [dim]PE估值分位数:  {comp['pe_score']:.0f}°  (越高越贵)[/dim]")
-        self.console.print(f"  [dim]PB估值分位数:  {comp['pb_score']:.0f}°  (越高越贵)[/dim]")
-        self.console.print(f"  [dim]股债性价比:    {comp['erp_score']:.0f}°  (越高股票越贵)[/dim]")
-        self.console.print(f"  [dim]成交量热度:    {comp['volume_score']:.0f}°  (天量=高温)[/dim]")
-        self.console.print(f"  [dim]市场情绪:      {comp['sentiment_score']:.0f}°  (贪婪=高温)[/dim]")
+        self.console.print(f"  [dim]PE估值分位数:  {_d(comp['pe_score'])}  (越高越贵)[/dim]")
+        self.console.print(f"  [dim]PB估值分位数:  {_d(comp['pb_score'])}  (越高越贵)[/dim]")
+        self.console.print(f"  [dim]股债性价比:    {_d(comp['erp_score'])}  (越高股票越贵)[/dim]")
+        self.console.print(f"  [dim]成交量热度:    {_d(comp['volume_score'])}  (天量=高温)[/dim]")
+        self.console.print(f"  [dim]市场情绪:      {_d(comp['sentiment_score'])}  (贪婪=高温)[/dim]")
+        if temp_data.get("degraded_dimensions"):
+            self.console.print(
+                f"  [yellow]⚠️ 数据缺失维度已剔除并按剩余权重归一化: "
+                f"{', '.join(temp_data['degraded_dimensions'])}[/yellow]")
 
         # 估值分歧
         div = temp_data.get("divergence", {})
@@ -263,7 +274,11 @@ class WeeklyReporter:
             parts = []
             for label, count in summary.get("by_risk", {}).items():
                 parts.append(f"{label}: {count}只")
-            self.console.print(f"  [dim]筛选结果: {summary['total']}只 | {' | '.join(parts)} | 平均费率: {summary['avg_fee']:.2f}%[/dim]")
+            _n = summary.get("fee_n", 0)
+            self.console.print(
+                f"  [dim]筛选结果: {summary['total']}只 | {' | '.join(parts)} | "
+                f"平均费率: {summary['avg_fee']:.2f}%"
+                f"（仅 {_n} 只有费率数据；缺失不计入平均）[/dim]")
 
         self.console.print()
 
@@ -290,7 +305,7 @@ class WeeklyReporter:
                     tag = "[red]!![/red]"
 
                 # 基金基本信息
-                line = f"  {tag} [cyan]{code}[/cyan] {name:<24} 费率{fee:.2f}%"
+                line = f"  {tag} [cyan]{code}[/cyan] {name:<24} 费率{format_fee(fee)}"
 
                 # 关键指标(从metrics取)
                 metrics = row.get("metrics", {})
@@ -393,7 +408,7 @@ class WeeklyReporter:
                     warning = f" ⚠️{reasons[0]}" if reasons else ""
                     lines.append(
                         f"  {row['fund_code']} {str(row['fund_name'])[:22]:<24} "
-                        f"费率{row['mgt_fee']:.2f}% 近3月{mom:+.0f}% 回撤{dd:.0f}%{warning}"
+                        f"费率{format_fee(row.get('mgt_fee'))} 近3月{mom:+.0f}% 回撤{dd:.0f}%{warning}"
                     )
 
         # 持仓
@@ -440,7 +455,7 @@ def quick_report():
     运行: python -m src.output.reporter
     """
     db = Database("data/fund_quant.db")
-    scorer = FundScorer(db)
+    scorer = FundScreener(db)
     thermometer = MarketThermometer(db)
     portfolio = PortfolioTracker(db)
     reporter = WeeklyReporter(db)

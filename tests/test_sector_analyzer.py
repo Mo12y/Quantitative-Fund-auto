@@ -61,5 +61,41 @@ class TestScoreAll(unittest.TestCase):
         self.assertEqual(len(scores), 1)
 
 
+class TestValueCandidates(unittest.TestCase):
+    """A8: 超跌反弹候选必须同时满足 近1月跌超8% + 近6月>0 + 站上120日线"""
+
+    def setUp(self):
+        self.analyzer = SectorAnalyzer()
+
+    def _row(self, name, ret_1m, ret_6m, ma120_ratio):
+        return {"name": name, "ret_1m": ret_1m, "ret_3m": 0.0, "ret_6m": ret_6m,
+                "ma_ratio": 1.0, "ma120_ratio": ma120_ratio, "ma_slope": 0.0,
+                "volatility": 20, "max_dd_6m": 10}
+
+    def test_persistent_downtrend_not_selected(self):
+        """持续单边下跌（近6月<0）不得被选为超跌反弹候选 —— 这是"接飞刀"防护"""
+        scored = [self._row("持续下跌", ret_1m=-15, ret_6m=-25, ma120_ratio=0.7)]
+        self.assertEqual(self.analyzer._pick_value_candidates(scored), [])
+
+    def test_below_120ma_not_selected(self):
+        """跌破120日线（趋势已破）不得入选"""
+        scored = [self._row("破位", ret_1m=-10, ret_6m=5, ma120_ratio=0.95)]
+        self.assertEqual(self.analyzer._pick_value_candidates(scored), [])
+
+    def test_valid_pullback_selected(self):
+        """短期超跌但长期趋势未破 + 站上120日线 → 入选"""
+        scored = [self._row("健康回调", ret_1m=-9, ret_6m=8, ma120_ratio=1.02)]
+        got = self.analyzer._pick_value_candidates(scored)
+        self.assertEqual([s["name"] for s in got], ["健康回调"])
+
+    def test_sorted_by_worst_recent(self):
+        scored = [
+            self._row("小跌", ret_1m=-8.5, ret_6m=3, ma120_ratio=1.01),
+            self._row("大跌", ret_1m=-20, ret_6m=6, ma120_ratio=1.05),
+        ]
+        got = self.analyzer._pick_value_candidates(scored)
+        self.assertEqual([s["name"] for s in got], ["大跌", "小跌"])
+
+
 if __name__ == "__main__":
     unittest.main()

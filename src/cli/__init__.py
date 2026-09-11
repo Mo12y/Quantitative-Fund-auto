@@ -9,6 +9,7 @@ from src.cli.data_cmds import (
     cmd_nav,
     cmd_enrich,
     cmd_hithink,
+    cmd_calendar,
 )
 from src.cli.analysis_cmds import (
     cmd_score,
@@ -19,6 +20,7 @@ from src.cli.analysis_cmds import (
     cmd_sector,
     cmd_recommend,
     cmd_plan,
+    cmd_precompute,
 )
 from src.cli.backtest_cmds import (
     cmd_backtest,
@@ -46,6 +48,7 @@ COMMANDS = {
     "nav": cmd_nav,
     "enrich": cmd_enrich,
     "hithink": cmd_hithink,
+    "calendar": cmd_calendar,
     "score": cmd_score,
     "temp": cmd_temp,
     "sentiment": cmd_sentiment,
@@ -54,6 +57,7 @@ COMMANDS = {
     "sector": cmd_sector,
     "recommend": cmd_recommend,
     "plan": cmd_plan,
+    "precompute": cmd_precompute,
     "backtest": cmd_backtest,
     "backtest2": cmd_backtest2,
     "backtest3": cmd_backtest3,
