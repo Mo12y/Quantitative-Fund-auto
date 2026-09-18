@@ -183,7 +183,11 @@ class PortfolioTracker:
                     nav = self._get_nav_exact(h["fund_code"], effective)
                     if not nav or nav <= 0:
                         continue                      # 净值未公布 → 保持待确认
-                    shares = round((h.get("buy_amount") or 0) / nav, 2)
+                    # 申购份额 = 净申购金额 / 净值（与 add_buy_transaction 同口径）。
+                    # 费用在申请时已记入 transactions.fee；这里不回填历史流水的 fee（铁律 3）。
+                    fee_rate = purchase_fee_rate(h.get("fund_name"))
+                    net = float(h.get("buy_amount") or 0) / (1.0 + fee_rate)
+                    shares = round(net / nav, 2)
                     with self.db.immediate():
                         self.db.update_holding(h["id"], buy_nav=nav, confirm_nav=nav,
                                                shares=shares, status="holding")
@@ -488,11 +492,18 @@ class PortfolioTracker:
         confirm_nav = None
         shares = 0.0
         status = "pending_confirm"
+        # 前端申购费（单一真源 purchase_fee_rate，按份额类别）—— 权威口径（D1 费率页原文）：
+        #   净申购金额 = 申购金额 / (1 + 申购费率)；申购费用 = 申购金额 − 净申购金额；
+        #   申购份额   = 净申购金额 / T日基金份额净值。
+        # 费用与净值无关，申请时即可入账；C/E/I 类费率 0 → 费用 0、份额与旧口径完全一致。
+        fee_rate = purchase_fee_rate(fund_name)
+        net_amount = amount / (1.0 + fee_rate)
+        fee = round(amount - net_amount, 2)
         # 确认日到了 ⇒ 生效日净值已公布，可以算份额
         if str(confirm_date) <= today:
             confirm_nav = self._get_nav_exact(fund_code, effective)
             if confirm_nav and confirm_nav > 0:
-                shares = round(amount / confirm_nav, 2)
+                shares = round(net_amount / confirm_nav, 2)
                 status = "holding"
             else:
                 status = "pending_confirm"     # 净值未公布，等 reconcile()
@@ -519,6 +530,7 @@ class PortfolioTracker:
                     "apply_date": apply_date, "apply_after_cutoff": int(ac),
                     "confirm_date": confirm_date, "confirm_nav": confirm_nav,
                     "accrual_start": accrual_start, "shares": shares, "amount": amount,
+                    "fee": fee,
                     "status": "confirmed" if status == "holding" else "pending_confirm",
                     "notes": notes,
                 })

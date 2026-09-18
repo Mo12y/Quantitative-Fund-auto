@@ -28,6 +28,7 @@ from ..config import get_config
 from ..data.database import Database
 from .portfolio import redeem_fee_rate, purchase_fee_rate
 from .nav_series import valuation_nav, valuation_nav_series
+from .risk_free import RISK_FREE_ANNUAL
 
 
 # =====================================================================
@@ -95,13 +96,14 @@ def compute_max_drawdown(nav: np.ndarray) -> float:
     return float(dd.max() * 100)
 
 
-def compute_metrics(returns: np.ndarray, rf_annual: float = 0.02) -> Dict:
+def compute_metrics(returns: np.ndarray, rf_annual: float = RISK_FREE_ANNUAL) -> Dict:
     """
     从月频收益序列（百分数）计算业绩指标。
 
     **单位约定（务必看清）**：
     - 入参 `returns`：月收益，单位 **百分数**（1.5 表示 1.5%）
     - 入参 `rf_annual`：无风险利率（年化），单位 **小数**（`0.02` 表示 2%），
+      默认值来自单一真源 `risk_free.RISK_FREE_ANNUAL`（批次 4.7，全项目统一），
       与 `vol_predictor._portfolio_metrics` 同语义
     - **返回值**：`total_return` / `annual_return` / `annual_volatility` /
       `max_drawdown` 均为**百分数**；`sharpe` 无量纲

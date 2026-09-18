@@ -401,58 +401,64 @@ class Database:
 
     # ========== 基金信息操作 ==========
 
+    # upsert 允许写入的字段清单（局部更新语义，见 upsert_fund_info）
+    _FUND_INFO_FIELDS = (
+        "fund_name", "fund_type", "establish_date", "fund_size",
+        "mgt_fee", "custodian_fee", "purchase_fee", "redeem_fee",
+        "manager_name", "manager_tenure", "company_name",
+        "purchase_status", "risk_level", "investment_style", "benchmark",
+    )
+    # 数字字段里 0 视为「未采到」：费率/规模/年限为 0 没有业务意义，
+    # 且批量路径缺列时会把默认 "0%" 解析成 0 —— COALESCE 拦得住 NULL 拦不住 0
+    _FUND_INFO_NUMERIC = frozenset(
+        {"fund_size", "mgt_fee", "custodian_fee", "purchase_fee", "manager_tenure"})
+
+    def _has_new_value(self, field: str, v) -> bool:
+        """该字段的新值是否足以覆盖旧值：非空；数字字段还要求非 0。"""
+        if v is None or v == "":
+            return False
+        if field in self._FUND_INFO_NUMERIC:
+            try:
+                if float(v) == 0:
+                    return False
+            except (TypeError, ValueError):
+                return True           # 非数字内容按文本的「非空」规则处理
+        return True
+
     def upsert_fund_info(self, fund: dict):
         """
-        插入或更新基金基本信息。
+        插入或更新基金基本信息（**局部更新**语义，批次 4.2 根因修复）。
 
-        Args:
-            fund: 基金信息字典
+        背景：两条采集路径各采一半字段 —— 批量列表路径有费率/申购状态，
+        enrich 详情路径有规模/公司/经理/成立日。旧版全字段覆盖导致
+        **谁后跑谁清空对方的数据**（实测两集合完美互斥：费率>0 且有规模的 = 0）。
+
+        现在的规则：
+        - INSERT：未提供的字段写 NULL（新基金没有旧值可保护）；
+        - ON CONFLICT UPDATE：只 SET 本次**真正采到值**的字段 ——
+          NULL / 空串一律不覆盖；数字字段（费率/规模/年限）的 0 同样视为
+          未采到、不覆盖。`redeem_fee` 原有的 COALESCE 行为被本规则包含。
+
+        代价（已知且接受）：已入库的字段无法通过 upsert「清空」，只能被
+        新的非空值覆盖；确需清空请显式 UPDATE。
         """
+        cols = ["fund_code"] + list(self._FUND_INFO_FIELDS) + ["updated_at"]
+        placeholders = ["?"] * (len(cols) - 1) + ["datetime('now','localtime')"]
+        sets = [f"{f}=excluded.{f}" for f in self._FUND_INFO_FIELDS
+                if self._has_new_value(f, fund.get(f))]
+        sets.append("updated_at=datetime('now','localtime')")
+        # fund_name 有 NOT NULL 约束：新基金没给名字时写空串
+        # （只发生在 INSERT；更新路径空串不会覆盖，见 _has_new_value）
+        name_val = fund.get("fund_name")
+        params = [fund.get("fund_code")] + [
+            ("" if (f == "fund_name" and name_val is None) else fund.get(f))
+            for f in self._FUND_INFO_FIELDS]
         cursor = self.conn.cursor()
-        cursor.execute("""
-            INSERT INTO fund_info (
-                fund_code, fund_name, fund_type, establish_date,
-                fund_size, mgt_fee, custodian_fee, purchase_fee,
-                redeem_fee, manager_name, manager_tenure,
-                company_name, purchase_status,
-                risk_level, investment_style, benchmark, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now','localtime'))
-            ON CONFLICT(fund_code) DO UPDATE SET
-                fund_name=excluded.fund_name,
-                fund_type=excluded.fund_type,
-                establish_date=excluded.establish_date,
-                fund_size=excluded.fund_size,
-                mgt_fee=excluded.mgt_fee,
-                custodian_fee=excluded.custodian_fee,
-                purchase_fee=excluded.purchase_fee,
-                -- 赎回费率常常采不到：新值为 NULL 时保留旧值，避免一次无数据的 enrich 把已有费率清掉
-                redeem_fee=COALESCE(excluded.redeem_fee, fund_info.redeem_fee),
-                manager_name=excluded.manager_name,
-                manager_tenure=excluded.manager_tenure,
-                company_name=excluded.company_name,
-                purchase_status=excluded.purchase_status,
-                risk_level=excluded.risk_level,
-                investment_style=excluded.investment_style,
-                benchmark=excluded.benchmark,
-                updated_at=datetime('now','localtime')
-        """, (
-            fund.get("fund_code"),
-            fund.get("fund_name"),
-            fund.get("fund_type"),
-            fund.get("establish_date"),
-            fund.get("fund_size"),
-            fund.get("mgt_fee"),
-            fund.get("custodian_fee"),
-            fund.get("purchase_fee"),
-            fund.get("redeem_fee"),
-            fund.get("manager_name"),
-            fund.get("manager_tenure"),
-            fund.get("company_name"),
-            fund.get("purchase_status"),
-            fund.get("risk_level"),
-            fund.get("investment_style"),
-            fund.get("benchmark"),
-        ))
+        cursor.execute(
+            "INSERT INTO fund_info (" + ",".join(cols) + ") "
+            "VALUES (" + ",".join(placeholders) + ") "
+            "ON CONFLICT(fund_code) DO UPDATE SET " + ", ".join(sets),
+            params)
         self.conn.commit()
 
     def get_all_funds(self) -> list:

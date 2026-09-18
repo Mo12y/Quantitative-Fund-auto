@@ -48,11 +48,15 @@ def cmd_score():
                 metrics = row.get("metrics", {})
                 mom = metrics.get("momentum_3m", 0) or 0
                 dd = metrics.get("max_drawdown_1y", 0) or 0
+                # 综合评分（批次 4.1）：类型桶内归一化，同风险等级内的排序依据
+                score = row.get("quality_score")
+                score_txt = f"{score:.0f}" if score is not None and score == score else "--"
 
                 # mgt_fee 缺失时（长历史基金很常见）必须显示"无数据"而不是 0.00%，
                 # 否则会被读成"零费率"
                 _fee_txt = format_fee(row.get("mgt_fee"))
-                print(f"  {row['fund_code']} {str(row['fund_name'])[:28]:<30} 费率{_fee_txt:<8} 近3月{mom:+.0f}%  回撤{dd:.0f}%")
+                print(f"  {row['fund_code']} {str(row['fund_name'])[:28]:<30} "
+                      f"评分{score_txt:>4} 费率{_fee_txt:<8} 近3月{mom:+.0f}%  回撤{dd:.0f}%")
 
                 reasons = row.get("risk_reasons", [])
                 for r in reasons:
@@ -295,12 +299,17 @@ def cmd_sector():
 
 
 def cmd_recommend():
-    """历史验证推荐: 基于3年回测, 找出持续被选中且真的赚了钱的基金"""
+    """历史回测验证（辅助参考路径）：基于回测找出持续被选中且真的赚了钱的基金"""
     db = Database("data/fund_quant.db")
     hr = HistoricalRecommender(db)
 
-    print("🔄 历史回测推荐引擎运行中...")
-    print("   (80只基金 · 每2月打分 · 约1.5年数据)")
+    print("🔄 历史回测验证引擎运行中...")
+    print("   (候选池按类型分层随机抽样 · 每月末打分 · 约1.5年数据)")
+    print()
+    print("⚠️ 口径说明（批次 4.3/4.9）：")
+    print("   - 这是**历史回测验证**，不是主推荐；主推荐 = 温度驱动的实时筛选（score 命令）。")
+    print("   - 下列结果为**样本内**历史表现：用已实现的前向收益筛选“赢家”存在")
+    print("     同义反复，不构成样本外的选基能力证据，仅作参考。")
     print()
     result = hr.recommend(lookback_years=1.5)
 
@@ -314,11 +323,20 @@ def cmd_recommend():
     print("📊 历史回测统计")
     print("=" * 60)
     print(f"  回测周期: {stats['date_range']} ({stats['total_months']}个月)")
-    print(f"  候选基金: {stats['total_candidates']}只")
+    print(f"  候选基金: {stats['total_candidates']}只"
+          f"（权益 {stats.get('candidates_equity', '?')} / 非权益 {stats.get('candidates_bond', '?')}，"
+          f"分层随机抽样）")
     print(f"  被选中过的: {stats['funds_ever_picked']}只")
     print(f"  历史验证: {stats['funds_with_proven_record']}只有效数据")
     print(f"    正收益{stats['proven_good']}只 / 负收益{stats['proven_bad']}只")
     print(f"  Top10平均3月后收益: {stats['top10_avg_3m_return']:+.1f}%")
+    pw_dist = stats.get("proven_type_dist") or {}
+    cp_dist = stats.get("current_type_dist") or {}
+    if pw_dist:
+        print(f"  历史最强类型分布: 权益 {pw_dist.get('equity', 0)} / 非权益 {pw_dist.get('bond', 0)}"
+              f"（按类型分组评分，批次 4.4）")
+    if cp_dist:
+        print(f"  当前推荐类型分布: 权益 {cp_dist.get('equity', 0)} / 非权益 {cp_dist.get('bond', 0)}")
 
     print()
     print("=" * 60)

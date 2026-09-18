@@ -76,7 +76,7 @@ def test_curve_cost_drops_after_partial_sell(tmp_path):
     _nav(db, "C1", "2026-01-09", 1.20)
 
     t = PT(db)
-    hid = t.add_buy_transaction("C1", "C1", "2026-01-05", 100.0)   # 100 份 @1.0
+    hid = t.add_buy_transaction("C1", "一号基金C", "2026-01-05", 100.0)   # 100 份 @1.0
     t.record_sell(hid, "2026-01-08", shares=50)                    # 卖一半
 
     c = t.get_portfolio_curve()

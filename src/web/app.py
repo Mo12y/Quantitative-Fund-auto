@@ -240,11 +240,15 @@ def _all_funds():
         funds = []
         for _, row in df.iterrows():
             m = row.get("metrics", {})
+            fee = row.get("mgt_fee")
+            if fee is None or fee != fee:      # NaN（费率缺失）→ null，不得当 0
+                fee = None
             funds.append({
                 "code": row["fund_code"],
                 "name": row.get("fund_name", "") or "",
                 "type": row.get("fund_type", ""),
-                "fee": row.get("mgt_fee", 0) or 0,
+                "fee": fee,
+                "score": row.get("quality_score"),
                 "risk": row["risk_label"],
                 "purchase_status": row.get("purchase_status", "") or "",
                 "purchasable": row.get("quality_checks", {}).get("申购状态", ""),
@@ -713,7 +717,13 @@ def api_sectors():
 
 @app.route("/api/recommend")
 def api_recommend():
-    """历史验证推荐 — 独立端点, 加载约15-20秒"""
+    """历史回测验证（**辅助参考路径**，批次 4.9 分工）—— 加载约15-20秒。
+
+    与主推荐的分工：
+    - 主路径 = 温度驱动的实时筛选（`/api/strategy` → `screen_funds`，带类型过滤）；
+    - 本端点 = 历史回测验证，回答「过去哪些基金被反复选中且真的赚了钱」。
+    两者结论可能不同，**不是同一件事**，前端/调用方不得混称“推荐”。
+    """
     try:
         db = get_db()
         hr = HistoricalRecommender(db)
@@ -725,7 +735,10 @@ def api_recommend():
             "stats": result.get("stats", {}),
             "proven_winners": result.get("proven_winners", [])[:15],
             "current_picks": result.get("current_picks", [])[:10],
-        }})
+        }, "purpose": "历史回测验证（样本内）——辅助参考，不是主推荐",
+           "methodology_note": ("以下为**样本内**历史表现：用已实现的前向收益筛选"
+                                "“赢家”存在同义反复，不构成样本外的选基能力证据。"
+                                "主推荐请看温度驱动的实时筛选。")})
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)})
 
@@ -1120,10 +1133,14 @@ def _compute_board_pool(size: int, limit: int) -> dict:
         funds = []
         for _, row in df.iterrows():
             m = row.get("metrics", {}) or {}
+            fee = row.get("mgt_fee")
+            if fee is None or fee != fee:      # NaN（费率缺失）→ null，不得当 0
+                fee = None
             funds.append({
                 "code": row["fund_code"], "name": row.get("fund_name", "") or "",
                 "type": row.get("fund_type", ""), "risk": row["risk_label"],
-                "fee": row.get("mgt_fee", 0) or 0,
+                "fee": fee,
+                "score": row.get("quality_score"),
                 "purchase_status": row.get("purchase_status", "") or "",
                 "purchasable": (row.get("quality_checks") or {}).get("申购状态", ""),
                 "momentum_3m": m.get("momentum_3m"), "max_dd_1y": m.get("max_drawdown_1y"),

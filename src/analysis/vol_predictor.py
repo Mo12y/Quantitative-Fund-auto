@@ -53,6 +53,16 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
+
+# 无风险利率单一真源（批次 4.7）。本文件两种运行方式都要能活：
+# ① 被包导入（From src.analysis.vol_predictor import ...）→ 走相对导入；
+# ② 直接脚本运行（python src/analysis/vol_predictor.py）→ 没有包上下文，
+#    退回把项目根塞进 sys.path 再按绝对路径导入（os/sys 已在上方导入）。
+try:
+    from .risk_free import RISK_FREE_ANNUAL
+except ImportError:
+    sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+    from src.analysis.risk_free import RISK_FREE_ANNUAL
 from scipy import stats
 
 warnings.filterwarnings("ignore")
@@ -898,12 +908,13 @@ def portfolio_simulation(ret_wide, pred_df, index_df, oos_start=OOS_START,
     return metrics
 
 
-def _portfolio_metrics(monthly_rets, rf_annual=0.02):
+def _portfolio_metrics(monthly_rets, rf_annual=RISK_FREE_ANNUAL):
     """组合月度收益 -> 年化指标。
 
     **单位约定（与 `backtest.compute_metrics` 的差别就在这里）**：
     - 入参 `monthly_rets`：月收益，单位 **小数**（0.015 表示 1.5%）
-    - `rf_annual`：小数，`0.02` 表示 2%
+    - `rf_annual`：小数，默认来自单一真源 `risk_free.RISK_FREE_ANNUAL`
+      （批次 4.7，全项目统一 0.02）
     - **返回**：`total_return` / `annual_return` / `annual_volatility` /
       `max_drawdown` 均为**小数**；`sharpe` 无量纲
 

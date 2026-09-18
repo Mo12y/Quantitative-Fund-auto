@@ -295,6 +295,9 @@ class WeeklyReporter:
                 name = str(row["fund_name"])[:22]
                 fee = row["mgt_fee"]
                 reasons = row.get("risk_reasons", [])
+                # 综合评分（批次 4.1）：类型桶内归一化，同风险等级内的排序依据
+                score = row.get("quality_score")
+                score_txt = f"{score:.0f}" if score is not None and score == score else "--"
 
                 # 风险标签
                 if risk_label == "🟢 稳健":
@@ -305,7 +308,7 @@ class WeeklyReporter:
                     tag = "[red]!![/red]"
 
                 # 基金基本信息
-                line = f"  {tag} [cyan]{code}[/cyan] {name:<24} 费率{format_fee(fee)}"
+                line = f"  {tag} [cyan]{code}[/cyan] {name:<24} 评分{score_txt} 费率{format_fee(fee)}"
 
                 # 关键指标(从metrics取)
                 metrics = row.get("metrics", {})
@@ -406,9 +409,11 @@ class WeeklyReporter:
                     dd = metrics.get("max_drawdown_1y", 0) or 0
                     reasons = row.get("risk_reasons", [])
                     warning = f" ⚠️{reasons[0]}" if reasons else ""
+                    score = row.get("quality_score")
+                    score_txt = f"{score:.0f}" if score is not None and score == score else "--"
                     lines.append(
                         f"  {row['fund_code']} {str(row['fund_name'])[:22]:<24} "
-                        f"费率{format_fee(row.get('mgt_fee'))} 近3月{mom:+.0f}% 回撤{dd:.0f}%{warning}"
+                        f"评分{score_txt} 费率{format_fee(row.get('mgt_fee'))} 近3月{mom:+.0f}% 回撤{dd:.0f}%{warning}"
                     )
 
         # 持仓

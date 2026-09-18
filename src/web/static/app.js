@@ -388,23 +388,37 @@ function portfolioChartSVG(C){
   const W=760,H=185,l=10,r=10,t=16,b=24;
   const n=(C.dates||[]).length;
   if(n<2)return'';
-  const vals=C.value, costs=C.cost;
-  const all=vals.concat(costs);
-  const mn=Math.min(...all), mx=Math.max(...all), rg=(mx-mn)||1;
+  // 批次5.1：主图画资金加权收益率（return_pct = pnl/cost），不再画市值/成本
+  // （建仓期每日定投会使市值单调上升，画市值与真实盈亏无关且把收益率压成一条缝）
+  const vals=(C.return_pct||[]).map(v=>Number(v)||0);
+  if(vals.length!==n)return'';
+  const mx=Math.max(0,...vals), mn=Math.min(0,...vals);
+  const M=Math.max(Math.abs(mx),Math.abs(mn))||1;          // y 轴关于 0 对称 [-M,+M]，零轴居中
   const x=i=>l+i*(W-l-r)/(n-1);
-  const y=v=>t+(1-(v-mn)/rg)*(H-t-b);
+  const y=v=>t+(1-(v+M)/(2*M))*(H-t-b);
   const pts=a=>a.map((v,i)=>`${x(i).toFixed(1)},${y(v).toFixed(1)}`).join(' ');
-  const area=`${x(0).toFixed(1)},${H-b} `+pts(vals)+` ${x(n-1).toFixed(1)},${H-b}`;
+  const y0=y(0).toFixed(1);                                  // 零轴（盈亏分界）
+  const area=`${x(0).toFixed(1)},${y0} `+pts(vals)+` ${x(n-1).toFixed(1)},${y0}`;
   const step=Math.ceil(n/6);
   const lab=(C.dates||[]).map((d,i)=>i%step===0?`<text x="${x(i).toFixed(1)}" y="${H-7}" font-size="9" fill="#62666d" text-anchor="${i===0?'start':i===n-1?'end':'middle'}">${esc(String(d).slice(5))}</text>`:'').join('');
   const last=vals[n-1], lastX=x(n-1).toFixed(1), lastY=y(last).toFixed(1);
-  const col=(C.pnl&&C.pnl[n-1]>=0)?'#27a644':'#e5484d';
-  return `<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="xMidYMid meet" role="img" aria-label="组合净值曲线">
-    <defs><linearGradient id="cg" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0%" stop-color="${col}" stop-opacity="0.28"/><stop offset="100%" stop-color="${col}" stop-opacity="0"/></linearGradient></defs>
-    ${[0,0.5,1].map(f=>`<line x1="${l}" y1="${(t+f*(H-t-b)).toFixed(1)}" x2="${W-r}" y2="${(t+f*(H-t-b)).toFixed(1)}" stroke="#23252a" stroke-width="1"/>`).join('')}
-    <polygon points="${area}" fill="url(#cg)"/>
-    <polyline points="${pts(costs)}" fill="none" stroke="#62666d" stroke-width="1.2" stroke-dasharray="4 4"/>
+  const col=(last>=0)?'#27a644':'#e5484d';
+  return `<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="xMidYMid meet" role="img" aria-label="组合收益率曲线">
+    <defs>
+      <linearGradient id="cgUp" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0%" stop-color="#27a644" stop-opacity="0.28"/><stop offset="100%" stop-color="#27a644" stop-opacity="0"/></linearGradient>
+      <linearGradient id="cgDn" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0%" stop-color="#e5484d" stop-opacity="0"/><stop offset="100%" stop-color="#e5484d" stop-opacity="0.28"/></linearGradient>
+      <clipPath id="cpUp"><rect x="0" y="0" width="${W}" height="${y0}"/></clipPath>
+      <clipPath id="cpDn"><rect x="0" y="${y0}" width="${W}" height="${(H-Number(y0)).toFixed(1)}"/></clipPath>
+    </defs>
+    <text x="${l}" y="9" font-size="9" fill="#62666d">收益率 %（资金加权：pnl/累计成本，非时间加权）</text>
+    ${[M,-M].map(v=>`<text x="${W-r}" y="${(y(v)+(v>0?9:-2)).toFixed(1)}" font-size="9" fill="#62666d" text-anchor="end">${(v>0?'+':'') + v.toFixed(1)}%</text>`).join('')}
+    ${[M,-M].map(v=>`<line x1="${l}" y1="${y(v).toFixed(1)}" x2="${W-r}" y2="${y(v).toFixed(1)}" stroke="#23252a" stroke-width="1"/>`).join('')}
+    <line x1="${l}" y1="${y0}" x2="${W-r}" y2="${y0}" stroke="#8a8f98" stroke-width="1.4"/>
+    <text x="${W-r}" y="${(Number(y0)-3).toFixed(1)}" font-size="9" fill="#8a8f98" text-anchor="end">0%</text>
+    <polygon points="${area}" fill="url(#cgUp)" clip-path="url(#cpUp)"/>
+    <polygon points="${area}" fill="url(#cgDn)" clip-path="url(#cpDn)"/>
     <polyline points="${pts(vals)}" fill="none" stroke="${col}" stroke-width="1.9" stroke-linejoin="round" stroke-linecap="round"/>
     <circle cx="${lastX}" cy="${lastY}" r="3" fill="${col}"/>
     ${lab}</svg>`;
@@ -424,9 +438,10 @@ function curveCard(C){
   return `<div class="card full" id="curve-card"><h2>组合累计走势 <span class="sub">— 起点 ${esc(String(C.dates[0]))} · ${C.funds_used||0} 只持仓</span></h2>
     <div class="stat-line">当前市值 <b>${fmtMoney(lastVal)}</b> · 累计收益 <b style="color:${tone}">${fmtMoney(lastPnl)}</b> · 收益率 <b style="color:${tone}">${fmtPct(lastRet)}</b></div>
     <div class="pcurve">${portfolioChartSVG(C)}</div>
-    <div class="qlegend"><span class="k"><span class="sw" style="background:${(lastPnl>=0)?'#27a644':'#e5484d'}"></span>组合市值</span>
-      <span class="k"><span class="sw" style="background:#62666d"></span>累计成本</span>
-      ${C.excluded_pending?`<span class="qtag">另有 ${C.excluded_pending} 笔待确认未计入</span>`:''}</div></div>`;
+    <div class="qlegend"><span class="k"><span class="sw" style="background:#27a644"></span>零轴上方（盈利区间）</span>
+      <span class="k"><span class="sw" style="background:#e5484d"></span>零轴下方（亏损区间）</span>
+      ${C.excluded_pending?`<span class="qtag">另有 ${C.excluded_pending} 笔待确认未计入</span>`:''}</div>
+    <div class="qtag" style="margin-top:6px">口径：图中收益率 = pnl / 累计成本，为资金加权持仓收益率（非时间加权）；与「已实现收益（含赎回费）」是两个不同口径，勿混用。</div></div>`;
 }
 
 function allocBars(title, obj, bg){
@@ -697,7 +712,10 @@ function poolHTML(F){
       </span></h2>`;
   if(!funds.length)return head+'<div class="empty">暂无基金数据 · 运行 python src/main.py nav && python src/main.py enrich</div>';
   const summary=F.summary||{};
-  let h=head+`<div class="stat-line">共 ${summary.total||0} 只 · 均费率 ${fmt(summary.avg_fee,2)}%`+
+  // 费率缺失时不得显示"均费率 0.00%"（会被读成零费率），改为显式声明缺失
+  const feeLine=(summary.fee_n>0)?`均费率 ${fmt(summary.avg_fee,2)}%（${summary.fee_n} 只有数据）`
+                                 :`<span class="qtag">费率数据缺失（${summary.total||0} 只均无费率）</span>`;
+  let h=head+`<div class="stat-line">共 ${summary.total||0} 只 · ${feeLine}`+
     (summary.limited_n?` · <span style="color:var(--warn)">限大额 ${summary.limited_n}</span>`:'')+
     (summary.status_unknown_n?` · <span class="qtag">申购状态未知 ${summary.status_unknown_n}</span>`:'')+
     `</div>`;
@@ -720,13 +738,16 @@ function poolRow(f){
   const ddC=dd>30?'var(--red)':(dd>20?'var(--yellow)':'var(--muted)');
   const trendC=mom>=0?'var(--green)':'var(--red)';
   const name=f.name||f.code;
+  // 综合评分（类型桶内归一化，同风险等级内的排序依据；缺失显示 --）
+  const sc=(f.score!==null&&f.score!==undefined&&f.score===f.score)?Math.round(f.score):null;
+  const scoreTag=sc!==null?`<span class="qtag" title="综合评分：类型桶内归一化百分位">评分 ${sc}</span>`:'<span class="qtag" title="综合评分缺失">评分 --</span>';
   // 申购状态是独立一轴：限大额不影响质量等级，单独挂标签（不静默、也不误导）
   const ps=f.purchase_status||'';
   const psTag=ps?`<span class="pill" style="background:var(--surface-2);color:var(--warn)" title="${esc(f.purchasable||ps)}">${esc(ps)}</span>`:'';
   return `<div class="fund-row" style="grid-template-columns:74px 1fr auto">
     <span><span class="fund-code">${esc(f.code)}</span>${riskBadge(f.risk)}</span>
     <span class="fund-name" title="${esc(name)}">${esc(name.length>26?name.slice(0,26)+'…':name)}${psTag}</span>
-    <span class="fund-meta"><span class="sparkline">${sparkSVG(navs,trendC)}</span>
+    <span class="fund-meta"><span class="sparkline">${sparkSVG(navs,trendC)}</span>${scoreTag}
       <span style="color:${momC};min-width:52px;text-align:right;font-weight:600">${mom>=0?'+':''}${fmt(mom,1)}%</span>
       <span class="qtag">回撤 ${fmt(dd,0)}%</span></span></div>`;
 }

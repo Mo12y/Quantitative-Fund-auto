@@ -50,38 +50,38 @@ def screener(db):
 
 class TestCheckPurchasable:
     def test_open_is_pass(self, screener):
-        text, warn, raw = screener._check_purchasable({"purchase_status": "开放申购"})
-        assert text.startswith("✅") and warn is None and raw == "开放申购"
+        level, text, warn, raw = screener._check_purchasable({"purchase_status": "开放申购"})
+        assert level == "pass" and text.startswith("✅") and warn is None and raw == "开放申购"
 
     def test_suspended_is_fail(self, screener):
-        text, warn, raw = screener._check_purchasable({"purchase_status": "暂停申购"})
-        assert text.startswith("❌") and warn and "买不进去" in warn
+        level, text, warn, raw = screener._check_purchasable({"purchase_status": "暂停申购"})
+        assert level == "fail" and text.startswith("❌") and warn and "买不进去" in warn
 
     def test_closed_period_is_fail(self, screener):
-        text, warn, _ = screener._check_purchasable({"purchase_status": "封闭期"})
-        assert text.startswith("❌") and warn
+        level, text, warn, _ = screener._check_purchasable({"purchase_status": "封闭期"})
+        assert level == "fail" and text.startswith("❌") and warn
 
     def test_limited_is_kept_but_annotated(self, screener):
         """限大额：标注，但**不产生 warning** —— 否则会拉低风险等级。"""
-        text, warn, raw = screener._check_purchasable({"purchase_status": "限大额"})
-        assert "限大额" in text and "单日" in text
+        level, text, warn, raw = screener._check_purchasable({"purchase_status": "限大额"})
+        assert level == "info" and "限大额" in text and "单日" in text
         assert warn is None and raw == "限大额"
 
     @pytest.mark.parametrize("val", ["", "   ", None])
     def test_blank_is_unknown_not_purchasable(self, screener, val):
         """空 / NULL ≠ 可申购：既不判通过也不判失败，标成"未知"。"""
-        text, warn, raw = screener._check_purchasable({"purchase_status": val})
-        assert "未知" in text and "跳过检查" in text
+        level, text, warn, raw = screener._check_purchasable({"purchase_status": val})
+        assert level == "unknown" and "未知" in text and "跳过检查" in text
         assert not text.startswith("✅"), "空白状态绝不能被当成'可申购'"
         assert warn is None and raw == ""
 
     def test_unrecognised_text_is_unknown(self, screener):
-        text, warn, raw = screener._check_purchasable({"purchase_status": "内部转让"})
-        assert "未知" in text and warn is None and raw == "内部转让"
+        level, text, warn, raw = screener._check_purchasable({"purchase_status": "内部转让"})
+        assert level == "unknown" and "未知" in text and warn is None and raw == "内部转让"
 
     def test_missing_key_does_not_crash(self, screener):
-        text, warn, raw = screener._check_purchasable({})
-        assert "未知" in text and raw == ""
+        level, text, warn, raw = screener._check_purchasable({})
+        assert level == "unknown" and "未知" in text and raw == ""
 
 
 class TestBlockedMarkerConstant:

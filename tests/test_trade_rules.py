@@ -118,7 +118,7 @@ def test_buy_priced_at_apply_day_nav(tracker):
     t, db = tracker
     _add_nav(db, "TA", "2026-01-05", 2.0)                    # 申请日 T（周一）
     _add_nav(db, "TA", "2026-01-06", 2.5)                    # 确认日 T+1
-    hid = t.add_buy_transaction("TA", "T日定价", "2026-01-05", 300.0)
+    hid = t.add_buy_transaction("TA", "T日定价C", "2026-01-05", 300.0)
     h = dict(db.conn.execute("SELECT * FROM holdings WHERE id=?", (hid,)).fetchone())
     assert h["confirm_date"] == "2026-01-06"
     assert h["confirm_nav"] == 2.0                           # 成交价 = T 日净值
@@ -133,7 +133,7 @@ def test_sell_priced_at_apply_day_nav(tracker):
     _add_nav(db, "TB", "2026-01-05", 1.0)
     _add_nav(db, "TB", "2026-01-08", 1.10)                   # 卖出申请日 T
     _add_nav(db, "TB", "2026-01-09", 2.00)                   # 卖出确认日 T+1（不该被用）
-    hid = t.add_buy_transaction("TB", "卖出T日定价", "2026-01-05", 100.0)
+    hid = t.add_buy_transaction("TB", "卖出T日定价C", "2026-01-05", 100.0)
     t.record_sell(hid, "2026-01-08", shares=100)
     tx = [x for x in db.get_transactions(holding_id=hid) if x["kind"] == "sell"][0]
     assert tx["confirm_nav"] == 1.10                         # 用 T 日净值
@@ -147,7 +147,7 @@ def test_sell_priced_at_apply_day_nav(tracker):
 def test_buy_confirmed_in_past(tracker):
     t, db = tracker
     _add_nav(db, "T001", "2026-01-05", 1.0)                  # 申请日 = 定价日（周一）
-    hid = t.add_buy_transaction("T001", "测试基金", "2026-01-05", 100.0)
+    hid = t.add_buy_transaction("T001", "测试基金C", "2026-01-05", 100.0)
     h = dict(db.conn.execute("SELECT * FROM holdings WHERE id=?", (hid,)).fetchone())
     assert h["status"] == "holding"
     assert h["confirm_date"] == "2026-01-06"
@@ -163,7 +163,7 @@ def test_buy_pending_then_settle(tracker):
     effective = tr.effective_apply_date(apply_date, CAL)
     confirm, _ = tr.resolve_apply(apply_date, False, CAL)
     _add_nav(db, "T002", effective, 2.0)
-    hid = t.add_buy_transaction("T002", "待确认基金", apply_date, 100.0)
+    hid = t.add_buy_transaction("T002", "待确认基金C", apply_date, 100.0)
     h = dict(db.conn.execute("SELECT * FROM holdings WHERE id=?", (hid,)).fetchone())
     if confirm > today:
         assert h["status"] == "pending_confirm" and (h["shares"] or 0) == 0
@@ -184,7 +184,7 @@ def test_settle_requires_exact_nav_date(tracker):
     if confirm <= date.today().isoformat():
         return
     _add_nav(db, "T006", "2026-12-29", 9.99)                 # 只有邻近日，没有生效日
-    hid = t.add_buy_transaction("T006", "净值未公布", apply_date, 100.0)
+    hid = t.add_buy_transaction("T006", "净值未公布C", apply_date, 100.0)
     h = dict(db.conn.execute("SELECT * FROM holdings WHERE id=?", (hid,)).fetchone())
     assert h["status"] == "pending_confirm" and (h["shares"] or 0) == 0
     assert t.settle_pending(today=confirm)["settled_buys"] == 0
@@ -201,7 +201,7 @@ def test_reconcile_is_idempotent(tracker):
     t, db = tracker
     _add_nav(db, "T007", "2026-01-05", 1.0)
     _add_nav(db, "T007", "2026-01-08", 1.10)
-    hid = t.add_buy_transaction("T007", "幂等", "2026-01-05", 100.0)
+    hid = t.add_buy_transaction("T007", "幂等C", "2026-01-05", 100.0)
     t.record_sell(hid, "2026-01-08", shares=40)
     for _ in range(3):
         t.reconcile()
@@ -216,7 +216,7 @@ def test_summary_does_not_write_by_default(tracker):
     _add_nav(db, "T008", "2026-01-05", 2.0)                  # 生效日净值（已过去很久）
     # 直接构造一条"确认日已过、但还没结算"的待确认买入
     hid = db.add_holding({
-        "fund_code": "T008", "fund_name": "纯读", "buy_date": "2026-01-05",
+        "fund_code": "T008", "fund_name": "纯读C", "buy_date": "2026-01-05",
         "buy_amount": 100.0, "apply_date": "2026-01-05",
         "confirm_date": "2026-01-06", "accrual_start": "2026-01-07",
         "status": "pending_confirm",
@@ -236,7 +236,7 @@ def test_partial_sell_keeps_position(tracker):
     t, db = tracker
     _add_nav(db, "T003", "2026-01-05", 1.0)                  # 买入定价日
     _add_nav(db, "T003", "2026-01-08", 1.25)                 # 卖出定价日
-    hid = t.add_buy_transaction("T003", "部分卖出", "2026-01-05", 100.0)
+    hid = t.add_buy_transaction("T003", "部分卖出C", "2026-01-05", 100.0)
     assert dict(db.conn.execute("SELECT * FROM holdings WHERE id=?", (hid,)).fetchone())["shares"] == 100.0
     t.record_sell(hid, "2026-01-08", shares=40)              # 周四申请 → 周五确认
     h = dict(db.conn.execute("SELECT * FROM holdings WHERE id=?", (hid,)).fetchone())
@@ -252,7 +252,7 @@ def test_partial_then_full_sell(tracker):
     _add_nav(db, "T009", "2026-01-05", 1.0)
     _add_nav(db, "T009", "2026-01-08", 1.10)
     _add_nav(db, "T009", "2026-01-09", 1.20)
-    hid = t.add_buy_transaction("T009", "先部分再全卖", "2026-01-05", 100.0)
+    hid = t.add_buy_transaction("T009", "先部分再全卖C", "2026-01-05", 100.0)
     t.record_sell(hid, "2026-01-08", shares=40)              # 卖 40
     t.record_sell(hid, "2026-01-09", shares=60)              # 再卖 60（周五申请 → 下周一确认）
     h = dict(db.conn.execute("SELECT * FROM holdings WHERE id=?", (hid,)).fetchone())
@@ -265,7 +265,7 @@ def test_short_hold_redeem_fee(tracker):
     t, db = tracker
     _add_nav(db, "T010", "2026-01-05", 1.0)                  # 买入：100 元 → 100 份
     _add_nav(db, "T010", "2026-01-08", 1.10)                 # 卖出定价日
-    hid = t.add_buy_transaction("T010", "短期赎回", "2026-01-05", 100.0)
+    hid = t.add_buy_transaction("T010", "短期赎回C", "2026-01-05", 100.0)
     t.record_sell(hid, "2026-01-08", shares=100)             # 确认日 01-09 − 买入确认日 01-06 = 3 天
     tx = [x for x in db.get_transactions(holding_id=hid) if x["kind"] == "sell"][0]
     gross = round(100 * 1.10, 2)                             # 110.00
@@ -286,7 +286,7 @@ def test_full_sell_marks_sold(tracker):
     t, db = tracker
     _add_nav(db, "T004", "2026-01-05", 1.0)
     _add_nav(db, "T004", "2026-01-08", 1.10)
-    hid = t.add_buy_transaction("T004", "全卖", "2026-01-05", 100.0)
+    hid = t.add_buy_transaction("T004", "全卖C", "2026-01-05", 100.0)
     t.record_sell(hid, "2026-01-08", sell_amount=110.0)      # 110 / 1.10 = 100 份 → 全卖
     h = dict(db.conn.execute("SELECT * FROM holdings WHERE id=?", (hid,)).fetchone())
     assert h["status"] == "sold"
@@ -296,7 +296,7 @@ def test_full_sell_marks_sold(tracker):
 def test_pending_sell_then_settle(tracker):
     t, db = tracker
     _add_nav(db, "T005", "2026-01-05", 1.0)
-    hid = t.add_buy_transaction("T005", "待确认卖出", "2026-01-05", 100.0)
+    hid = t.add_buy_transaction("T005", "待确认卖出C", "2026-01-05", 100.0)
     # 卖出申请在未来 → 进入 sell_pending，不立即变动份额
     t.record_sell(hid, "2026-12-30", shares=50)
     h = dict(db.conn.execute("SELECT * FROM holdings WHERE id=?", (hid,)).fetchone())
@@ -318,7 +318,7 @@ def test_ledger_consistency(tracker):
     """持仓与流水必须一致：份额/金额对得上，且买入必有对应流水。"""
     t, db = tracker
     _add_nav(db, "T012", "2026-01-05", 2.0)
-    hid = t.add_buy_transaction("T012", "一致性", "2026-01-05", 100.0)
+    hid = t.add_buy_transaction("T012", "一致性C", "2026-01-05", 100.0)
     txs = db.get_transactions(holding_id=hid)
     assert len(txs) == 1 and txs[0]["kind"] == "buy"
     h = dict(db.conn.execute("SELECT * FROM holdings WHERE id=?", (hid,)).fetchone())
@@ -333,7 +333,7 @@ def test_realized_plus_unrealized_equals_total(tracker):
     _add_nav(db, "T011", "2026-01-05", 1.0)                  # 100 元 → 100 份
     _add_nav(db, "T011", "2026-01-08", 1.20)                 # 卖出定价日
     _add_nav(db, "T011", "2026-01-09", 1.50)                 # 最新净值（未实现部分）
-    hid = t.add_buy_transaction("T011", "半卖半留", "2026-01-05", 100.0)
+    hid = t.add_buy_transaction("T011", "半卖半留C", "2026-01-05", 100.0)
     t.record_sell(hid, "2026-01-08", shares=50)              # 卖 50 份 @1.20
 
     real = t.get_realized_pnl()["total_pnl"]

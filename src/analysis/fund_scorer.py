@@ -19,6 +19,7 @@ import numpy as np
 from typing import Optional
 from ..data.database import Database
 from .nav_series import valuation_nav_series
+from .risk_free import RISK_FREE_ANNUAL
 
 # 申购状态分类（D2）——
 #   `暂停申购` / `封闭期`：**买不进去**，直接排除出推荐池；
@@ -27,6 +28,17 @@ from .nav_series import valuation_nav_series
 #   做法，**不得静默当作可申购**。
 _BLOCKED_PURCHASE_MARKERS = ("暂停申购", "封闭期")
 _LIMITED_PURCHASE_MARKERS = ("限大额", "限购")
+
+
+def type_bucket(fund_type: str) -> str:
+    """粗分类型桶：权益（equity） / 非权益（bond）。
+
+    批次 4.1/4.4 的归一化口径：债基与权益的回撤、动量区间天然不可比，
+    综合评分的百分位归一化必须**在同一个桶内**进行，否则债基的"低回撤"
+    会变成挤掉权益的免费分。historical_recommender 复用同一函数。
+    """
+    t = str(fund_type or "")
+    return "equity" if any(kw in t for kw in ("股票", "混合", "指数", "QDII")) else "bond"
 
 
 class FundScreener:
@@ -44,8 +56,9 @@ class FundScreener:
         "momentum_warning": 40,     # 近3月涨幅>40%→追涨警告
     }
 
-    def __init__(self, db: Database, risk_free_rate: float = 0.02):
+    def __init__(self, db: Database, risk_free_rate: float = RISK_FREE_ANNUAL):
         self.db = db
+        # 无风险利率：单一真源（批次 4.7），全项目统一 0.02，不得各自硬编码
         self.risk_free_rate = risk_free_rate
 
     # =================================================================
@@ -105,16 +118,22 @@ class FundScreener:
             if result["risk_label"] == "不合格" or result.get("purchase_blocked"):
                 continue
 
+            # mgt_fee 缺失保持 None（批次 4.1）：费率字段的 0 绝大多数是
+            # 「没采到」而非真零费率，转成 0 会让"缺失"在排序里排在最前。
+            raw_fee = info.get("mgt_fee")
+            mgt_fee = float(raw_fee) if raw_fee not in (None, "", 0) else None
+
             results.append({
                 "fund_code": code,
                 "fund_name": info.get("fund_name", ""),
                 "fund_type": ftype,
-                "mgt_fee": info.get("mgt_fee", 0) or 0,
+                "mgt_fee": mgt_fee,
                 "fund_size": info.get("fund_size", 0) or 0,
                 "purchase_status": result["metrics"].get("purchase_status", ""),
                 "risk_label": result["risk_label"],
                 "risk_reasons": result["risk_reasons"],
                 "quality_checks": result["quality_checks"],
+                "check_levels": result["check_levels"],
                 "metrics": result["metrics"],
             })
 
@@ -122,65 +141,115 @@ class FundScreener:
         if df.empty:
             return df
 
-        # 按风险等级排序：稳健 > 注意 > 高风险
+        df["mgt_fee"] = pd.to_numeric(df["mgt_fee"], errors="coerce")   # None → NaN
+        # 综合评分（批次 4.1）：类型桶内归一化，让排序在同一风险等级内不再任意
+        df = self._attach_quality_score(df)
+
+        # 排序（批次 4.1 修复）：旧键 ["_risk_order", "mgt_fee"] 在真实数据里
+        # 两列几乎全是常数（同标签 + 费率全缺）→ 排序退化为 SQLite 返回顺序。
+        # 现在：1) 风险等级（稳健 > 注意 > 高风险）
+        #       2) 综合评分 quality_score 降序（类型桶内归一化百分位）
+        #       3) 管理费升序，缺失（NaN）排最后，不得当 0
         risk_order = {"🟢 稳健": 0, "🟡 注意": 1, "🔴 高风险": 2}
         df["_risk_order"] = df["risk_label"].map(risk_order).fillna(3)
-        df = df.sort_values(["_risk_order", "mgt_fee"]).drop(columns=["_risk_order"])
-        df = df.reset_index(drop=True)
+        df = df.sort_values(["_risk_order", "quality_score", "mgt_fee"],
+                            ascending=[True, False, True], na_position="last")
+        df = df.drop(columns=["_risk_order"]).reset_index(drop=True)
 
         return df.head(max_results)
 
+    def _attach_quality_score(self, df: pd.DataFrame) -> pd.DataFrame:
+        """给筛选池挂**综合评分**（0-100，批次 4.1）。
+
+        三个子项按**类型桶内百分位**归一化（批次 4.4 的口径）：
+          - 风险调整收益（夏普）45%：桶内百分位，越高越好
+          - 回撤控制 30%：近1年最大回撤取负后的桶内百分位（回撤越小越好）
+          - 费率 25%：管理费桶内百分位（越低越好）
+        任一指标缺失按 0.5 中性处理 —— **缺数据不奖励也不惩罚**（批次 2.2 约定）。
+        评分数值本身只用于同风险等级内部的排序，不代表绝对质量。
+        """
+        if df.empty:
+            df["quality_score"] = pd.Series(dtype=float)
+            return df
+        df = df.copy()
+        buckets = df["fund_type"].map(type_bucket)
+        metrics = df["metrics"].apply(lambda m: m or {})
+        sharpe = pd.to_numeric(metrics.map(lambda m: m.get("sharpe")), errors="coerce")
+        dd = pd.to_numeric(metrics.map(lambda m: m.get("max_drawdown_1y")), errors="coerce")
+        fee = pd.to_numeric(df["mgt_fee"], errors="coerce")
+
+        def _pct(s, sign=1.0):
+            # 桶内百分位；NaN（缺失）→ 0.5 中性
+            return (sign * s).groupby(buckets).rank(pct=True).fillna(0.5)
+
+        df["quality_score"] = (
+            100 * (0.45 * _pct(sharpe) + 0.30 * _pct(dd, sign=-1.0) + 0.25 * _pct(fee, sign=-1.0))
+        ).round(1)
+        return df
+
 
     # ------------------------------------------------------------------
-    # 单项质量检查（提取自 _screen_single_fund，每项返回 (check_text, warning, *metrics)）
+    # 单项质量检查（提取自 _screen_single_fund）
+    #
+    # 返回值约定（批次 4.8 结构化）：`(level, check_text, warning, *metrics)`，
+    #   level ∈ "pass" | "warn" | "fail" | "info" | "unknown"。
+    # 业务判定**只看 level**，不看 emoji 前缀 —— 展示层的符号改了不能
+    # 静默改变风险分级。`check_text` 只负责给人看。
     # ------------------------------------------------------------------
 
     def _check_age(self, fund_info: dict) -> tuple:
-        """成立时间检查 → (check_text, warning)"""
+        """成立时间检查 → (level, check_text, warning)"""
         est = fund_info.get("establish_date", "")
         if not est:
-            return "⚠️ 无数据", None
+            return "unknown", "⚠️ 无数据", None
         try:
             e = pd.to_datetime(est)
             months = (pd.Timestamp.now() - e).days / 30
             if months >= self.THRESHOLDS["min_age_months"]:
-                return "✅ 通过", None
-            return f"❌ 仅{months:.0f}个月", f"成立仅{months:.0f}个月，不足{self.THRESHOLDS['min_age_months']}个月"
+                return "pass", "✅ 通过", None
+            return "fail", f"❌ 仅{months:.0f}个月", f"成立仅{months:.0f}个月，不足{self.THRESHOLDS['min_age_months']}个月"
         except Exception:
-            return "⚠️ 未知", None
+            return "unknown", "⚠️ 未知", None
 
     def _check_size(self, fund_info: dict) -> tuple:
-        """规模检查 → (check_text, warning, size_yi)"""
+        """规模检查 → (level, check_text, warning, size_yi)"""
         size = float(fund_info.get("fund_size") or 0)
         if size == 0:
-            return "✅ 无数据(跳过检查)", None, size
+            return "unknown", "✅ 无数据(跳过检查)", None, size
         if size < self.THRESHOLDS["min_size_yi"]:
-            return f"❌ 仅{size:.2f}亿(清盘风险)", f"规模仅{size:.2f}亿，有清盘风险", size
+            return "fail", f"❌ 仅{size:.2f}亿(清盘风险)", f"规模仅{size:.2f}亿，有清盘风险", size
         if size > self.THRESHOLDS["max_size_yi"]:
-            return f"⚠️ {size:.1f}亿(偏大)", None, size
-        return f"✅ {size:.1f}亿", None, size
+            return "warn", f"⚠️ {size:.1f}亿(偏大)", None, size
+        return "pass", f"✅ {size:.1f}亿", None, size
 
     def _check_fee(self, fund_info: dict) -> tuple:
-        """费率检查 → (check_text, warning, total_fee)"""
-        mgt = float(fund_info.get("mgt_fee") or 0)
-        cust = float(fund_info.get("custodian_fee") or 0)
-        total = mgt + cust
-        if mgt == 0 and cust == 0:
-            return "⊘ 无数据", None, total
+        """费率检查 → (level, check_text, warning, total_fee)
+
+        批次 4.10：`custodian_fee` 大量以 0 填充（0 ≠ 真实托管费为 0）。
+        只有管理费而无托管费时**只按已知部分判定并显式标注**，
+        不把 0 当真值加总（否则总费率被系统性低估）。
+        """
+        mgt_v = float(fund_info.get("mgt_fee") or 0)
+        cust_v = float(fund_info.get("custodian_fee") or 0)
+        if mgt_v == 0 and cust_v == 0:
+            return "unknown", "⊘ 无数据", None, 0.0
+        total = mgt_v + cust_v
+        partial = (mgt_v == 0 or cust_v == 0)          # 一边有一边缺
+        note = "(部分费率未知)" if partial else ""
         if total > self.THRESHOLDS["max_total_fee"]:
-            return f"❌ {total:.2f}%(过高)", f"总费率{total:.2f}%过高，严重侵蚀长期收益", total
+            return "fail", f"❌ {total:.2f}%{note}(过高)", f"总费率{total:.2f}%过高，严重侵蚀长期收益", total
         if total > self.THRESHOLDS["warn_total_fee"]:
-            return f"⚠️ {total:.2f}%(偏高)", None, total
-        return f"✅ {total:.2f}%", None, total
+            return "warn", f"⚠️ {total:.2f}%{note}(偏高)", None, total
+        return "pass", f"✅ {total:.2f}%{note}", None, total
 
     def _check_purchasable(self, fund_info: dict) -> tuple:
-        """可申购性检查 → (check_text, warning, status_raw)
+        """可申购性检查 → (level, check_text, warning, status_raw)
 
         **`warning` 一律返回 None**（除非真的买不进去）—— 申购状态与"基金好不好"
         是两个轴：`限大额` 是申购限制，不是质量瑕疵。把它算进 `warn_count`
         会把一只 🟢 稳健基金压成 🟡 注意，等于变相降级（D2 要的是"保留但标注"）。
         所以限大额只写进 `quality_checks["申购状态"]` 与行上的 `purchase_status`
-        字段，由前端单独挂一个标签，**不改风险等级**。
+        字段，由前端单独挂一个标签，**不改风险等级**（level="info"，不计 warn）。
 
         `status_raw` 原样返回，供调用方决定是否真的排除。
         **未知不等于可申购**：空串和无法归类的文字都走“⊘ 未知(跳过检查)”，
@@ -188,63 +257,63 @@ class FundScreener:
         """
         raw = (fund_info.get("purchase_status") or "").strip()
         if not raw:
-            return "⊘ 申购状态未知(跳过检查)", None, raw
+            return "unknown", "⊘ 申购状态未知(跳过检查)", None, raw
         if any(m in raw for m in _BLOCKED_PURCHASE_MARKERS):
-            return f"❌ {raw}", f"当前**{raw}**，买不进去，不应出现在推荐池里", raw
+            return "fail", f"❌ {raw}", f"当前**{raw}**，买不进去，不应出现在推荐池里", raw
         if any(m in raw for m in _LIMITED_PURCHASE_MARKERS):
-            return "🔸 限大额·注意单日申购上限", None, raw
+            return "info", "🔸 限大额·注意单日申购上限", None, raw
         if "开放" in raw:
-            return "✅ 可申购", None, raw
-        return f"⊘ 申购状态未知({raw})", None, raw
+            return "pass", "✅ 可申购", None, raw
+        return "unknown", f"⊘ 申购状态未知({raw})", None, raw
 
     def _check_drawdown(self, vals) -> tuple:
-        """近1年最大回撤检查 → (check_text, warning, max_dd)
+        """近1年最大回撤检查 → (level, check_text, warning, max_dd)
 
         入参是**升序的单位净值序列**（numpy array）。原来用 pandas 逐点循环，
         540 只基金要跑十几万次 Python 迭代；改成 maximum.accumulate 后整批只需几十毫秒。
         """
         if len(vals) < 60:
-            return "⚠️ 数据不足", None, None
+            return "unknown", "⚠️ 数据不足", None, None
         recent = vals[-252:] if len(vals) >= 252 else vals
         peak = np.maximum.accumulate(recent)
         peak = np.where(peak == 0, 1e-12, peak)      # 防 0 净值除零
         max_dd = float(np.max((peak - recent) / peak * 100)) if len(recent) else 0.0
         if max_dd > self.THRESHOLDS["max_drawdown_1y"]:
-            return f"❌ {max_dd:.0f}%(过大)", f"近1年最大回撤{max_dd:.0f}%，超过{self.THRESHOLDS['max_drawdown_1y']}%阈值", round(max_dd, 1)
+            return "fail", f"❌ {max_dd:.0f}%(过大)", f"近1年最大回撤{max_dd:.0f}%，超过{self.THRESHOLDS['max_drawdown_1y']}%阈值", round(max_dd, 1)
         if max_dd > 25:
-            return f"⚠️ {max_dd:.0f}%(偏高)", None, round(max_dd, 1)
-        return f"✅ {max_dd:.0f}%", None, round(max_dd, 1)
+            return "warn", f"⚠️ {max_dd:.0f}%(偏高)", None, round(max_dd, 1)
+        return "pass", f"✅ {max_dd:.0f}%", None, round(max_dd, 1)
 
     def _check_momentum(self, vals) -> tuple:
-        """追涨风险检查 → (check_text, warning, mom_3m)"""
+        """追涨风险检查 → (level, check_text, warning, mom_3m)"""
         if len(vals) < 63:
-            return "⚠️ 数据不足", None, None
+            return "unknown", "⚠️ 数据不足", None, None
         mom = float((vals[-1] / vals[-63] - 1) * 100)
         if mom > self.THRESHOLDS["momentum_warning"]:
-            return f"🔴 近3月涨{mom:.0f}%(追涨!)", f"近3月涨幅{mom:.0f}%过高，此时买入有追涨风险", round(mom, 1)
+            return "warn", f"🔴 近3月涨{mom:.0f}%(追涨!)", f"近3月涨幅{mom:.0f}%过高，此时买入有追涨风险", round(mom, 1)
         if mom > 25:
-            return f"⚠️ 近3月涨{mom:.0f}%", None, round(mom, 1)
+            return "warn", f"⚠️ 近3月涨{mom:.0f}%", None, round(mom, 1)
         if mom < -20:
-            return f"💡 近3月跌{abs(mom):.0f}%(可能超跌)", None, round(mom, 1)
-        return f"✅ 近3月{mom:+.0f}%", None, round(mom, 1)
+            return "warn", f"💡 近3月跌{abs(mom):.0f}%(可能超跌)", None, round(mom, 1)
+        return "pass", f"✅ 近3月{mom:+.0f}%", None, round(mom, 1)
 
     def _check_sharpe(self, vals) -> tuple:
-        """风险调整收益检查 → (check_text, warning, sharpe, ann_vol)"""
+        """风险调整收益检查 → (level, check_text, warning, sharpe, ann_vol)"""
         if len(vals) < 60:
-            return "⚠️ 数据不足", None, None, None
+            return "unknown", "⚠️ 数据不足", None, None, None
         with np.errstate(divide="ignore", invalid="ignore"):
             daily = np.diff(vals) / vals[:-1]        # 等价于 pct_change().dropna()
         daily = daily[np.isfinite(daily)]
         if len(daily) < 20:
-            return "⚠️ 数据不足", None, None, None
+            return "unknown", "⚠️ 数据不足", None, None, None
         ann_ret = float(np.mean(daily) * 252)
         ann_vol = float(np.std(daily, ddof=1) * np.sqrt(252))
         sharpe = (ann_ret - self.risk_free_rate) / ann_vol if ann_vol > 0 else 0
         if sharpe < 0:
-            return "❌ 夏普为负", "夏普比率为负，承担风险但没有获得相应回报", round(sharpe, 2), round(ann_vol * 100, 1)
+            return "fail", "❌ 夏普为负", "夏普比率为负，承担风险但没有获得相应回报", round(sharpe, 2), round(ann_vol * 100, 1)
         if sharpe < 0.3:
-            return "⚠️ 夏普偏低", None, round(sharpe, 2), round(ann_vol * 100, 1)
-        return f"✅ {sharpe:.2f}", None, round(sharpe, 2), round(ann_vol * 100, 1)
+            return "warn", "⚠️ 夏普偏低", None, round(sharpe, 2), round(ann_vol * 100, 1)
+        return "pass", f"✅ {sharpe:.2f}", None, round(sharpe, 2), round(ann_vol * 100, 1)
 
     # ------------------------------------------------------------------
     # 净值序列装载
@@ -298,44 +367,50 @@ class FundScreener:
         return self._score_series(vals, fund_info)
 
     def _score_series(self, vals, fund_info: dict) -> dict:
-        """对一段已排好序的净值序列做 6 维检查并给风险标签。"""
+        """对一段已排好序的净值序列做 6 维检查并给风险标签。
+
+        批次 4.8：业务判定（fail/warn 计数）只读**结构化 level**
+        （`check_levels`），`quality_checks` 里的 emoji 文本只用于展示 ——
+        改一次展示符号不再会静默改变风险分级。
+        """
         metrics = {}
         checks = {}
+        levels = {}
         warnings = []
 
         # ---- 检查1: 成立时间 ----
-        checks["成立时间"], w = self._check_age(fund_info)
+        levels["成立时间"], checks["成立时间"], w = self._check_age(fund_info)
         if w:
             warnings.append(w)
 
         # ---- 检查2: 规模 ----
-        checks["基金规模"], w, size = self._check_size(fund_info)
+        levels["基金规模"], checks["基金规模"], w, size = self._check_size(fund_info)
         if w:
             warnings.append(w)
         metrics["fund_size_yi"] = size
 
         # ---- 检查3: 费率 ----
-        checks["费率"], w, total_fee = self._check_fee(fund_info)
+        levels["费率"], checks["费率"], w, total_fee = self._check_fee(fund_info)
         if w:
             warnings.append(w)
         metrics["total_fee"] = total_fee
 
         # ---- 检查4: 回撤 ----
-        checks["回撤控制"], w, max_dd = self._check_drawdown(vals)
+        levels["回撤控制"], checks["回撤控制"], w, max_dd = self._check_drawdown(vals)
         if w:
             warnings.append(w)
         if max_dd is not None:
             metrics["max_drawdown_1y"] = max_dd
 
         # ---- 检查5: 动量(追涨风险) ----
-        checks["追涨风险"], w, mom = self._check_momentum(vals)
+        levels["追涨风险"], checks["追涨风险"], w, mom = self._check_momentum(vals)
         if w:
             warnings.append(w)
         if mom is not None:
             metrics["momentum_3m"] = mom
 
         # ---- 检查6: 夏普比率 ----
-        checks["风险调整收益"], w, sharpe, ann_vol = self._check_sharpe(vals)
+        levels["风险调整收益"], checks["风险调整收益"], w, sharpe, ann_vol = self._check_sharpe(vals)
         if w:
             warnings.append(w)
         if sharpe is not None:
@@ -343,19 +418,15 @@ class FundScreener:
             metrics["ann_vol"] = ann_vol
 
         # ---- 检查7: 可申购性（暂停申购/封闭期买不进去）----
-        checks["申购状态"], w, purchase_status = self._check_purchasable(fund_info)
+        levels["申购状态"], checks["申购状态"], w, purchase_status = self._check_purchasable(fund_info)
         if w:
             warnings.append(w)
         metrics["purchase_status"] = purchase_status
         purchase_blocked = any(m in purchase_status for m in _BLOCKED_PURCHASE_MARKERS)
 
-        # ---- 判定风险标签 ----
-        fail_count = sum(1 for v in checks.values() if v.startswith("❌"))
-        warn_count = sum(
-            1 for v in checks.values()
-            if (v.startswith("⚠️") or v.startswith("🔴") or v.startswith("💡"))
-            and not v.startswith("⚠️ 无数据")
-        )
+        # ---- 判定风险标签（只看结构化 level，不看 emoji）----
+        fail_count = sum(1 for lv in levels.values() if lv == "fail")
+        warn_count = sum(1 for lv in levels.values() if lv == "warn")
 
         if fail_count >= 2:
             risk_label = "不合格"
@@ -370,6 +441,7 @@ class FundScreener:
             "risk_label": risk_label,
             "risk_reasons": warnings,
             "quality_checks": checks,
+            "check_levels": levels,
             "metrics": metrics,
             "purchase_blocked": purchase_blocked,
         }

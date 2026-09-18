@@ -66,6 +66,7 @@ logs/
 
 # --- AI 工具本地记忆（不应公开） ---
 .claude/
+.workbuddy/
 
 # --- 第三方文档聚合（非项目内容） ---
 docs/llms-full.md

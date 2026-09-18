@@ -16,6 +16,7 @@ Phase 0 的首要任务就是验证这些接口的可用性。
 
 import pandas as pd
 import time
+from typing import Optional
 
 try:
     import akshare as ak
@@ -350,8 +351,9 @@ class DataCollector:
             if extra.get("fund_name"):
                 fund_name = extra["fund_name"]
 
-            # 解析费率
-            mgt_fee = self._parse_fee(extra.get("fee_str", "0%"))
+            # 解析费率：缺列时保持 None（不再默认 "0%" —— 那会把缺失解析成 0，
+            # upsert 的字段保护拦不住 0，见批次 4.2）
+            mgt_fee = self._parse_fee(extra.get("fee_str"))
 
             fund = {
                 "fund_code": code,
@@ -572,12 +574,17 @@ class DataCollector:
             return 0.0
 
     @staticmethod
-    def _parse_fee(fee_str: str) -> float:
-        """解析费率字符串: '0.15%' → 0.15, '1.50%' → 1.50"""
+    def _parse_fee(fee_str) -> Optional[float]:
+        """解析费率字符串: '0.15%' → 0.15, '1.50%' → 1.50。
+
+        **采集失败返回 None 而不是 0**（批次 4.2）：把「没采到」解析成 0
+        会被下游当成真零费率，且 upsert 的字段保护拦不住 0（COALESCE 只拦
+        NULL）。缺数据必须保持 None，让 upsert 保留旧值。
+        """
         try:
-            return float(fee_str.replace("%", ""))
+            return float(str(fee_str).replace("%", "").strip())
         except (ValueError, TypeError):
-            return 0.0
+            return None
 
     @staticmethod
     def _parse_size(size_str: str) -> float:

@@ -14,7 +14,7 @@ CODE = "000011"
 def client(tmp_path, monkeypatch):
     dbp = str(tmp_path / "api.db")
     db = Database(dbp)
-    db.upsert_fund_info({"fund_code": CODE, "fund_name": "测试混合A", "fund_type": "混合型"})
+    db.upsert_fund_info({"fund_code": CODE, "fund_name": "测试混合C", "fund_type": "混合型"})
     db.conn.execute(
         "INSERT OR REPLACE INTO fund_nav (fund_code, nav_date, unit_nav, acc_nav, daily_return) "
         "VALUES (?, '2026-01-05', 2.0, 2.0, 0)", (CODE,))
@@ -117,7 +117,7 @@ def test_dca_add_run_and_guard(client):
 def test_reconcile_endpoint_is_idempotent(client):
     c, dbp = client
     db = Database(dbp)
-    db.add_holding({"fund_code": CODE, "fund_name": "待确认", "buy_date": "2026-01-05",
+    db.add_holding({"fund_code": CODE, "fund_name": "待确认C", "buy_date": "2026-01-05",
                     "buy_amount": 100.0, "apply_date": "2026-01-05",
                     "confirm_date": "2026-01-06", "accrual_start": "2026-01-07",
                     "status": "pending_confirm"})
