@@ -196,7 +196,8 @@ def index():
         v = int(max(os.path.getmtime(os.path.join(STATIC_DIR, f))
                     for f in ("app.css", "app.js")))
     except Exception:
-        v = 0
+        # 改不动静态资源版本号时，宁可让浏览器每次都回源，也不要它继续用旧 JS
+        v = int(time.time())
     return render_template("dashboard.html", v=v)
 
 
@@ -245,6 +246,8 @@ def _all_funds():
                 "type": row.get("fund_type", ""),
                 "fee": row.get("mgt_fee", 0) or 0,
                 "risk": row["risk_label"],
+                "purchase_status": row.get("purchase_status", "") or "",
+                "purchasable": row.get("quality_checks", {}).get("申购状态", ""),
                 "momentum_3m": m.get("momentum_3m"),
                 "max_dd_1y": m.get("max_drawdown_1y"),
                 "sharpe": m.get("sharpe"),
@@ -271,6 +274,7 @@ def _holdings_payload(data: dict) -> list:
             "pnl": h.get("pnl"), "pnl_pct": h.get("pnl_pct"),
             "days_held": h.get("days_held"),
             "status": h.get("status", "holding"),
+            "legacy_rule_deviation": h.get("legacy_rule_deviation"),
             "is_pending": h.get("is_pending", False),
             "apply_date": h.get("apply_date"),
             "confirm_date": h.get("confirm_date"),
@@ -333,12 +337,19 @@ def _all_rebalance():
         advisor = RebalanceAdvisor(db)
         # 总资金口径 = 持仓市值 + 计划现金弹药（cash_reserve）。
         # 旧版用 total_invested * 1.1 拍脑袋估算，与计划卡数字互相打架。
+        # 读不到就退回 0（总资金被低估、仓位被高估），但**必须声明** ——
+        # 静默填 0 会让"缺失"伪装成一个看起来正常的仓位建议。
+        degraded = []
         try:
             ensure_seed(db)
             plan = get_plan(db) or {}
-            cash_reserve = float(plan.get("cash_reserve") or 0)
+            raw_cash = plan.get("cash_reserve")
+            if raw_cash is None or str(raw_cash).strip() == "":
+                raise ValueError("plan.cash_reserve 缺失")
+            cash_reserve = float(raw_cash)
         except Exception:
             cash_reserve = 0.0
+            degraded.append("cash_reserve")
         rb = advisor.analyze(cash_reserve=cash_reserve)
         db.close()
         return {
@@ -348,6 +359,8 @@ def _all_rebalance():
             "gap_pct": rb["gap_pct"],
             "summary": rb["summary"],
             "instructions": rb["instructions"],
+            "cash_reserve": cash_reserve,
+            "degraded": degraded,
         }
     except Exception as e:
         return {"error": str(e), "instructions": [], "summary": {"verdict": "分析失败"}}
@@ -1111,6 +1124,8 @@ def _compute_board_pool(size: int, limit: int) -> dict:
                 "code": row["fund_code"], "name": row.get("fund_name", "") or "",
                 "type": row.get("fund_type", ""), "risk": row["risk_label"],
                 "fee": row.get("mgt_fee", 0) or 0,
+                "purchase_status": row.get("purchase_status", "") or "",
+                "purchasable": (row.get("quality_checks") or {}).get("申购状态", ""),
                 "momentum_3m": m.get("momentum_3m"), "max_dd_1y": m.get("max_drawdown_1y"),
                 "sharpe": m.get("sharpe"), "ann_vol": m.get("ann_vol"),
                 "nav_trend": _get_nav_trend(db, row["fund_code"]),

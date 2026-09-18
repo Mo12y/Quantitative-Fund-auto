@@ -20,10 +20,10 @@ from typing import Tuple
 from ..data.database import Database
 from .fund_scorer import FundScreener
 from .thermometer import MarketThermometer
-from .portfolio import redeem_fee_rate
+from .portfolio import redeem_fee_rate, DEFAULT_PURCHASE_FEE
 
-# 场外基金申购费（C类）；赎回费一律走 portfolio.redeem_fee_rate（单一真源）
-PURCHASE_FEE = 0.0015
+# 前端申购费同样走 portfolio 的单一真源（DEFAULT_PURCHASE_FEE / purchase_fee_rate），
+# 本模块不再自建常量。赎回费一律走 portfolio.redeem_fee_rate。
 
 
 class StrategyEngine:
@@ -234,16 +234,20 @@ class StrategyEngine:
                     "fee": round(cost, 2),
                 })
         else:
-            # 加仓：按申购费对买入额计费
-            cost = traded * PURCHASE_FEE
+            # 加仓：按前端申购费对买入额计费。
+            # 这里**不知道**最终会买哪只（候选由质量筛选池给出），所以只能用默认费率；
+            # 真实买入时（`portfolio.add_buy_transaction` / 回测）会按份额类别逐只判断：
+            # C/E/I 类不收前端申购费 → 0。所以本估算对 C 类是**高估**的。
+            cost = traded * DEFAULT_PURCHASE_FEE
             total_cost += cost
             breakdown.append({
                 "fund_name": "(按质量筛选池买入)",
                 "action": "买入",
                 "traded": round(traded, 2),
                 "days_held": None,
-                "fee_rate": f"{PURCHASE_FEE*100:.2f}%",
+                "fee_rate": f"{DEFAULT_PURCHASE_FEE*100:.2f}%",
                 "fee": round(cost, 2),
+                "note": "未指定具体标的，按默认费率估；C/E/I 类实际为 0",
             })
 
         return {

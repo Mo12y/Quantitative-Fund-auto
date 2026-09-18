@@ -64,6 +64,7 @@ from src.analysis.vol_predictor import (
     compute_daily_returns, month_end_dates, compute_features,
     monthly_realized_vol, add_har_features, walk_forward_har,
     build_panel, _portfolio_metrics, last_signal_before,
+    FALLBACK_PRED_VOL, FALLBACK_PE_EQUITY, FALLBACK_DD_FRAC,
     FEATURE_COLS, HAR_FEATURES, TRAIN_END, OOS_START, REFIT_FREQ_MONTHS,
     TRADING_DAYS_YEAR, TARGET_VOL, ONE_WAY_COST, N_PORTFOLIO_FUNDS, RF_ANNUAL,
     DB_PATH, DOCS_DIR, RESULT_DIR,
@@ -169,6 +170,8 @@ def combined_portfolio_simulation(ret_wide, vol_pred, dd_pred, index_df,
     schemes = {"Equal_Weight": [], "Vol_Targeting": [], "Vol_DD_Combined": []}
     positions = {"Equal_Weight": [], "Vol_Targeting": [], "Vol_DD_Combined": []}
     signals = {"Vol_Targeting": [], "Vol_DD_Combined": []}
+    # 兜底命中计数：缺失信号时用了中性值，必须能被上层看见（不静默填）
+    fallback_counts = {"vol_signal": 0, "dd_signal": 0}
     # 期初在现金里（仓位 0）：首月建仓要付一次成本（旧版从 1.0 起算，少收首月费用）
     prev_pos = {"Equal_Weight": 0.0, "Vol_Targeting": 0.0, "Vol_DD_Combined": 0.0}
     rf_monthly = RF_ANNUAL / 12.0
@@ -187,14 +190,16 @@ def combined_portfolio_simulation(ret_wide, vol_pred, dd_pred, index_df,
         # HAR/回撤预测的目标本就是 t+1 月，取 t<m 恰好对齐到"对 m 月的预测"。
         pred_v = last_signal_before(vol_pred_monthly, m_ts)
         if pred_v is None:
-            pred_v = 0.20
+            pred_v = FALLBACK_PRED_VOL
+            fallback_counts["vol_signal"] += 1
         dd_frac = last_signal_before(dd_monthly, m_ts)
         if dd_frac is None:
-            dd_frac = 0.0
+            dd_frac = FALLBACK_DD_FRAC
+            fallback_counts["dd_signal"] += 1
 
         # 各方案仓位
         eq_pos = 1.0
-        vt_pos = float(np.clip(target_vol / pred_v, 0.05, 1.0)) if pred_v > 0 else 0.35
+        vt_pos = float(np.clip(target_vol / pred_v, 0.05, 1.0)) if pred_v > 0 else FALLBACK_PE_EQUITY
         dd_pos = DD_REDUCTION_FACTOR if dd_frac > DD_TRIGGER_FRAC else 1.0
         combined_pos = vt_pos * dd_pos
 
@@ -222,6 +227,9 @@ def combined_portfolio_simulation(ret_wide, vol_pred, dd_pred, index_df,
             continue
         s = pd.Series(dict(rets))
         m = _portfolio_metrics(s, rf_annual=RF_ANNUAL)
+        # 声明兜底命中次数：这几个月的仓位/减仓判断不是信号算出来的，是缺失时的中性兜底
+        m["fallback_vol_signal_months"] = int(fallback_counts["vol_signal"])
+        m["fallback_dd_signal_months"] = int(fallback_counts["dd_signal"])
         m["avg_position"] = float(np.mean([p[1] for p in positions[name]]))
         m["avg_turnover"] = float(np.mean([
             abs(positions[name][i][1] - (positions[name][i-1][1] if i > 0 else 0.0))
@@ -342,7 +350,7 @@ def generate_report(metrics, signals, port_codes, data_info, dd_threshold):
     lines.append("|:--|:--|:--|:--|:--|")
     for s in sig_combined:
         m_ts, pred_v, dd_frac, comb_pos = s
-        vt_pos = float(np.clip(TARGET_VOL / pred_v, 0.05, 1.0)) if pred_v > 0 else 0.35
+        vt_pos = float(np.clip(TARGET_VOL / pred_v, 0.05, 1.0)) if pred_v > 0 else FALLBACK_PE_EQUITY
         trigger = "是" if dd_frac > DD_TRIGGER_FRAC else "否"
         lines.append(
             f"| {m_ts.strftime('%Y-%m')} | {fmt_pct(pred_v)} | {fmt_pct(dd_frac)} {trigger} "
@@ -387,7 +395,18 @@ def generate_report(metrics, signals, port_codes, data_info, dd_threshold):
     lines.append("- **回撤标签**：月内最大回撤在**复权净值**（累计净值，除息日不下挫）上计算；"
                  "旧版直接用单位净值，分红会污染标签。")
     lines.append("- **阈值的选择**：回撤阈值来自对 OOS 的敏感性搜索，属于样本内选型 —— "
-                 "本报告的绝对 AUC 因此偏乐观。\n")
+                 "本报告的绝对 AUC 因此偏乐观。")
+    # 兜底声明：这几个月的仓位不是信号算出来的
+    _fb_vol = _fb_dd = _n_months = 0
+    if metrics:
+        _any = next(iter(metrics.values()))
+        _fb_vol = int(_any.get("fallback_vol_signal_months", 0))
+        _fb_dd = int(_any.get("fallback_dd_signal_months", 0))
+        _n_months = int(_any.get("months", 0))
+    lines.append(f"- **缺失信号的兜底（不静默）**：OOS 共 {_n_months} 个月，其中"
+                 f"**波动率信号缺失 {_fb_vol} 个月**（按 {FALLBACK_PRED_VOL*100:.0f}% 年化兜底）、"
+                 f"**回撤信号缺失 {_fb_dd} 个月**（按「无触发」兜底）。"
+                 "这几个月的仓位不是模型算出来的，报告结论不应覆盖它们以外的月份。\n")
 
     lines.append("---")
     lines.append("*本报告由 `src/analysis/portfolio_simulation.py` 自动生成。"
@@ -494,7 +513,7 @@ def main():
     sig_rows = []
     for s in signals.get("Vol_DD_Combined", []):
         m_ts, pred_v, dd_frac, comb_pos = s
-        vt_pos = float(np.clip(TARGET_VOL / pred_v, 0.05, 1.0)) if pred_v > 0 else 0.35
+        vt_pos = float(np.clip(TARGET_VOL / pred_v, 0.05, 1.0)) if pred_v > 0 else FALLBACK_PE_EQUITY
         sig_rows.append({
             "month": m_ts, "pred_vol": pred_v, "dd_warning_frac": dd_frac,
             "vol_target_pos": vt_pos, "combined_pos": comb_pos,

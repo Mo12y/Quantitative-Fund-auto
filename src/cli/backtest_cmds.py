@@ -325,7 +325,7 @@ def cmd_backtest3():
 
     cm = result.get("cost_model") or {}
     if cm:
-        print(f"\n💸 成本模型: 申购 {cm['purchase_fee']*100:.2f}% · "
+        print(f"\n💸 成本模型: 申购 {cm['purchase_fee']*100:.2f}%（**C/E/I 类为 0**） · "
               f"赎回 <7天 {cm['redemption_fee_lt7d']*100:.2f}% / ≥7天 {cm['redemption_fee_ge7d']*100:.2f}% · "
               f"管理费年化 {cm['management_fee_annual']*100:.2f}%")
         print(f"   费率真源: {cm.get('source', '')}")

@@ -108,16 +108,16 @@
 
 | 文件 | 说明 |
 |:--|:--|:--|
-| [src/analysis/vol_predictor.py](file:///d:/DSH/Quantitative-Fund-auto/src/analysis/vol_predictor.py) | vol 预测（HAR-RV 主模型） |
-| [src/analysis/vol_model_comparison.py](file:///d:/DSH/Quantitative-Fund-auto/src/analysis/vol_model_comparison.py) | vol 多模型对比 |
-| [src/analysis/drawdown_warning.py](file:///d:/DSH/Quantitative-Fund-auto/src/analysis/drawdown_warning.py) | 回撤预警分类器 |
-| [src/analysis/portfolio_simulation.py](file:///d:/DSH/Quantitative-Fund-auto/src/analysis/portfolio_simulation.py) | 组合模拟（本模块） |
-| [docs/vol_model_comparison_report.md](file:///d:/DSH/Quantitative-Fund-auto/docs/vol_model_comparison_report.md) | vol 多模型对比报告 |
-| [docs/drawdown_warning_report.md](file:///d:/DSH/Quantitative-Fund-auto/docs/drawdown_warning_report.md) | 回撤预警报告 |
-| [docs/portfolio_simulation_report.md](file:///d:/DSH/Quantitative-Fund-auto/docs/portfolio_simulation_report.md) | 组合模拟报告 |
-| [docs/vol_final_review.md](file:///d:/DSH/Quantitative-Fund-auto/docs/vol_final_review.md) | vol 预测最终审查 |
-| [docs/drawdown_final_review.md](file:///d:/DSH/Quantitative-Fund-auto/docs/drawdown_final_review.md) | 回撤预警最终审查 |
-| [docs/portfolio_final_review.md](file:///d:/DSH/Quantitative-Fund-auto/docs/portfolio_final_review.md) | 本审查文档 |
+| [src/analysis/vol_predictor.py](file:///D:/DSH/projects/Quantitative-Fund-auto/src/analysis/vol_predictor.py) | vol 预测（HAR-RV 主模型） |
+| [src/analysis/vol_model_comparison.py](file:///D:/DSH/projects/Quantitative-Fund-auto/src/analysis/vol_model_comparison.py) | vol 多模型对比 |
+| [src/analysis/drawdown_warning.py](file:///D:/DSH/projects/Quantitative-Fund-auto/src/analysis/drawdown_warning.py) | 回撤预警分类器 |
+| [src/analysis/portfolio_simulation.py](file:///D:/DSH/projects/Quantitative-Fund-auto/src/analysis/portfolio_simulation.py) | 组合模拟（本模块） |
+| [docs/vol_model_comparison_report.md](file:///D:/DSH/projects/Quantitative-Fund-auto/docs/vol_model_comparison_report.md) | vol 多模型对比报告 |
+| [docs/drawdown_warning_report.md](file:///D:/DSH/projects/Quantitative-Fund-auto/docs/drawdown_warning_report.md) | 回撤预警报告 |
+| [docs/portfolio_simulation_report.md](file:///D:/DSH/projects/Quantitative-Fund-auto/docs/portfolio_simulation_report.md) | 组合模拟报告 |
+| [docs/vol_final_review.md](file:///D:/DSH/projects/Quantitative-Fund-auto/docs/vol_final_review.md) | vol 预测最终审查 |
+| [docs/drawdown_final_review.md](file:///D:/DSH/projects/Quantitative-Fund-auto/docs/drawdown_final_review.md) | 回撤预警最终审查 |
+| [docs/portfolio_final_review.md](file:///D:/DSH/projects/Quantitative-Fund-auto/docs/portfolio_final_review.md) | 本审查文档 |
 
 ## 最终可行方案
 

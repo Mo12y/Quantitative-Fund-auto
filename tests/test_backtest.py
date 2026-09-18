@@ -21,6 +21,7 @@ from src.analysis.backtest import (
     alpha_t_test,
     compute_beta_and_alpha,
     compute_max_drawdown,
+    compute_metrics,
     _t_cdf,
     _t_cdf_numerical,
 )
@@ -47,10 +48,11 @@ class _FakeConn:
 
 
 class _FakeNavDB:
-    """只提供净值的最小假库。navs: {code: {date: nav}}"""
+    """只提供净值的最小假库。navs: {code: {date: nav}}；names: {code: fund_name}"""
 
-    def __init__(self, navs):
+    def __init__(self, navs, names=None):
         self._navs = navs
+        self._names = names or {}
         all_d = sorted({d for m in navs.values() for d in m})
         self.conn = _FakeConn(all_d)
 
@@ -62,15 +64,20 @@ class _FakeNavDB:
                 for d, v in sorted(self._navs.get(code, {}).items())
                 if end_date is None or d <= end_date]
 
+    def get_fund_info(self, code):
+        return {"fund_name": self._names.get(code, "")}
+
 
 ZERO_COST = CostModel(fee_scale=0.0)
 
 
-def _fake_market():
+def _fake_market(names=None):
     """造一段可控行情：A 每日稳定上涨，B 完全不涨；返回 (db, navs, 月末网格)。
 
     网格按 run() 的同款定义生成（末端 = 最新净值日，起点回溯 1 年，取自然月末），
     这样手算与引擎走的是同一串月份。
+
+    `names` 用于测份额类别对申购费的影响；不传则基金名为空（走保守默认费率）。
     """
     dates = pd.date_range("2022-01-03", "2023-08-31", freq="B").strftime("%Y-%m-%d").tolist()
     navs = {
@@ -81,7 +88,7 @@ def _fake_market():
     start = (pd.to_datetime(end) - pd.Timedelta(days=365)).strftime("%Y-%m-%d")
     grid = [d.strftime("%Y-%m-%d")
             for d in pd.date_range(start=start, end=end, freq="ME")]
-    return _FakeNavDB(navs), navs, grid
+    return _FakeNavDB(navs, names=names), navs, grid
 
 
 def _engine(db, cost=None):
@@ -163,17 +170,18 @@ class TestMonthGrid(unittest.TestCase):
 class TestCostsFlowIntoMetrics(unittest.TestCase):
     """B1: 申购费/赎回费/管理费必须流进指标；费率归零时应复现毛收益"""
 
-    def _expected(self, navs, grid, cost):
+    def _expected(self, navs, grid, cost, buy_fee=None):
         """独立手算：等权买 A/B，A 按净值增长，B 不动，再按期扣管理费。
 
         净值按"不晚于该日期的最近一条"取值（与 get_fund_nav(end_date=...) 同口径）。
+        `buy_fee` 指定首月建仓的申购费率；不传则用 `cost.purchase_rate()`（默认费率）。
         """
         def asof(code, d):
             keys = [k for k in navs[code] if k <= d]
             return navs[code][max(keys)]
 
         pv = 100.0
-        pv -= pv * cost.purchase_rate()        # 首月建仓：申购费
+        pv -= pv * (cost.purchase_rate() if buy_fee is None else buy_fee)   # 首月建仓：申购费
         vA = vB = pv / 2.0
         for m, nm in zip(grid[:-1], grid[1:]):
             rA = asof("A", nm) / asof("A", m) - 1
@@ -209,7 +217,109 @@ class TestCostsFlowIntoMetrics(unittest.TestCase):
         db, _, _ = _fake_market()
         r = _engine(db, CostModel()).run(lookback_years=1)
         self.assertIn("cost_model", r)
-        self.assertAlmostEqual(r["cost_model"]["round_trip_cost_1y"], 0.0015 + 0.015, places=6)
+        # 管理费默认 0 → 1 年往返成本 = 申购费 0.15% + 赎回 0
+        self.assertAlmostEqual(r["cost_model"]["round_trip_cost_1y"], 0.0015, places=6)
+        self.assertEqual(r["cost_model"]["management_fee_annual"], 0.0)
+
+    def test_management_fee_not_charged_separately(self):
+        """1.2 回归：净值已含管理费，不得再按月扣一次。
+
+        默认 CostModel 的管理费率必须是 0；且在这个"零申购费(C类)+零管理费"的场景下，
+        组合总收益必须与**净值本身的复利**完全一致 —— 多扣任何一笔费用都会让它偏低。
+        """
+        self.assertEqual(CostModel().management_fee_annual, 0.0)
+        db, navs, grid = _fake_market(names={"A": "某某混合C", "B": "某某混合C"})
+        r = _engine(db, CostModel()).run(lookback_years=1)
+        # C 类份额：申购费 0；管理费 0 → 组合收益 = 净值复利，一分钱都没多扣
+        exp = self._expected(navs, grid, CostModel(), buy_fee=0.0)
+        self.assertAlmostEqual(r["strategy"]["total_return"], round(exp, 2), places=2)
+
+    def test_charging_management_fee_would_lower_the_result(self):
+        """证明这一项仍然"接线"着 —— 只是默认关掉了（回测标的是指数时才会用到）"""
+        db0, _, _ = _fake_market(names={"A": "某某混合C", "B": "某某混合C"})
+        r0 = _engine(db0, CostModel()).run(lookback_years=1)
+        db1, _, _ = _fake_market(names={"A": "某某混合C", "B": "某某混合C"})
+        r1 = _engine(db1, CostModel(management_fee_annual=0.015)).run(lookback_years=1)
+        self.assertLess(r1["strategy"]["total_return"], r0["strategy"]["total_return"])
+
+
+class TestSharpeRiskFreeRate(unittest.TestCase):
+    """1.1: `ann_ret` 是百分数、`rf_annual` 是小数 —— 相减前必须归一。
+
+    旧实现 `(ann_ret - rf_annual)` 只扣了 0.02 个百分点而不是 2 个百分点（差 100 倍）。
+    """
+
+    def setUp(self):
+        rng = np.random.default_rng(7)
+        self.rets = rng.normal(1.0, 3.0, 60)
+
+    def test_rf_is_actually_subtracted(self):
+        m0 = compute_metrics(self.rets, rf_annual=0.0)
+        m2 = compute_metrics(self.rets, rf_annual=0.02)
+        av = m0["annual_volatility"]
+        # 回归本 bug：旧实现这里恒为 0.0000
+        self.assertAlmostEqual(m2["sharpe"] - m0["sharpe"], -2.0 / av, delta=0.02)
+
+    def test_rf0_and_default_are_not_identical(self):
+        a = compute_metrics(self.rets, rf_annual=0.0)["sharpe"]
+        b = compute_metrics(self.rets)["sharpe"]      # 默认 0.02
+        self.assertNotAlmostEqual(a, b, places=2)
+
+    def test_sharpe_matches_manual(self):
+        m = compute_metrics(self.rets, rf_annual=0.02)
+        manual = (m["annual_return"] - 2.0) / m["annual_volatility"]
+        self.assertAlmostEqual(m["sharpe"], manual, places=2)
+
+    def test_consistent_with_portfolio_metrics(self):
+        """同一组收益，两个模块的 Sharpe 必须一致（旧版 1.59 vs 1.83）"""
+        from src.analysis.vol_predictor import _portfolio_metrics
+        import pandas as pd
+        a = compute_metrics(self.rets, rf_annual=0.02)
+        b = _portfolio_metrics(pd.Series(self.rets / 100.0), rf_annual=0.02)
+        self.assertAlmostEqual(a["sharpe"], b["sharpe"], places=2)
+
+    def test_unit_conventions_differ_and_are_documented(self):
+        """compute_metrics 返回百分数、_portfolio_metrics 返回小数（各自 docstring 已写明）"""
+        from src.analysis.vol_predictor import _portfolio_metrics
+        import pandas as pd
+        a = compute_metrics(self.rets, rf_annual=0.02)
+        b = _portfolio_metrics(pd.Series(self.rets / 100.0), rf_annual=0.02)
+        self.assertAlmostEqual(a["annual_return"], b["annual_return"] * 100, delta=0.05)
+        self.assertIn("小数", _portfolio_metrics.__doc__)
+        self.assertIn("百分数", compute_metrics.__doc__)
+
+
+class TestPurchaseRateByShareClass(unittest.TestCase):
+    """1.3: 前端申购费按份额类别 —— C/E/I 类不收（销售服务费已含在净值里）"""
+
+    def test_c_and_e_class_free(self):
+        cm = CostModel()
+        self.assertEqual(cm.purchase_rate("某某混合C"), 0.0)
+        self.assertEqual(cm.purchase_rate("某某混合E"), 0.0)
+
+    def test_a_class_uses_configured_default(self):
+        cm = CostModel()
+        self.assertEqual(cm.purchase_rate("某某混合A"), cm.purchase_fee)
+
+    def test_no_name_falls_back_to_default(self):
+        self.assertEqual(CostModel().purchase_rate(), 0.0015)
+
+    def test_fee_scale_zeroes_everything(self):
+        cm = CostModel(fee_scale=0.0)
+        self.assertEqual(cm.purchase_rate("某某混合A"), 0.0)
+        self.assertEqual(cm.purchase_rate("某某混合C"), 0.0)
+
+    def test_c_class_buy_pays_no_purchase_fee(self):
+        """端到端：全 C 类组合的买入成本应为 0"""
+        db, _, _ = _fake_market(names={"A": "某某混合C", "B": "某某混合C"})
+        r = _engine(db, CostModel()).run(lookback_years=1)
+        self.assertNotIn("error", r)
+        self.assertEqual(sum(t["buy_cost"] for t in r["trades"]), 0.0)
+
+    def test_a_class_buy_pays_purchase_fee(self):
+        db, _, _ = _fake_market(names={"A": "某某混合A", "B": "某某混合A"})
+        r = _engine(db, CostModel()).run(lookback_years=1)
+        self.assertGreater(sum(t["buy_cost"] for t in r["trades"]), 0.0)
 
 
 class TestDateAlignment(unittest.TestCase):
@@ -292,13 +402,18 @@ class TestCostModel(unittest.TestCase):
         self.assertEqual(zero.purchase_rate(), 0.0)
         self.assertEqual(zero.management_rate_annual(), 0.0)
 
-    def test_round_trip_includes_management_fee(self):
-        """往返成本 = 申购费 + 赎回费 + 持有期管理费摊销"""
-        # 持有 365 天：0.15% 申购 + 0 赎回 + 1.5% 管理费
-        self.assertAlmostEqual(self.cost.round_trip_cost(365), 0.0015 + 0.015, places=6)
-        # 持有 3 天：0.15% 申购 + 1.5% 赎回 + 少量管理费
-        c = self.cost.round_trip_cost(3)
-        self.assertAlmostEqual(c, 0.0015 + 0.015 + 0.015 * 3 / 365, places=6)
+    def test_round_trip_cost_defaults_without_management_fee(self):
+        """往返成本 = 申购费 + 赎回费（管理费默认为 0：净值已含，不再重复扣）"""
+        # 持有 365 天：0.15% 申购 + 0 赎回 + 0 管理费
+        self.assertAlmostEqual(self.cost.round_trip_cost(365), 0.0015, places=6)
+        # 持有 3 天：0.15% 申购 + 1.5% 赎回
+        self.assertAlmostEqual(self.cost.round_trip_cost(3), 0.0015 + 0.015, places=6)
+
+    def test_round_trip_cost_still_models_management_fee_when_asked(self):
+        """显式给出管理费率时仍能算（用于"回测标的换成指数"的假设场景）"""
+        cm = CostModel(management_fee_annual=0.015)
+        self.assertAlmostEqual(cm.round_trip_cost(365), 0.0015 + 0.015, places=6)
+        self.assertAlmostEqual(cm.round_trip_cost(3), 0.0015 + 0.015 + 0.015 * 3 / 365, places=6)
 
 
 class TestMaxDrawdown(unittest.TestCase):

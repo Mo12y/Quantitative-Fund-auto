@@ -3,8 +3,9 @@
 
 相对 v1/v2 的核心改进：
 1. 防未来函数：PE 温度用「扩展窗口分位数」（只用 <=T 的数据），信号只用当日及之前数据
-2. 交易成本计入指标：申购费 + 赎回费（真源见 portfolio.redeem_fee_rate）+ 管理费月度摊销，
+2. 交易成本计入指标：申购费（按份额类别）+ 赎回费（真源见 portfolio.redeem_fee_rate），
    全部流进 strategy_monthly 的**净收益**（旧版扣在一个没人读的变量上）
+   —— **管理费不再单独计提**：净值本身已扣除管理费，再扣一次属重复计费
 3. 多基准对比：沪深300 / 中证500（按**日期**对齐，非位置截断）
 4. 统计检验：月度超额收益（alpha）的 t 检验、Beta
 5. 逐年一致性：按**自然年**分解收益
@@ -25,7 +26,8 @@ import pandas as pd
 
 from ..config import get_config
 from ..data.database import Database
-from .portfolio import redeem_fee_rate
+from .portfolio import redeem_fee_rate, purchase_fee_rate
+from .nav_series import valuation_nav, valuation_nav_series
 
 
 # =====================================================================
@@ -40,20 +42,38 @@ class CostModel:
     与监管下限 1.5% 孰高；≥7 天为 0）—— 与持仓账务同一口径。
     旧版这里自建了「7–30 天 0.5%」这一档，与账务真源冲突，会系统性高估成本。
 
+    申购费率按**份额类别**（C/E/I 类不收前端申购费）—— 见 `portfolio.purchase_fee_rate`。
+
+    **管理费默认为 0，这是有意的**：回测标的是基金公布的**单位净值**，而基金的管理费/
+    托管费/销售服务费**每日从基金资产中计提，公告净值已扣除**（016453 费率页原文：
+    「无需投资者在每笔交易中另行支付」）。所以再按月扣一次管理费就是**重复计费** ——
+    旧版硬编码 1.5%/年，5 年回测会凭空低估约 7%，而且 1.5% 本身也是真实运作费
+    （该基金三项合计 0.75%）的 2 倍。
+    只有当回测标的换成**指数收益**（不含管理费）时，才需要把这里设回非 0。
+
     fee_scale 只用于敏感性/对照实验（0 = 零费率，用来隔离"成本是否进入指标"）。
     """
-    purchase_fee: float = 0.0015          # 申购费 0.15%
-    management_fee_annual: float = 0.015  # 管理费年化 1.5%
+    purchase_fee: float = 0.0015          # 申购费 0.15%（仅 A 类/未知份额用）
+    management_fee_annual: float = 0.0    # 管理费年化：净值已含，默认不再重复扣
     fee_scale: float = 1.0                # 1=按真实费率计；0=零费率对照
 
     def redemption_rate(self, days_held: int, redeem_fee_text=None) -> float:
         """赎回费率（委托给 portfolio 的单一真源）。"""
         return self.fee_scale * redeem_fee_rate(redeem_fee_text, days_held)
 
-    def purchase_rate(self) -> float:
-        return self.fee_scale * self.purchase_fee
+    def purchase_rate(self, fund_name: str = None) -> float:
+        """前端申购费率。
+
+        传了 `fund_name` 就按**份额类别**判断 —— C/E/I 类不收前端申购费（改收销售
+        服务费，已从每日净值里扣）→ 0；A 类/推断不出类别 → `purchase_fee`。
+        不传则退回 `purchase_fee`（用于"不知道具体标的"的粗略估算）。
+        """
+        if fund_name is None:
+            return self.fee_scale * self.purchase_fee
+        return self.fee_scale * purchase_fee_rate(fund_name, default=self.purchase_fee)
 
     def management_rate_annual(self) -> float:
+        """月度摊销用的年化管理费率。**默认 0**（净值已含管理费，不再重复扣）。"""
         return self.fee_scale * self.management_fee_annual
 
     def round_trip_cost(self, days_held: int, redeem_fee_text=None) -> float:
@@ -79,9 +99,19 @@ def compute_metrics(returns: np.ndarray, rf_annual: float = 0.02) -> Dict:
     """
     从月频收益序列（百分数）计算业绩指标。
 
+    **单位约定（务必看清）**：
+    - 入参 `returns`：月收益，单位 **百分数**（1.5 表示 1.5%）
+    - 入参 `rf_annual`：无风险利率（年化），单位 **小数**（`0.02` 表示 2%），
+      与 `vol_predictor._portfolio_metrics` 同语义
+    - **返回值**：`total_return` / `annual_return` / `annual_volatility` /
+      `max_drawdown` 均为**百分数**；`sharpe` 无量纲
+
+    （`vol_predictor._portfolio_metrics` 的返回是**小数**，格式化成文本时
+    必须走 `fmt_pct`，不要与这里的值混排。）
+
     Args:
         returns: 月收益数组，单位 %
-        rf_annual: 无风险利率（年化）
+        rf_annual: 无风险利率（年化），单位小数，0.02 = 2%
     """
     r = np.asarray(returns, dtype=float)
     n = len(r)
@@ -91,7 +121,10 @@ def compute_metrics(returns: np.ndarray, rf_annual: float = 0.02) -> Dict:
     total_ret = (nav[-1] - 1) * 100
     ann_ret = ((nav[-1]) ** (12.0 / n) - 1) * 100
     ann_vol = np.std(r, ddof=1) * np.sqrt(12)
-    sharpe = (ann_ret - rf_annual) / ann_vol if ann_vol > 0 else 0
+    # ann_ret 是**百分数**（如 12.86），rf_annual 是**小数**（如 0.02）。
+    # 旧实现直接 `ann_ret - rf_annual` → 只扣了 0.02 个百分点而不是 2 个百分点
+    # （差 100 倍，无风险利率形同没扣）。这里把 rf 归一到百分数再相减。
+    sharpe = (ann_ret - rf_annual * 100.0) / ann_vol if ann_vol > 0 else 0
     mdd = compute_max_drawdown(nav)
     calmar = ann_ret / mdd if mdd > 0 else 0
     win_rate = float((r > 0).sum() / n * 100)
@@ -321,7 +354,8 @@ class RigorousBacktest:
                 continue
             try:
                 df_nav = pd.DataFrame(navs).sort_values("nav_date")
-                nav_series = df_nav["unit_nav"].values
+                # 估值/打分一律用累计净值（分红除息日单位净值下挫会被误判成下跌）
+                nav_series = valuation_nav_series(df_nav).values
 
                 # 近3月动量
                 if len(nav_series) >= 63:
@@ -378,6 +412,17 @@ class RigorousBacktest:
         return [d.strftime("%Y-%m-%d")
                 for d in pd.date_range(start=start_dt, end=end_dt, freq="ME")]
 
+    def _fund_names(self, codes) -> Dict[str, str]:
+        """code -> fund_name（一次拉取，供**份额类别**判断用）。查不到记为 ''。"""
+        out: Dict[str, str] = {}
+        for c in codes:
+            try:
+                info = self.db.get_fund_info(c) or {}
+            except Exception:
+                info = {}
+            out[c] = info.get("fund_name") or ""
+        return out
+
     # ------------------------------------------------------------------
     # 主回测
     # ------------------------------------------------------------------
@@ -420,6 +465,8 @@ class RigorousBacktest:
         all_codes = list(self.db.get_all_fund_codes())
         if not all_codes:
             return {"error": "无净值数据"}
+        # 份额类别查表：申购费按 C/A 类分派（见 portfolio.purchase_fee_rate）
+        name_map = self._fund_names(all_codes)
 
         # 3. 时间范围
         cur = self.db.conn.cursor()
@@ -478,11 +525,17 @@ class RigorousBacktest:
                     portfolio_value -= sell_cost
 
                     # 申购费：只对**实际加仓**的成交额计（旧版对整仓计费，
-                    # 选中同一批基金原封不动持有也会被收一次申购费）
+                    # 选中同一批基金原封不动持有也会被收一次申购费）。
+                    # 费率按**份额类别**逐只判断：C/E/I 类不收前端申购费 → 0。
                     post_target = portfolio_value / n_new
                     kept = {c: max(0.0, cur.get(c, 0.0) - sell_amt.get(c, 0.0)) for c in new_picks}
-                    buy_notional = sum(max(0.0, post_target - kept[c]) for c in new_picks)
-                    buy_cost = buy_notional * self.cost.purchase_rate()
+                    buy_notional, buy_cost = 0.0, 0.0
+                    for c in new_picks:
+                        amt = max(0.0, post_target - kept[c])
+                        if amt <= 0:
+                            continue
+                        buy_notional += amt
+                        buy_cost += amt * self.cost.purchase_rate(name_map.get(c, ""))
                     portfolio_value -= buy_cost
 
                     holdings = [
@@ -552,14 +605,18 @@ class RigorousBacktest:
         return out
 
     def _monthly_returns(self, holdings, m: str, next_m: str) -> Dict[str, float]:
-        """各持仓当月收益（%）：code -> ret"""
+        """各持仓当月收益（%）：code -> ret
+
+        取**累计净值**：这是"这只基金这个月替你赚了多少"，
+        单位净值会把分红除息当成下跌，把回测年化系统性压低。
+        """
         out: Dict[str, float] = {}
         for h in holdings:
             nb = self.db.get_fund_nav(h["code"], end_date=m)
             na = self.db.get_fund_nav(h["code"], end_date=next_m)
             if nb and na:
-                b = float(nb[-1]["unit_nav"])
-                a = float(na[-1]["unit_nav"])
+                b = valuation_nav(nb[-1]["unit_nav"], nb[-1].get("acc_nav"))
+                a = valuation_nav(na[-1]["unit_nav"], na[-1].get("acc_nav"))
                 if b > 0:
                     out[h["code"]] = (a / b - 1) * 100
         return out
@@ -586,12 +643,14 @@ class RigorousBacktest:
                      "策略与基准按日期 inner join 对齐"),
             "cost_model": {
                 "purchase_fee": self.cost.purchase_fee,
+                "purchase_fee_note": "A 类/未知份额用此默认值；C/E/I 类前端申购费为 0"
+                                     "（见 portfolio.purchase_fee_rate）",
                 "redemption_fee_lt7d": round(self.cost.redemption_rate(3), 4),
                 "redemption_fee_ge7d": round(self.cost.redemption_rate(30), 4),
                 "management_fee_annual": self.cost.management_fee_annual,
                 "fee_scale": self.cost.fee_scale,
                 "round_trip_cost_1y": round(self.cost.round_trip_cost(365), 4),
-                "source": "portfolio.redeem_fee_rate（与持仓账务同一真源）",
+                "source": "portfolio.redeem_fee_rate / purchase_fee_rate（与持仓账务同一真源）",
             },
         }
         for sym, rets in benchmark_returns.items():

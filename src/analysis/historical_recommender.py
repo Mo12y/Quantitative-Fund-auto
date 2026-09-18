@@ -21,6 +21,7 @@ from typing import Optional
 from collections import defaultdict
 
 from ..data.database import Database
+from .nav_series import VALUATION_NAV_SQL, valuation_nav
 
 
 class HistoricalRecommender:
@@ -252,7 +253,8 @@ class HistoricalRecommender:
         可用 since(YYYY-MM-DD) 只加载回测窗口内及更早一小段(供动量/夏普预热)的历史，
         避免固定 LIMIT 300 把多年回测的早期月份“截断成无历史”。"""
         cur = self.db.conn.cursor()
-        sql = ("SELECT nav_date, unit_nav FROM fund_nav "
+        # 取累计净值：动量/夏普是"这只基金赚了多少"，单位净值会把分红算成下跌
+        sql = ("SELECT nav_date, " + VALUATION_NAV_SQL + " AS nav FROM fund_nav "
                "WHERE fund_code = ?" + (" AND nav_date >= ?" if since else "") +
                " ORDER BY nav_date ASC LIMIT 8000")
         params = [code] + ([since] if since else [])
@@ -318,7 +320,8 @@ class HistoricalRecommender:
 
     # legacy compat
     def _quick_score(self, code: str, nav_records: list, date: str) -> Optional[float]:
-        navs = [(str(r.get('nav_date','')), float(r.get('unit_nav',0))) for r in nav_records]
+        navs = [(str(r.get('nav_date','')),
+                 valuation_nav(r.get('unit_nav'), r.get('acc_nav'))) for r in nav_records]
         navs.sort(key=lambda x: x[0])
         return self._score_from_tuples(navs, date)
 

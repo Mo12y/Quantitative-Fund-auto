@@ -95,13 +95,13 @@
 
 | 文件 | 说明 |
 |:--|:--|
-| [src/analysis/vol_predictor.py](file:///d:/DSH/Quantitative-Fund-auto/src/analysis/vol_predictor.py) | vol 预测（HAR-RV 主模型 + XGBoost 对比） |
-| [src/analysis/vol_model_comparison.py](file:///d:/DSH/Quantitative-Fund-auto/src/analysis/vol_model_comparison.py) | vol 多模型对比（6 模型 + 排列检验） |
-| [src/analysis/drawdown_warning.py](file:///d:/DSH/Quantitative-Fund-auto/src/analysis/drawdown_warning.py) | 回撤预警分类器（4 模型 + 3 阈值 + 排列检验） |
-| [docs/vol_model_comparison_report.md](file:///d:/DSH/Quantitative-Fund-auto/docs/vol_model_comparison_report.md) | vol 多模型对比报告（修正版） |
-| [docs/drawdown_warning_report.md](file:///d:/DSH/Quantitative-Fund-auto/docs/drawdown_warning_report.md) | 回撤预警报告（修正版） |
-| [docs/vol_final_review.md](file:///d:/DSH/Quantitative-Fund-auto/docs/vol_final_review.md) | vol 预测最终审查（修正版） |
-| [docs/drawdown_final_review.md](file:///d:/DSH/Quantitative-Fund-auto/docs/drawdown_final_review.md) | 本审查文档（修正版） |
+| [src/analysis/vol_predictor.py](file:///D:/DSH/projects/Quantitative-Fund-auto/src/analysis/vol_predictor.py) | vol 预测（HAR-RV 主模型 + XGBoost 对比） |
+| [src/analysis/vol_model_comparison.py](file:///D:/DSH/projects/Quantitative-Fund-auto/src/analysis/vol_model_comparison.py) | vol 多模型对比（6 模型 + 排列检验） |
+| [src/analysis/drawdown_warning.py](file:///D:/DSH/projects/Quantitative-Fund-auto/src/analysis/drawdown_warning.py) | 回撤预警分类器（4 模型 + 3 阈值 + 排列检验） |
+| [docs/vol_model_comparison_report.md](file:///D:/DSH/projects/Quantitative-Fund-auto/docs/vol_model_comparison_report.md) | vol 多模型对比报告（修正版） |
+| [docs/drawdown_warning_report.md](file:///D:/DSH/projects/Quantitative-Fund-auto/docs/drawdown_warning_report.md) | 回撤预警报告（修正版） |
+| [docs/vol_final_review.md](file:///D:/DSH/projects/Quantitative-Fund-auto/docs/vol_final_review.md) | vol 预测最终审查（修正版） |
+| [docs/drawdown_final_review.md](file:///D:/DSH/projects/Quantitative-Fund-auto/docs/drawdown_final_review.md) | 本审查文档（修正版） |
 
 ## 关键数据摘要（修正后）
 

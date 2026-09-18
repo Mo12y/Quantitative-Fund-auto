@@ -18,6 +18,15 @@ import pandas as pd
 import numpy as np
 from typing import Optional
 from ..data.database import Database
+from .nav_series import valuation_nav_series
+
+# 申购状态分类（D2）——
+#   `暂停申购` / `封闭期`：**买不进去**，直接排除出推荐池；
+#   `限大额`：限额度 ≠ 不能买（每天 ¥10 定投完全合规）→ 保留，但标注单日上限；
+#   空串 / NULL / 无法归类的文字：**视为未知**，沿用 `_check_size` 的“无数据(跳过检查)”
+#   做法，**不得静默当作可申购**。
+_BLOCKED_PURCHASE_MARKERS = ("暂停申购", "封闭期")
+_LIMITED_PURCHASE_MARKERS = ("限大额", "限购")
 
 
 class FundScreener:
@@ -92,8 +101,8 @@ class FundScreener:
             info = fund_info_map[code]
             result = self._score_series(vals, info)
 
-            # 排除标签为"不合格"的基金
-            if result["risk_label"] == "不合格":
+            # 排除标签为"不合格"的基金，以及**买不进去**的（暂停申购/封闭期）
+            if result["risk_label"] == "不合格" or result.get("purchase_blocked"):
                 continue
 
             results.append({
@@ -102,6 +111,7 @@ class FundScreener:
                 "fund_type": ftype,
                 "mgt_fee": info.get("mgt_fee", 0) or 0,
                 "fund_size": info.get("fund_size", 0) or 0,
+                "purchase_status": result["metrics"].get("purchase_status", ""),
                 "risk_label": result["risk_label"],
                 "risk_reasons": result["risk_reasons"],
                 "quality_checks": result["quality_checks"],
@@ -163,6 +173,30 @@ class FundScreener:
             return f"⚠️ {total:.2f}%(偏高)", None, total
         return f"✅ {total:.2f}%", None, total
 
+    def _check_purchasable(self, fund_info: dict) -> tuple:
+        """可申购性检查 → (check_text, warning, status_raw)
+
+        **`warning` 一律返回 None**（除非真的买不进去）—— 申购状态与"基金好不好"
+        是两个轴：`限大额` 是申购限制，不是质量瑕疵。把它算进 `warn_count`
+        会把一只 🟢 稳健基金压成 🟡 注意，等于变相降级（D2 要的是"保留但标注"）。
+        所以限大额只写进 `quality_checks["申购状态"]` 与行上的 `purchase_status`
+        字段，由前端单独挂一个标签，**不改风险等级**。
+
+        `status_raw` 原样返回，供调用方决定是否真的排除。
+        **未知不等于可申购**：空串和无法归类的文字都走“⊘ 未知(跳过检查)”，
+        既不判失败也不判通过（沿用 `_check_size` 的既有做法）。
+        """
+        raw = (fund_info.get("purchase_status") or "").strip()
+        if not raw:
+            return "⊘ 申购状态未知(跳过检查)", None, raw
+        if any(m in raw for m in _BLOCKED_PURCHASE_MARKERS):
+            return f"❌ {raw}", f"当前**{raw}**，买不进去，不应出现在推荐池里", raw
+        if any(m in raw for m in _LIMITED_PURCHASE_MARKERS):
+            return "🔸 限大额·注意单日申购上限", None, raw
+        if "开放" in raw:
+            return "✅ 可申购", None, raw
+        return f"⊘ 申购状态未知({raw})", None, raw
+
     def _check_drawdown(self, vals) -> tuple:
         """近1年最大回撤检查 → (check_text, warning, max_dd)
 
@@ -217,18 +251,24 @@ class FundScreener:
     # ------------------------------------------------------------------
 
     def _nav_values(self, fund_code: str) -> np.ndarray:
-        """单只基金的净值序列（按日期升序的 numpy 数组）。"""
+        """单只基金的**估值净值**序列（按日期升序的 numpy 数组）。
+
+        用累计净值而非单位净值：分红除息日单位净值下挫会被下面几个检查
+        误判成"真实下跌"（假回撤 / 假低动量），见 `nav_series` 模块说明。
+        """
         df = pd.read_sql_query(
-            "SELECT unit_nav FROM fund_nav WHERE fund_code = ? AND unit_nav IS NOT NULL "
+            "SELECT unit_nav, acc_nav FROM fund_nav WHERE fund_code = ? AND unit_nav IS NOT NULL "
             "ORDER BY nav_date ASC", self.db.conn, params=[fund_code])
-        return df["unit_nav"].to_numpy(dtype=float)
+        return valuation_nav_series(df).to_numpy(dtype=float)
 
     def _load_nav_series(self, codes: list) -> dict:
-        """一次性读出多只基金的净值序列 → {code: np.ndarray(升序)}。
+        """一次性读出多只基金的**估值净值**序列 → {code: np.ndarray(升序)}。
 
         原来每只基金走一次 `get_fund_nav()`（list[dict] → DataFrame），
         540 只基金要构造 100 多万个 dict；这里改成按批 SQL 直读 + groupby，
         实测 /api/funds 的冷计算从 ~7.8s 降到 ~2.8s。
+
+        取累计净值（见 `nav_series`）：单位净值会把分红除息当成下跌。
         """
         out = {}
         if not codes:
@@ -236,12 +276,12 @@ class FundScreener:
         CHUNK = 500                                   # 控制在 SQLite 变量上限内
         for i in range(0, len(codes), CHUNK):
             part = codes[i:i + CHUNK]
-            q = ("SELECT fund_code, unit_nav FROM fund_nav "
+            q = ("SELECT fund_code, unit_nav, acc_nav FROM fund_nav "
                  "WHERE unit_nav IS NOT NULL AND fund_code IN (%s) "
                  "ORDER BY fund_code, nav_date" % ",".join("?" * len(part)))
             df = pd.read_sql_query(q, self.db.conn, params=part)
             for code, sub in df.groupby("fund_code", sort=False):
-                out[code] = sub["unit_nav"].to_numpy(dtype=float)
+                out[code] = valuation_nav_series(sub).to_numpy(dtype=float)
         return out
 
     def _screen_single_fund(self, fund_code: str, fund_info: dict) -> Optional[dict]:
@@ -302,6 +342,13 @@ class FundScreener:
             metrics["sharpe"] = sharpe
             metrics["ann_vol"] = ann_vol
 
+        # ---- 检查7: 可申购性（暂停申购/封闭期买不进去）----
+        checks["申购状态"], w, purchase_status = self._check_purchasable(fund_info)
+        if w:
+            warnings.append(w)
+        metrics["purchase_status"] = purchase_status
+        purchase_blocked = any(m in purchase_status for m in _BLOCKED_PURCHASE_MARKERS)
+
         # ---- 判定风险标签 ----
         fail_count = sum(1 for v in checks.values() if v.startswith("❌"))
         warn_count = sum(
@@ -324,6 +371,7 @@ class FundScreener:
             "risk_reasons": warnings,
             "quality_checks": checks,
             "metrics": metrics,
+            "purchase_blocked": purchase_blocked,
         }
 
     def _get_funds_with_nav(self) -> set:
@@ -337,18 +385,26 @@ class FundScreener:
         旧版把缺失当 0 一起平均，会把平均费率显著拉低。
         """
         if df.empty:
-            return {"total": 0, "by_risk": {}, "avg_fee": 0, "fee_n": 0}
+            return {"total": 0, "by_risk": {}, "avg_fee": 0, "fee_n": 0,
+                    "limited_n": 0, "status_unknown_n": 0}
 
         by_risk = df["risk_label"].value_counts().to_dict()
         fees = pd.to_numeric(df["mgt_fee"], errors="coerce")
         fees = fees[fees > 0]
         avg_fee = float(fees.mean()) if len(fees) else 0.0
 
+        ps = df["purchase_status"].fillna("").astype(str) if "purchase_status" in df.columns \
+            else pd.Series([""] * len(df))
+        unknown = int((ps.str.strip() == "").sum())
+
         return {
             "total": len(df),
             "by_risk": by_risk,
             "avg_fee": round(avg_fee, 2),
             "fee_n": int(len(fees)),
+            # 池内限大额（保留但标注）与申购状态未知的数量 —— 静默当作可申购会骗人
+            "limited_n": int(ps.str.contains("限大额").sum()),
+            "status_unknown_n": unknown,
         }
 
 

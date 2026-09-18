@@ -5,6 +5,12 @@
 - 交易日 15:00 前提交的申请，按当日净值确认，T+1 日起计算收益（确认日为申请日的下一个交易日）。
 - 交易日 15:00 后提交的申请，顺延按下一交易日净值确认（确认日再顺延一个交易日）。
 - 周末与法定节假日提交的申请，顺延至下一交易日处理；非交易日不确认净值。
+  周末/节假日下单**语义上等于“上一个交易日收盘后下单”**（D3），因此不再叠加
+  一次 15:00 顺延 —— `after_cutoff` 只在申请日本身是交易日时生效。
+
+确认周期按基金类型分派（`confirm_lag_for`）：**QDII / 海外基金 T+2 确认**，
+其余公募基金 T+1。确认周期只影响“份额到账日”与“收益起算日”，
+**不影响成交价** —— 成交价一律取生效日（`effective_apply_date`）那天的净值。
 
 本模块是**纯逻辑**，不依赖网络/数据库：交易日历由调用方注入（可为空 → 回退“跳过周末”）。
 """
@@ -15,6 +21,25 @@ from typing import Iterable, Optional, Set, Tuple
 
 CUTOFF_HOUR = 15          # 15:00 后提交顺延
 _DATE_FMT = "%Y-%m-%d"
+
+# 确认周期（交易日）—— 从**生效日**起，再数几个交易日拿到确认日。
+# QDII 跨境结算慢一拍（招募说明书通行口径：T 日买入 → T+2 确认份额），
+# 境内基金按 T+1。赎回侧另有更长的到账周期，本模块暂不区分（见 resolve_sell 注释）。
+DEFAULT_CONFIRM_LAG = 1
+QDII_CONFIRM_LAG = 2
+_QDII_MARKERS = ("QDII", "海外")
+
+
+def confirm_lag_for(fund_type=None, fund_name=None) -> int:
+    """按基金类型分派确认周期（交易日）：QDII / 海外 → 2，其余 → 1。
+
+    两条线索都看：`fund_type` 里带 “QDII”（如 “指数型-海外股票”）或
+    `fund_name` 里带 “QDII”/“海外”（如 “南方纳斯达克100指数发起(QDII)C”）。
+    """
+    text = f"{fund_type or ''} {fund_name or ''}".upper()
+    if any(m in text for m in _QDII_MARKERS):
+        return QDII_CONFIRM_LAG
+    return DEFAULT_CONFIRM_LAG
 
 
 # --------------------------------------------------------------------------
@@ -124,19 +149,28 @@ def resolve_apply(
     apply_date,
     after_cutoff: bool = False,
     calendar: Optional[Set[str]] = None,
+    confirm_lag: int = DEFAULT_CONFIRM_LAG,
 ) -> Tuple[str, str]:
     """
     计算 (确认日, 收益起算日)。
 
     - 非交易日的申请先顺延到下一个交易日作为“生效日”；
-    - 15:00 前：确认日 = 生效日的下一个交易日；
-    - 15:00 后：确认日 = 生效日之后的第二个交易日（等价再顺延一次）；
+    - 15:00 前：确认日 = 生效日之后的第 `confirm_lag` 个交易日；
+    - 15:00 后（**仅当申请日本身是交易日**）：再顺延 1 个交易日；
     - 收益起算日 = 确认日的下一个交易日。
+
+    `confirm_lag` 由调用方按基金类型分派（见 `confirm_lag_for`）：QDII T+2、其余 T+1。
+    本函数**不参与定价** —— 成交价一律用 `effective_apply_date`。
     """
     d = to_date(apply_date)
-    effective = d if is_trade_day(d, calendar) else next_trade_day(d, calendar)
+    on_trade_day = is_trade_day(d, calendar)
+    effective = d if on_trade_day else next_trade_day(d, calendar)
     confirm = next_trade_day(effective, calendar)
-    if after_cutoff:
+    # 15:00 是**交易日专有**概念：非交易日没有"15:00 前/后"这回事，
+    # 它的顺延本身已经表达了"上一交易日收盘后下单"的语义，不能再叠加一次。
+    if after_cutoff and on_trade_day:
+        confirm = next_trade_day(confirm, calendar)
+    for _ in range(max(0, int(confirm_lag) - DEFAULT_CONFIRM_LAG)):
         confirm = next_trade_day(confirm, calendar)
     accrual_start = next_trade_day(confirm, calendar)
     return confirm.strftime(_DATE_FMT), accrual_start.strftime(_DATE_FMT)
@@ -146,13 +180,18 @@ def resolve_sell(
     apply_date,
     after_cutoff: bool = False,
     calendar: Optional[Set[str]] = None,
+    confirm_lag: int = DEFAULT_CONFIRM_LAG,
 ) -> Tuple[str, str]:
     """
     卖出的 (确认日, 资金到账日)。
     确认规则与买入一致；公募基金赎回款一般确认后 1 个交易日内到账，
-    这里取“确认日的下一个交易日”为到账日（T+2 场景自然顺延）。
+    这里取“确认日的下一个交易日”为到账日。
+
+    `confirm_lag` 默认 1：**赎回侧暂不按基金类型分派** —— QDII 的实际赎回确认
+    比申购更久（常见 T+3~T+10），但本项目尚无对应证据，且本次范围只到申购确认。
+    参数已就位，等有权威口径再在调用方传入。
     """
-    confirm, _ = resolve_apply(apply_date, after_cutoff, calendar)
+    confirm, _ = resolve_apply(apply_date, after_cutoff, calendar, confirm_lag)
     payout = next_trade_day(confirm, calendar)
     return confirm, payout.strftime(_DATE_FMT)
 

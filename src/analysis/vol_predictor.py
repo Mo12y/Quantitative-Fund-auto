@@ -107,6 +107,18 @@ FEATURE_COLS = [
 
 EWMA_LAMBDA = 0.94            # RiskMetrics 标准
 
+# ---------------------------------------------------------------------
+# 缺失信号时的兜底值 —— **不静默**
+#
+# 这三个值直接决定**仓位**。静默填中性值等于把"没有信息"伪装成"信息恰好是中性的"，
+# 与温度计 A1（缺失维度不再注入 50.0）是同一类问题。
+# 因此：① 用具名常量而不是散落的魔数；② 每次命中都计数，并在返回值里声明出去
+# （`fallback_*_months`），让报告能说明"这几个月的仓位是兜底出来的"。
+# ---------------------------------------------------------------------
+FALLBACK_PRED_VOL = 0.20      # 预测波动率缺失 → 按 20% 年化估仓位
+FALLBACK_PE_EQUITY = 0.35     # PE 分位缺失 → 按中性仓位
+FALLBACK_DD_FRAC = 0.0        # 回撤信号缺失 → 按"无回撤触发"
+
 
 # =====================================================================
 # 数据加载
@@ -808,7 +820,8 @@ def portfolio_simulation(ret_wide, pred_df, index_df, oos_start=OOS_START,
     # 温度计映射 (与 config/settings.yaml 一致)
     def temp_to_equity(pe_pct):
         if pe_pct is None or np.isnan(pe_pct):
-            return 0.35
+            # PE 分位缺失 → 中性仓位（调用方会计数并声明，见 fallback_pe_signal_months）
+            return FALLBACK_PE_EQUITY
         if pe_pct < 0.20:
             return 0.70
         if pe_pct < 0.40:
@@ -828,6 +841,8 @@ def portfolio_simulation(ret_wide, pred_df, index_df, oos_start=OOS_START,
 
     schemes = {"Equal_Weight": [], "Thermometer": [], "Vol_Targeting": []}
     positions = {"Equal_Weight": [], "Thermometer": [], "Vol_Targeting": []}
+    # 兜底命中计数：缺失信号时用了中性值，必须能被上层看见（不静默填）
+    fallback_counts = {"pe_signal": 0, "vol_signal": 0}
     # 期初在现金里（仓位 0）：首月建仓要付一次成本。
     # 旧版从 1.0 起算 → 首月"已经满仓"，凭空少收一次建仓费。
     prev_pos = {"Equal_Weight": 0.0, "Thermometer": 0.0, "Vol_Targeting": 0.0}
@@ -843,14 +858,17 @@ def portfolio_simulation(ret_wide, pred_df, index_df, oos_start=OOS_START,
 
         # 各方案目标仓位（信号一律**严格早于** m，见 last_signal_before）
         eq_pos = 1.0
-        # 温度计: 用 m 之前已知的 PE 分位
+        # 温度计: 用 m 之前已知的 PE 分位（缺失 → 中性仓位，计数声明）
         pe_pct = last_signal_before(idx_monthly_pe, m_ts)
+        if pe_pct is None:
+            fallback_counts["pe_signal"] += 1
         th_pos = temp_to_equity(pe_pct if pe_pct is not None else np.nan)
-        # vol-targeting: 用 m 之前发布的、对 m 月的预测 vol
+        # vol-targeting: 用 m 之前发布的、对 m 月的预测 vol（缺失 → 兜底 20%，计数声明）
         pred_v = last_signal_before(pred_monthly, m_ts)
         if pred_v is None:
-            pred_v = 0.20
-        vt_pos = float(np.clip(target_vol / pred_v, 0.05, 1.0)) if pred_v > 0 else 0.35
+            pred_v = FALLBACK_PRED_VOL
+            fallback_counts["vol_signal"] += 1
+        vt_pos = float(np.clip(target_vol / pred_v, 0.05, 1.0)) if pred_v > 0 else FALLBACK_PE_EQUITY
 
         cur_pos = {"Equal_Weight": eq_pos, "Thermometer": th_pos, "Vol_Targeting": vt_pos}
 
@@ -869,6 +887,9 @@ def portfolio_simulation(ret_wide, pred_df, index_df, oos_start=OOS_START,
             continue
         s = pd.Series(dict(rets))
         m = _portfolio_metrics(s, rf_annual=RF_ANNUAL)
+        # 声明兜底命中次数：这几个月的仓位不是信号算出来的，而是缺失时的中性兜底
+        m["fallback_pe_signal_months"] = int(fallback_counts["pe_signal"])
+        m["fallback_vol_signal_months"] = int(fallback_counts["vol_signal"])
         m["avg_position"] = float(np.mean([p[1] for p in positions[name]]))
         m["avg_turnover"] = float(np.mean([
             abs(positions[name][i][1] - (positions[name][i-1][1] if i > 0 else 0.0))
@@ -878,7 +899,19 @@ def portfolio_simulation(ret_wide, pred_df, index_df, oos_start=OOS_START,
 
 
 def _portfolio_metrics(monthly_rets, rf_annual=0.02):
-    """组合月度收益 -> 年化指标（Sharpe 扣无风险利率，与 backtest.compute_metrics 同口径）"""
+    """组合月度收益 -> 年化指标。
+
+    **单位约定（与 `backtest.compute_metrics` 的差别就在这里）**：
+    - 入参 `monthly_rets`：月收益，单位 **小数**（0.015 表示 1.5%）
+    - `rf_annual`：小数，`0.02` 表示 2%
+    - **返回**：`total_return` / `annual_return` / `annual_volatility` /
+      `max_drawdown` 均为**小数**；`sharpe` 无量纲
+
+    Sharpe 的**算法**与 `compute_metrics` 一致（都是 `(ann_ret - rf) / ann_vol`，
+    同一量纲相减）；差别只在收益的单位口径 —— 这里全用小数，那边入参是百分数、
+    返回值也是百分数。格式化成文本时，这里必须走 `fmt_pct`（会 ×100），
+    不要和 `compute_metrics` 的百分数混排。
+    """
     r = monthly_rets.dropna().values
     n = len(r)
     if n == 0:
@@ -1141,6 +1174,17 @@ def generate_report(universe_df, panel, summaries, ic_series_dict,
     lines.append("- **评测窗口**：所有模型限制在同一 OOS 月份集合（见 §四 的 `n_pred`/`n_months`）。")
     lines.append("- **分红/除权处理**：日收益由 `unit_nav` 计算并剔除 |日收益|>20% 的异常点"
                  "（多为分红除权造成的假跳变）；EWMA 遇到缺失日**跳过而非填 0**。")
+    # 兜底声明：缺失信号时用了中性值
+    _fb_pe = _fb_vol = 0
+    if portfolio_metrics:
+        _any = next(iter(portfolio_metrics.values()))
+        _fb_pe = int(_any.get("fallback_pe_signal_months", 0))
+        _fb_vol = int(_any.get("fallback_vol_signal_months", 0))
+    lines.append(f"- **缺失信号的兜底（不静默）**：组合模拟里若有月份取不到信号，"
+                 f"不会静默填中性值后当作正常月份 —— 本次 **PE 分位缺失 {_fb_pe} 个月**"
+                 f"（按中性仓位 {FALLBACK_PE_EQUITY*100:.0f}% 兜底）、"
+                 f"**预测波动率缺失 {_fb_vol} 个月**（按 {FALLBACK_PRED_VOL*100:.0f}% 年化兜底），"
+                 "命中次数已写进 `vol_portfolio.csv` 的 `fallback_*_months` 列。")
     lines.append("- **置换检验的零假设**：`vol_model_comparison.py` 的置换检验在**基金内部**打乱标签，"
                  "保留每只基金自身的均值 —— 它检验的是「基金内的增量信号」，"
                  "而不是「模型整体无预测力」（后者打乱后 AUC 应回到 0.5）。")

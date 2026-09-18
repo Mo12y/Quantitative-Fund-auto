@@ -21,8 +21,15 @@ import time
 import requests
 from datetime import datetime, timedelta
 from typing import Optional
+from zoneinfo import ZoneInfo
 
 from .database import Database
+
+# 同花顺返回的是**北京时间零点**的毫秒时间戳。解析必须显式指定时区 ——
+# datetime.fromtimestamp() 用的是**本机时区**：本机在 UTC+8 时恰好正确，
+# 部署到 UTC 服务器（或 Docker 默认 UTC）会整体**早一天**，
+# 直接污染 T+1 计价与 effective_apply_date。
+_CN_TZ = ZoneInfo("Asia/Shanghai")
 
 
 class HiThinkCollector:
@@ -416,9 +423,14 @@ class HiThinkCollector:
 
     @staticmethod
     def ms_to_date(ms: int) -> str:
-        """毫秒时间戳 → 日期字符串"""
+        """毫秒时间戳 → 日期字符串（按**北京时间**，不依赖机器时区）。
+
+        旧实现用 `datetime.fromtimestamp()`，取的是本机时区。本机在 UTC+8 时结果
+        恰好正确，但换到 UTC 环境（Docker 默认）会整体早一天 —— 净值日期一错，
+        T+1 确认与 `effective_apply_date` 全跟着错。
+        """
         try:
-            return datetime.fromtimestamp(ms / 1000).strftime("%Y-%m-%d")
+            return datetime.fromtimestamp(ms / 1000, tz=_CN_TZ).strftime("%Y-%m-%d")
         except Exception:
             return ""
 

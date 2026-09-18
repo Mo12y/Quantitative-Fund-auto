@@ -44,9 +44,17 @@ def test_saturday_apply():
 
 
 def test_sunday_after_cutoff():
+    """周日下单 = **周五收盘后下单**（D3）→ 不再叠加一次 15:00 顺延。
+
+    2026-09-06 是周日 → 生效日 09-07(周一) → 确认日 09-08 → 起算日 09-09。
+    旧行为（09-09 / 09-10）是"非交易日顺延"与"15:00 顺延"被叠加了两次的结果。
+    """
     confirm, accrual = tr.resolve_apply("2026-09-06", after_cutoff=True, calendar=CAL)
-    assert confirm == "2026-09-09"
-    assert accrual == "2026-09-10"
+    assert confirm == "2026-09-08"
+    assert accrual == "2026-09-09"
+    # 非交易日：cutoff 传什么都不该改变结果
+    assert (tr.resolve_apply("2026-09-06", after_cutoff=False, calendar=CAL)
+            == tr.resolve_apply("2026-09-06", after_cutoff=True, calendar=CAL))
 
 
 def test_holiday_span_before_cutoff():

@@ -98,12 +98,12 @@ bug 修正后重跑推翻了该结论。**这正是规则 11 要求的"地基再
 
 | 文件 | 说明 |
 |:--|:--|:--|
-| [docs/vol_model_risk_report.md](file:///d:/DSH/Quantitative-Fund-auto/docs/vol_model_risk_report.md) | 立项初期问题风险报告 |
-| [docs/vol_prediction_report.md](file:///d:/DSH/Quantitative-Fund-auto/docs/vol_prediction_report.md) | HAR-RV 主模型报告 |
-| [docs/vol_model_comparison_report.md](file:///d:/DSH/Quantitative-Fund-auto/docs/vol_model_comparison_report.md) | 多模型对比报告（修正版，6 模型 + 排列检验） |
-| [docs/vol_final_review.md](file:///d:/DSH/Quantitative-Fund-auto/docs/vol_final_review.md) | 本审查文档（修正版） |
-| [src/analysis/vol_predictor.py](file:///d:/DSH/Quantitative-Fund-auto/src/analysis/vol_predictor.py) | vol 预测（HAR-RV 主模型 + XGBoost 对比） |
-| [src/analysis/vol_model_comparison.py](file:///d:/DSH/Quantitative-Fund-auto/src/analysis/vol_model_comparison.py) | 多模型对比脚本（6 模型 + 排列检验 + purging gap） |
+| [docs/vol_model_risk_report.md](file:///D:/DSH/projects/Quantitative-Fund-auto/docs/vol_model_risk_report.md) | 立项初期问题风险报告 |
+| [docs/vol_prediction_report.md](file:///D:/DSH/projects/Quantitative-Fund-auto/docs/vol_prediction_report.md) | HAR-RV 主模型报告 |
+| [docs/vol_model_comparison_report.md](file:///D:/DSH/projects/Quantitative-Fund-auto/docs/vol_model_comparison_report.md) | 多模型对比报告（修正版，6 模型 + 排列检验） |
+| [docs/vol_final_review.md](file:///D:/DSH/projects/Quantitative-Fund-auto/docs/vol_final_review.md) | 本审查文档（修正版） |
+| [src/analysis/vol_predictor.py](file:///D:/DSH/projects/Quantitative-Fund-auto/src/analysis/vol_predictor.py) | vol 预测（HAR-RV 主模型 + XGBoost 对比） |
+| [src/analysis/vol_model_comparison.py](file:///D:/DSH/projects/Quantitative-Fund-auto/src/analysis/vol_model_comparison.py) | 多模型对比脚本（6 模型 + 排列检验 + purging gap） |
 | data/vol_results/ | 原始 CSV 结果 |
 
 ## 关键数据摘要（修正后）

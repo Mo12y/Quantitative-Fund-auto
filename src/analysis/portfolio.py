@@ -50,6 +50,51 @@ def redeem_fee_rate(redeem_fee_text, held_days: int) -> float:
     return max(rate, SHORT_HOLD_FEE) if rate else SHORT_HOLD_FEE
 
 
+# ---------------------------------------------------------------------
+# 前端申购费（按份额类别）
+# ---------------------------------------------------------------------
+
+# A 类/未知份额的保守默认值。真实 A 类前端费率的采集属《数据源扩展计划书》阶段 1，
+# 在此之前一律用这个默认值，宁可保守（高估成本）也不要低估。
+DEFAULT_PURCHASE_FEE = 0.0015
+
+# 份额类别字母（基金名称尾部）
+_CLASS_LETTERS = frozenset("ABCDEHIORY")
+# 这些尾串是**产品类型**不是份额类别，不能被误判（"LOF" 的最后一位是 F，
+# 若按"取尾部大写字母"就会把 "LOF" 尾部读成 F/O 而误判）
+_NOT_CLASS_SUFFIX = frozenset({"LOF", "ETF", "FOF", "QDII", "REIT", "ABS", "LOFT"})
+
+
+def share_class(fund_name: str) -> Optional[str]:
+    """从基金名称尾部推断份额类别（C/A/E/I...）；推断不出返回 None。
+
+    例：`南方中证500ETF联接发起式C` → `C`；`易方达瑞富混合E` → `E`；`某某LOF` → None。
+    """
+    s = str(fund_name or "").strip().upper()
+    m = re.search(r"([A-Z]+)\)?$", s)
+    if not m:
+        return None
+    tok = m.group(1)
+    if tok in _NOT_CLASS_SUFFIX:
+        return None
+    last = tok[-1]
+    return last if last in _CLASS_LETTERS else None
+
+
+def purchase_fee_rate(fund_name: str, default: float = DEFAULT_PURCHASE_FEE) -> float:
+    """前端申购费率的**单一真源**（按份额类别判断）。
+
+    C / E / I 类份额**不收前端申购费**（改收销售服务费，已从每日净值里扣除）→ 0。
+    A 类与推断不出类别的 → 返回 `default`（保守默认）。
+
+    依据：`016453` 费率页原文「买入费率（前端申购）: 0≤买入金额 → 0 费率」，
+    最高申购费率实测 **0.00%**；用户 7/7 持仓均为 C 类份额。
+    """
+    if share_class(fund_name) in ("C", "E", "I"):
+        return 0.0
+    return default
+
+
 class PortfolioTracker:
     """持仓跟踪器"""
 
@@ -77,14 +122,21 @@ class PortfolioTracker:
         return _date.today().isoformat()
 
     def _backfill_t1(self):
-        """老持仓（历史录入、无 T+1 字段）补算一次确认日/起算日，并按确认日修正状态。"""
+        """老持仓（历史录入、无 T+1 字段）补算一次确认日/起算日，并按确认日修正状态。
+
+        只补**缺失**字段，不覆写已有确认日 —— 历史记录的口径偏差不回填，
+        改由 `get_holdings_detail` 的 `legacy_rule_deviation` 在 UI 上标注。
+        """
         rows = [dict(r) for r in self.db.conn.execute(
-            "SELECT id, buy_date FROM holdings "
+            "SELECT id, buy_date, fund_code FROM holdings "
             "WHERE (confirm_date IS NULL OR confirm_date = '') "
             "AND status IN ('holding','pending_confirm')")]
         for r in rows:
             try:
-                cd, acc = trade_rules.resolve_apply(r["buy_date"], False, self._calendar())
+                info = self._get_fund_info(r["fund_code"]) or {}
+                lag = trade_rules.confirm_lag_for(info.get("fund_type"), info.get("fund_name"))
+                cd, acc = trade_rules.resolve_apply(
+                    r["buy_date"], False, self._calendar(), lag)
                 fields = {"apply_date": r["buy_date"], "confirm_date": cd, "accrual_start": acc}
                 if trade_rules.holding_status(cd) == "pending_confirm":
                     fields["status"] = "pending_confirm"
@@ -323,6 +375,24 @@ class PortfolioTracker:
             effective_date = trade_rules.effective_apply_date(
                 h.get("apply_date") or h["buy_date"], self._calendar())
 
+            # 历史口径偏差：老记录按旧规则（一律 T+1、且周末叠加 15:00 顺延）算出的
+            # 确认链，与新规则（QDII T+2 / 非交易日不叠加 cutoff）不一致。**不回填**，
+            # 只把偏差标出来让前端提示（铁律 3）。
+            legacy_rule_deviation = None
+            try:
+                exp_confirm = trade_rules.resolve_apply(
+                    h.get("apply_date") or h["buy_date"],
+                    bool(h.get("apply_after_cutoff")), self._calendar(),
+                    trade_rules.confirm_lag_for(fund_type, h.get("fund_name")))[0]
+                if h.get("confirm_date") and str(h["confirm_date"]) != exp_confirm:
+                    legacy_rule_deviation = {
+                        "field": "confirm_date",
+                        "stored": str(h["confirm_date"]),
+                        "current_rule": exp_confirm,
+                    }
+            except Exception:
+                legacy_rule_deviation = None
+
             # 待确认期（收益尚未起算）：用生效日净值 → 最新净值 给一个“预估涨跌”
             pending_est_pct = None
             if h.get("status") == "pending_confirm" and latest_nav:
@@ -351,6 +421,7 @@ class PortfolioTracker:
                 "accrual_start": h.get("accrual_start"),
                 "confirm_nav": cnav,
                 "effective_date": effective_date,
+                "legacy_rule_deviation": legacy_rule_deviation,
                 "nav_missing": nav_missing,
                 "replay_pct": round(replay_pct, 2),
                 "pending_est_pct": pending_est_pct,
@@ -405,10 +476,13 @@ class PortfolioTracker:
         apply_date = apply_date or buy_date
         ac = bool(after_cutoff)
         cal = self._calendar()
+        info = self._get_fund_info(fund_code) or {}
+        # QDII/海外 → T+2 确认；其余 T+1。只影响确认日/起算日，不影响成交价。
+        lag = trade_rules.confirm_lag_for(info.get("fund_type"), fund_name)
         # 定价日（生效日）= 申请日若是交易日就是它，否则顺延到下一交易日。
         # 公募规则：15:00 前下单按**当日(T日)净值**成交，份额 T+1 日确认（= 本模块开头的规则说明）。
         effective = trade_rules.effective_apply_date(apply_date, cal)
-        confirm_date, accrual_start = trade_rules.resolve_apply(apply_date, ac, cal)
+        confirm_date, accrual_start = trade_rules.resolve_apply(apply_date, ac, cal, lag)
         today = self._today()
 
         confirm_nav = None

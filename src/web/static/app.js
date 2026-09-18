@@ -620,7 +620,7 @@ function holdingsHTML(P,PL){
         <td>${esc(l.effective_date||'—')}</td>
         <td>${fmtMoney(l.buy_amount)}</td>
         <td>${(Number(l.shares)||0).toFixed(2)}</td>
-        <td>${esc(l.confirm_date||'—')}</td>
+        <td>${esc(l.confirm_date||'—')}${l.legacy_rule_deviation?`<span class="pill" style="background:var(--surface-2);color:var(--warn)" title="该笔按旧规则记账：确认日 ${esc(l.legacy_rule_deviation.stored)}。按现行规则（QDII T+2 确认 / 非交易日不再叠加 15:00 顺延）应为 ${esc(l.legacy_rule_deviation.current_rule)}。历史记录不回填，仅标注。">旧口径</span>`:''}</td>
         <td>${esc(l.accrual_start||'—')}</td>
         <td>${esc(st)}</td>
         <td style="white-space:nowrap">
@@ -670,6 +670,12 @@ function rebalanceHTML(RB,P){
   const col=RB.need_rebalance?'var(--yellow)':'var(--green)';
   let h=`<div style="font-size:15px;font-weight:700;margin-bottom:6px;color:${col}">${esc(summary.verdict||'')}</div>
     <div class="stat-line">${esc(summary.detail||'')}</div>`;
+  // 总资金口径缺现金弹药 → 仓位被高估，必须显式提示（不静默填 0）
+  if((RB.degraded||[]).includes('cash_reserve')){
+    h+=`<div class="alert alert-info" style="border-left-color:var(--warn)">
+      <b>⚠️ 数据缺失：计划现金弹药</b><br>
+      <span style="color:var(--dim);font-size:12px">读不到 <code>plan.cash_reserve</code>，总资金口径按 0 计算 —— 权益占比被<b>高估</b>，上面的调仓金额仅供参考。</span></div>`;
+  }
   for(const inst of RB.instructions.slice(0,6)){
     const icon={'卖出':'','买入':'','持有':''};
     const ac={'卖出':'var(--red)','买入':'var(--green)','持有':'var(--dim)'};
@@ -691,7 +697,10 @@ function poolHTML(F){
       </span></h2>`;
   if(!funds.length)return head+'<div class="empty">暂无基金数据 · 运行 python src/main.py nav && python src/main.py enrich</div>';
   const summary=F.summary||{};
-  let h=head+`<div class="stat-line">共 ${summary.total||0} 只 · 均费率 ${fmt(summary.avg_fee,2)}%</div>`;
+  let h=head+`<div class="stat-line">共 ${summary.total||0} 只 · 均费率 ${fmt(summary.avg_fee,2)}%`+
+    (summary.limited_n?` · <span style="color:var(--warn)">限大额 ${summary.limited_n}</span>`:'')+
+    (summary.status_unknown_n?` · <span class="qtag">申购状态未知 ${summary.status_unknown_n}</span>`:'')+
+    `</div>`;
   const groups={};
   for(const f of funds){const ft=f.type||'其他';(groups[ft]=groups[ft]||[]).push(f);}
   for(const g of Object.values(groups))g.sort((a,b)=>(b.risk||'').includes('稳健')-(a.risk||'').includes('稳健'));
@@ -711,9 +720,12 @@ function poolRow(f){
   const ddC=dd>30?'var(--red)':(dd>20?'var(--yellow)':'var(--muted)');
   const trendC=mom>=0?'var(--green)':'var(--red)';
   const name=f.name||f.code;
+  // 申购状态是独立一轴：限大额不影响质量等级，单独挂标签（不静默、也不误导）
+  const ps=f.purchase_status||'';
+  const psTag=ps?`<span class="pill" style="background:var(--surface-2);color:var(--warn)" title="${esc(f.purchasable||ps)}">${esc(ps)}</span>`:'';
   return `<div class="fund-row" style="grid-template-columns:74px 1fr auto">
     <span><span class="fund-code">${esc(f.code)}</span>${riskBadge(f.risk)}</span>
-    <span class="fund-name" title="${esc(name)}">${esc(name.length>26?name.slice(0,26)+'…':name)}</span>
+    <span class="fund-name" title="${esc(name)}">${esc(name.length>26?name.slice(0,26)+'…':name)}${psTag}</span>
     <span class="fund-meta"><span class="sparkline">${sparkSVG(navs,trendC)}</span>
       <span style="color:${momC};min-width:52px;text-align:right;font-weight:600">${mom>=0?'+':''}${fmt(mom,1)}%</span>
       <span class="qtag">回撤 ${fmt(dd,0)}%</span></span></div>`;
