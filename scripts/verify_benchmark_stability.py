@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+﻿#!/usr/bin/env python3
 """
 参照系稳定性验证（设计方案 §4.5）—— **修正版**
 
@@ -57,22 +57,52 @@ SCORE_W = {"sharpe": 0.6, "max_drawdown_1y": 0.4}
 SCORE_DIR = {"sharpe": True, "max_drawdown_1y": False}
 
 
-def metrics_at(vals, idx):
-    """只用 vals[:idx] 计算指标（严格无前视）。idx 为切片上界（不含）。"""
+def metrics_at(vals, idx, dates=None):
+    """只用 vals[:idx] 计算指标（严格无前视）。
+
+    ⚠️ **必须传 dates**：净值序列可能有缺口（实测 576 只里 135 只点数明显少于
+    应有交易天数，最严重比值 0.437）。用「点数/252」当年数会把年化**严重高估**
+    （实测债券基金最坏高估 135%）。年化与近1年回撤一律用**日期**而非点数。
+    """
+    import bisect
+    from datetime import date as _d, timedelta as _td
+
     v = vals[:idx]
     n = v.size
     if n < 60:
         return None
     ret = v[-1] / v[0] - 1
-    ann_ret = (1 + ret) ** (TRADING_DAYS / n) - 1
+
+    if dates is not None and len(dates) >= idx:
+        ds = list(dates[:idx])
+        try:
+            years = max((_d.fromisoformat(str(ds[-1])) - _d.fromisoformat(str(ds[0]))).days / 365.25, 1e-6)
+        except Exception:
+            years = n / TRADING_DAYS
+    else:
+        ds = None
+        years = n / TRADING_DAYS
+    ann_ret = (1 + ret) ** (1.0 / years) - 1
+
     d = np.diff(v) / v[:-1]
     ann_vol = float(d.std(ddof=1) * np.sqrt(TRADING_DAYS)) if d.size > 1 else np.nan
-    w = min(n, TRADING_DAYS)
-    seg = v[-w:]
+
+    def _win_start(default_k, days):
+        if ds is None:
+            return max(0, n - default_k)
+        try:
+            cut = (_d.fromisoformat(str(ds[-1])) - _td(days=days)).isoformat()
+            return bisect.bisect_left(ds, cut)
+        except Exception:
+            return max(0, n - default_k)
+
+    seg = v[_win_start(TRADING_DAYS, 365):]
     pk = np.maximum.accumulate(seg)
-    mdd1y = float(((pk - seg) / pk).max() * 100)
-    k = min(n - 1, 63)
-    mom = float((v[-1] / v[-1 - k] - 1) * 100)
+    mdd1y = float(((pk - seg) / pk).max() * 100) if seg.size else np.nan
+
+    j0 = _win_start(63, 91)
+    mom = float((v[-1] / v[j0] - 1) * 100) if j0 < n and v[j0] > 0 else np.nan
+
     sharpe = float((ann_ret - 0.02) / ann_vol) if ann_vol and ann_vol > 0 else np.nan
     return {"annual_return": ann_ret * 100, "ann_vol": ann_vol * 100,
             "max_drawdown_1y": mdd1y, "momentum_3m": mom, "sharpe": sharpe}
@@ -128,7 +158,7 @@ def main():
             idx = int(np.searchsorted(dates, cut, side="right"))
             if idx < args.min_days:
                 continue
-            mm = metrics_at(vals, idx)
+            mm = metrics_at(vals, idx, dates)
             if mm:
                 mm["_code"] = code
                 per_group.setdefault(g, []).append(mm)

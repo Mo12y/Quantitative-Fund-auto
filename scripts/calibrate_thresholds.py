@@ -35,16 +35,35 @@ TRADING_DAYS = 252
 # --- 类型聚合：把 44 种 fund_type 归成 6 组（见设计文档 §3.5）---
 TYPE_GROUPS = [
     ("A 偏股混合", ["混合型-偏股"]),
-    ("B 灵活配置", ["混合型-灵活配置", "混合型-灵活", "混合型-平衡"]),
+    ("B 灵活配置", ["混合型-灵活配置", "混合型-灵活", "混合型-平衡", "混合型-股债平衡"]),
     ("C 主动股票", ["股票型", "股票型-普通"]),
-    ("D 指数股票", ["股票型-标准指数", "股票型-增强指数", "指数型-股票"]),
+    ("D 指数股票", ["股票型-标准指数", "股票型-增强指数", "指数型-股票", "指数型-其他"]),
     ("E 债券", ["债券型-长债", "债券型-普通债券", "债券型-长期纯债", "债券型-中短债",
                 "债券型-短期纯债", "债券型-混合一级", "债券型-混合二级",
                 "债券型-利率债", "债券型-信用债", "债券型-可转债"]),
     ("F QDII/其他", ["QDII-混合偏股", "QDII-普通股票", "QDII-混合灵活", "QDII-纯债",
-                     "指数型-海外股票", "FOF-稳健型", "FOF-均衡型", "FOF-进取型"]),
+                     "QDII-FOF", "QDII-混合债", "QDII-混合平衡", "QDII-商品", "QDII-REITs",
+                     "指数型-海外股票", "指数型-固收",
+                     "FOF-稳健型", "FOF-均衡型", "FOF-进取型",
+                     "混合型-绝对收益", "货币型-普通货币", "货币型-浮动净值",
+                     "商品", "Reits"]),
 ]
 TYPE2GROUP = {t: g for g, ts in TYPE_GROUPS for t in ts}
+
+# ⚠️ 覆盖性断言（2026-09-18 自查发现的问题）：
+# 首版映射表漏了「混合型-股债平衡」「指数型-其他」，导致 5 只基金被**静默丢弃** ——
+# 违反本项目铁律「数据缺失必须声明，不得静默填充/丢弃」。
+# 现在改为：调用方必须显式报告未映射的类型（见 audit_type_coverage()）。
+def audit_type_coverage(types_with_count):
+    """返回 (已映射数, 未映射清单)。调用方**必须把未映射清单打印出来**，不得静默。"""
+    mapped, unmapped = 0, []
+    for t, n in types_with_count:
+        if t in TYPE2GROUP:
+            mapped += n
+        else:
+            unmapped.append((t, n))
+    return mapped, unmapped
+
 
 # --- 现有拍脑袋阈值（fund_scorer.THRESHOLDS）---
 CURRENT = {
@@ -80,25 +99,71 @@ def load_navs(conn, min_days):
     return {k: np.asarray(v, dtype=float) for k, v in out.items() if len(v) >= min_days}
 
 
-def metrics(vals):
-    """单只基金的指标。v 为累计净值序列（升序）。"""
+def metrics(vals, dates=None):
+    """单只基金的指标。
+
+    ⚠️ **必须传 dates**：净值序列**可能有缺口**（实测 576 只里 135 只点数明显少于
+    应有的交易天数，最严重的比值仅 0.437）。用「点数 / 252」当年数会把年化收益
+    **严重高估**（实测最坏情形约 2.3 倍）。
+    正确做法：年化用**日期跨度**，近 1 年回撤用**日期窗口**，而不是点数窗口。
+
+    vals: 累计净值序列（升序）；dates: 对应的 'YYYY-MM-DD' 列表（可选，但强烈建议传）
+    """
     n = len(vals)
     if n < 60:
         return None
+    vals = np.asarray(vals, dtype=float)
     ret = vals[-1] / vals[0] - 1
-    ann_ret = (1 + ret) ** (TRADING_DAYS / n) - 1
+
+    # ---- 年化：优先用日期跨度 ----
+    if dates is not None and len(dates) == n:
+        from datetime import date as _d
+        try:
+            y0 = _d.fromisoformat(str(dates[0]))
+            y1 = _d.fromisoformat(str(dates[-1]))
+            years = max((y1 - y0).days / 365.25, 1e-6)
+        except Exception:
+            years = n / TRADING_DAYS
+    else:
+        years = n / TRADING_DAYS
+    ann_ret = (1 + ret) ** (1.0 / years) - 1 if years > 0 else np.nan
+
     daily = np.diff(vals) / vals[:-1]
     ann_vol = float(daily.std(ddof=1) * np.sqrt(TRADING_DAYS)) if daily.size > 1 else np.nan
+
     peak = np.maximum.accumulate(vals)
     mdd = float(((peak - vals) / peak).max() * 100)
-    # 近 1 年回撤（与 fund_scorer._check_drawdown 口径一致）
-    w = min(n, TRADING_DAYS)
-    seg = vals[-w:]
+
+    # ---- 近 1 年回撤：优先用日期窗口 ----
+    if dates is not None and len(dates) == n:
+        import bisect
+        i0 = bisect.bisect_left(list(dates), str(dates[-1])[:4] + "-" + str(dates[-1])[5:7] + "-" + str(dates[-1])[8:])
+        # 用 dates[-1] 往前 365 天的位置
+        from datetime import date as _d, timedelta as _td
+        try:
+            cut = (_d.fromisoformat(str(dates[-1])) - _td(days=365)).isoformat()
+            i0 = bisect.bisect_left(list(dates), cut)
+        except Exception:
+            i0 = max(0, n - TRADING_DAYS)
+    else:
+        i0 = max(0, n - TRADING_DAYS)
+    seg = vals[i0:]
     pk = np.maximum.accumulate(seg)
-    mdd1y = float(((pk - seg) / pk).max() * 100)
-    # 近 3 月动量
-    k = min(n - 1, 63)
-    mom3m = float((vals[-1] / vals[-1 - k] - 1) * 100)
+    mdd1y = float(((pk - seg) / pk).max() * 100) if seg.size else np.nan
+
+    # ---- 近 3 月动量：日期窗口 ----
+    if dates is not None and len(dates) == n:
+        import bisect
+        from datetime import date as _d, timedelta as _td
+        try:
+            cut3 = (_d.fromisoformat(str(dates[-1])) - _td(days=91)).isoformat()
+            j0 = bisect.bisect_left(list(dates), cut3)
+        except Exception:
+            j0 = max(0, n - 63)
+    else:
+        j0 = max(0, n - 63)
+    mom3m = float((vals[-1] / vals[j0] - 1) * 100) if j0 < n and vals[j0] > 0 else np.nan
+
     sharpe = float((ann_ret - 0.02) / ann_vol) if ann_vol and ann_vol > 0 else np.nan
     return {"annual_return": ann_ret * 100, "ann_vol": ann_vol * 100,
             "max_drawdown_1y": mdd1y, "max_drawdown_all": mdd,

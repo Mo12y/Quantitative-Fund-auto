@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+﻿#!/usr/bin/env python3
 """
 同类百分位参照系（设计方案 §4.2/§4.3 的实现）
 
@@ -82,7 +82,7 @@ def main():
         g = TYPE2GROUP.get(fi.get(code, ""))
         if not g:
             continue
-        m = metrics(v)
+        m = metrics(v, d)
         if m:
             m["_code"] = code
             m["_name"] = name.get(code, "")
