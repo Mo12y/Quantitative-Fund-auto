@@ -55,6 +55,11 @@ CURRENT = {
     "sharpe": None,
 }
 
+# --- 参与校准的指标（模块级，供 fund_percentile.py 复用，保证 SSOT）---
+METRICS = ["annual_return", "ann_vol", "max_drawdown_1y", "momentum_3m", "sharpe"]
+LABEL = {"annual_return": "年化收益%", "ann_vol": "年化波动%",
+         "max_drawdown_1y": "近1年最大回撤%", "momentum_3m": "近3月动量%", "sharpe": "夏普"}
+
 MIN_N_FULL, MIN_N_MID, MIN_N_IQR = 150, 100, 30
 
 
@@ -132,9 +137,8 @@ def main():
         if m:
             groups.setdefault(g, []).append(m)
 
-    METRICS = ["annual_return", "ann_vol", "max_drawdown_1y", "momentum_3m", "sharpe"]
-    LABEL = {"annual_return": "年化收益%", "ann_vol": "年化波动%",
-             "max_drawdown_1y": "近1年最大回撤%", "momentum_3m": "近3月动量%", "sharpe": "夏普"}
+    METRICS_LOCAL = METRICS  # 模块级已定义，此处仅为可读性
+    LABEL_LOCAL = LABEL
 
     for g, rows in sorted(groups.items()):
         n = len(rows)
