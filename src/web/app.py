@@ -288,6 +288,9 @@ def _holdings_payload(data: dict) -> list:
             "nav_missing": h.get("nav_missing", False),
             "current_nav": h.get("current_nav"),
             "nav_latest_date": h.get("nav_latest_date"),
+            # replay_pct = 净值比值法（基金净值涨跌），**不等于** pnl_pct（金额法，"我赚了多少"）。
+            # 两者差一个"份额四舍五入到 2 位"的楔子（约 0.1%）。前端当前只显示 pnl_pct；
+            # 若要把本字段露出，必须显式标注为「基金净值涨跌（不含份额舍入）」（F-05 口径纪律）。
             "replay_pct": h.get("replay_pct"),
             "pending_est_pct": h.get("pending_est_pct"),
             "curve": h.get("curve", []),

@@ -349,6 +349,11 @@ class PortfolioTracker:
             if latest_nav is not None and shares > 0:
                 current_value = shares * latest_nav
                 pnl = current_value - invested
+                # pnl_pct = **金额法**：「我赚了多少」的展示口径（前端就显示这个）。
+                # 分母 buy_amount 是剩余成本，分子用四舍五入到 2 位的 shares →
+                # 与下面的 replay_pct（净值比值法）会差一个"份额舍入楔子"（约 0.1%，
+                # ¥10 小额定投最明显）。两者都对，只是回答的问题不同：
+                # pnl_pct 答"我的钱涨了多少"，replay_pct 答"这只基金净值涨了多少"。
                 pnl_pct = (pnl / invested) * 100
             else:
                 current_value = invested  # 无法获取净值时假设不变
@@ -372,6 +377,9 @@ class PortfolioTracker:
             nav_latest_date = str(navs[-1].get("nav_date")) if navs else None
 
             # 按“确认净值 → 最新净值”重放（净值比值法，断更多天也精确）
+            # replay_pct = **净值比值法**：与份额/金额无关，纯"基金净值涨跌"。
+            # ⚠️ 口径纪律（F-05）：它**不是**"我赚了多少"，若要露出，必须显式标注为
+            #    「基金净值涨跌（不含份额舍入）」，不得与 pnl_pct 并列显示而不加区分。
             cnav = h.get("confirm_nav") or h.get("buy_nav") or latest_nav
             replay_pct = ((latest_nav / cnav - 1) * 100) if (cnav and latest_nav) else 0.0
 
@@ -611,23 +619,38 @@ class PortfolioTracker:
         - 收益_t = 市值_t − 成本_t。
 
         待确认买入（份额为 0）暂不计入市值，单独统计数量提示。
+
+        **未入仓口径（F-03）**：曲线只画"已经起算"的持仓，因此最终点**不含**
+        ① 待确认买入、② 起算日晚于曲线末日的持仓。这两类统一按"**未入仓**"回报
+        （`excluded_not_in` 笔 + `excluded_amount` 投入金额），由卡片写明，
+        免得用户拿它跟顶部 KPI 的"持仓市值"（含全部持仓）对比时以为数字错了。
         """
         holdings = self.db.get_current_holdings()
-        active, pending = [], 0
+        active, pending_rows = [], []
         for h in holdings:
             if h.get("status") == "sold":
                 continue
             shares = float(h.get("shares") or 0)
             # 待确认买入：确认净值未定 → 不计入曲线（避免用未确认份额算出假收益）
             if h.get("status") == "pending_confirm" or shares <= 0:
-                pending += 1
+                pending_rows.append(h)
                 continue
             start = h.get("accrual_start") or h.get("confirm_date") or h.get("buy_date")
             active.append((h, shares, start))
+        pending = len(pending_rows)
+
+        def _not_in(last_date=None):
+            """未入仓清单：待确认 + 起算日晚于曲线末日。"""
+            extra = [h for h, _s, start in active
+                     if last_date and start and last_date < str(start)]
+            rows = pending_rows + extra
+            return len(rows), round(sum(float(h.get("buy_amount") or 0) for h in rows), 2)
 
         if not active:
+            n, amt = _not_in()
             return {"dates": [], "value": [], "cost": [], "pnl": [], "return_pct": [],
-                    "funds_used": 0, "excluded_pending": pending}
+                    "funds_used": 0, "excluded_pending": pending,
+                    "excluded_not_in": n, "excluded_amount": amt}
 
         nav_maps = {}
         for h, _s, start in active:
@@ -636,8 +659,10 @@ class PortfolioTracker:
 
         all_dates = sorted({d for m in nav_maps.values() for d in m})
         if not all_dates:
+            n, amt = _not_in()
             return {"dates": [], "value": [], "cost": [], "pnl": [], "return_pct": [],
-                    "funds_used": len(active), "excluded_pending": pending}
+                    "funds_used": len(active), "excluded_pending": pending,
+                    "excluded_not_in": n, "excluded_amount": amt}
 
         dates, values, costs, pnls, rets = [], [], [], [], []
         for d in all_dates:
@@ -664,8 +689,10 @@ class PortfolioTracker:
             pnls.append(round(pnl, 2))
             rets.append(round(pnl / cost * 100, 2))
 
+        n_notin, amt_notin = _not_in(all_dates[-1])
         return {"dates": dates, "value": values, "cost": costs, "pnl": pnls, "return_pct": rets,
-                "funds_used": len(active), "excluded_pending": pending}
+                "funds_used": len(active), "excluded_pending": pending,
+                "excluded_not_in": n_notin, "excluded_amount": amt_notin}
 
     def get_performance_history(self) -> pd.DataFrame:
         """

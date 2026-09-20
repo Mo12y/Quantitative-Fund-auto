@@ -384,7 +384,7 @@ function overviewKpis(T,P,PL,S){
       ${kpi('持仓市值', fmtMoney(P.total_market_value), P.has_holdings? ('盈亏 '+fmtPct(P.total_return_pct)):'暂无持仓', null, 'kpi-mv', 'kpi-mv-sub')}
       ${kpi('计划投入', fmtMoney(PL.total_invested||0), '目标 '+fmtMoney(tgt), null, 'kpi-plan', 'kpi-plan-sub')}
     </div>
-    <div class="qtag" style="margin-top:8px">口径：历史持仓成本按旧口径（确认日 T+1 净值）；新流水按申请日 T 净值定价。已实现收益含赎回费（持有 &lt;7 天按 1.5%）。</div>`;
+    <div class="qtag" style="margin-top:8px">口径：历史持仓成本按旧口径（确认日 T+1 净值）；新流水按申请日 T 净值定价。已实现收益含赎回费（持有 &lt;7 天按 1.5%）。<br>「收益」= 金额法（市值 − 剩余成本）÷ 剩余成本，即<b>我赚了多少</b>；与「基金净值涨跌」（净值比值法，不含份额舍入）会有约 0.1% 的差 —— 那是份额四舍五入到 2 位造成的，两数不可混用。</div>`;
 }
 
 function portfolioChartSVG(C){
@@ -428,11 +428,15 @@ function portfolioChartSVG(C){
 }
 function curveCard(C){
   C=C||{};
+  // F-03：曲线只画"已起算"的持仓 → 被排除的（待确认 + 起算日未到）统一叫「未入仓」，
+  // 并把笔数与金额写在卡片上，免得跟顶部 KPI 的"持仓市值"（含全部持仓）对比时以为算错了。
+  const nIn=(C.excluded_not_in!=null)?C.excluded_not_in:(C.excluded_pending||0);
+  const amtIn=C.excluded_amount||0;
+  const notInTxt=nIn?(` · 另有 ${nIn} 笔未入仓${amtIn?`（约 ${fmtMoney(amtIn)}）`:''}未计入`):'';
   const n=(C.dates||[]).length;
   if(n<2){
-    const pend=C.excluded_pending||0;
     return `<div class="card full" id="curve-card"><h2>组合累计走势</h2><div class="empty">暂无可绘制的组合曲线${
-      pend?` · ${pend} 笔持仓待确认（确认净值后才计入）`:''}</div></div>`;
+      nIn?`${notInTxt}`:''}</div></div>`;
   }
   const lastRet=(C.return_pct||[]).slice(-1)[0];
   const lastPnl=(C.pnl||[]).slice(-1)[0];
@@ -443,8 +447,8 @@ function curveCard(C){
     <div class="pcurve">${portfolioChartSVG(C)}</div>
     <div class="qlegend"><span class="k"><span class="sw" style="background:#27a644"></span>零轴上方（盈利区间）</span>
       <span class="k"><span class="sw" style="background:#e5484d"></span>零轴下方（亏损区间）</span>
-      ${C.excluded_pending?`<span class="qtag">另有 ${C.excluded_pending} 笔待确认未计入</span>`:''}</div>
-    <div class="qtag" style="margin-top:6px">口径：图中收益率 = pnl / 累计成本，为资金加权持仓收益率（非时间加权）；与「已实现收益（含赎回费）」是两个不同口径，勿混用。</div></div>`;
+      ${nIn?`<span class="qtag">另有 ${nIn} 笔未入仓${amtIn?`（约 ${fmtMoney(amtIn)}）`:''}未计入</span>`:''}</div>
+    <div class="qtag" style="margin-top:6px">口径：本图只画「已起算」的持仓，起点为最早起算日、末点为净值末日；「未入仓」= 待确认买入 + 起算日晚于末点的持仓，它们尚未计入市值与成本，等确认/起算后会自动进来。图中收益率 = pnl / 累计成本，为资金加权持仓收益率（非时间加权）；与「已实现收益（含赎回费）」是两个不同口径，勿混用。</div></div>`;
 }
 
 function allocBars(title, obj, bg){
