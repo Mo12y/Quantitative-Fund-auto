@@ -7,7 +7,7 @@ import time
 
 import akshare as ak
 
-from src.data.collector import DataCollector, quick_test
+from src.data.collector import DataCollector, parse_daily_snapshot, quick_test
 from src.data.database import Database
 from src.data.hithink_collector import quick_test as hithink_quick_test
 
@@ -257,6 +257,66 @@ def cmd_nav():
     print("💡 下一步:")
     print("   python src/main.py score  → 查看基金质量筛选")
     print("=" * 60)
+
+
+def cmd_snapshot():
+    """
+    全市场当日净值快照：1 次请求覆盖全市场（日常增量主路径，约 10 秒）。
+
+    - 写 fund_nav：快照自带的最近 2 个交易日的单位/累计净值
+      （INSERT OR IGNORE 只增不改，重跑/连跑安全）；
+    - 写 fund_info：申购状态/费率走 upsert 局部更新（只覆盖真正采到值的字段）；
+    - 日线缺口检测：fund_nav 现有最新日期与快照首日之间若隔了交易日，
+      说明中间漏跑了，打印缺口清单——快照只含最近 2 个交易日，
+      缺口不会靠重跑 snapshot 自动补齐，需走历史采集路径回填。
+    """
+    db = Database("data/fund_quant.db")
+
+    print("📡 全市场当日快照（1 次请求，约 10 秒）...")
+    try:
+        daily_df = ak.fund_open_fund_daily_em()
+    except Exception as e:
+        print(f"❌ 获取失败: {e}")
+        db.close()
+        return
+
+    latest_before = db.get_latest_nav_date()
+    nav_records, info_rows, snap_dates = parse_daily_snapshot(daily_df)
+    if not snap_dates:
+        print("❌ 快照中未识别到带日期的净值列（接口结构可能已变化），未写入任何数据")
+        db.close()
+        return
+
+    before_cnt = db.conn.execute("SELECT COUNT(*) FROM fund_nav").fetchone()[0]
+    db.insert_nav_batch(nav_records)
+    after_cnt = db.conn.execute("SELECT COUNT(*) FROM fund_nav").fetchone()[0]
+
+    # 申购状态/费率：两万行包成一个事务（逐行 commit 会被 fsync 拖死）
+    with db.immediate():
+        for f in info_rows:
+            db.upsert_fund_info(f, commit=False)
+
+    new_rows = after_cnt - before_cnt
+    print(f"✅ 快照日期: {'、'.join(snap_dates)}（{len(daily_df)} 只基金）")
+    print(f"   fund_nav: 解析 {len(nav_records)} 行，新增 {new_rows} 行（已有日期自动忽略）")
+    print(f"   fund_info: 申购状态/费率局部更新 {len(info_rows)} 只（空值不覆盖旧值）")
+
+    # 日线缺口检测：快照只给最近 2 个交易日，漏跑的日子需要显式提示
+    if latest_before and latest_before < snap_dates[0]:
+        trade_days = [d for d in db.get_trade_dates(start=latest_before, end=snap_dates[-1])
+                      if latest_before < d < snap_dates[0]]
+        if trade_days:
+            print(f"⚠️ 日线缺口: {latest_before} ~ {snap_dates[0]} 之间缺 "
+                  f"{len(trade_days)} 个交易日: {'、'.join(trade_days[:10])}")
+            print("   重跑 snapshot 补不回这些日子，需用历史采集路径回填（nav / 定向 collect_fund_nav）。")
+        elif db.count_trade_dates() == 0:
+            print(f"ℹ️ 净值日期 {latest_before} → {snap_dates[-1]}；"
+                  f"交易日历为空，无法判定是否有缺口（可先跑 python src/main.py calendar）。")
+
+    db.log_data_collection("fund_nav_snapshot", "success", new_rows)
+    db.close()
+    print()
+    print("💡 snapshot 是日常增量主路径；历史回填仍需 nav（分层采样）。")
 
 
 def cmd_enrich():

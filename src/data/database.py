@@ -425,7 +425,7 @@ class Database:
                 return True           # 非数字内容按文本的「非空」规则处理
         return True
 
-    def upsert_fund_info(self, fund: dict):
+    def upsert_fund_info(self, fund: dict, commit: bool = True):
         """
         插入或更新基金基本信息（**局部更新**语义，批次 4.2 根因修复）。
 
@@ -441,6 +441,9 @@ class Database:
 
         代价（已知且接受）：已入库的字段无法通过 upsert「清空」，只能被
         新的非空值覆盖；确需清空请显式 UPDATE。
+
+        commit=False：调用方负责事务（如 cmd_snapshot 两万行包成一个
+        immediate() 事务，避免逐行 commit 的 fsync 开销）。
         """
         cols = ["fund_code"] + list(self._FUND_INFO_FIELDS) + ["updated_at"]
         placeholders = ["?"] * (len(cols) - 1) + ["datetime('now','localtime')"]
@@ -459,7 +462,8 @@ class Database:
             "VALUES (" + ",".join(placeholders) + ") "
             "ON CONFLICT(fund_code) DO UPDATE SET " + ", ".join(sets),
             params)
-        self.conn.commit()
+        if commit:
+            self.conn.commit()
 
     def get_all_funds(self) -> list:
         """获取所有基金基本信息"""

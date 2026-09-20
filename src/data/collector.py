@@ -15,6 +15,7 @@ Phase 0 的首要任务就是验证这些接口的可用性。
 """
 
 import pandas as pd
+import re
 import time
 from typing import Optional
 
@@ -593,6 +594,66 @@ class DataCollector:
             return float(size_str.replace("亿", "").replace("万", ""))
         except (ValueError, TypeError):
             return 0.0
+
+
+# 快照宽表里带日期的净值列名：'2026-09-18-单位净值' / '2026-09-18-累计净值'
+_DAILY_COL_RE = re.compile(r"^(\d{4}-\d{2}-\d{2})-(单位净值|累计净值)$")
+
+
+def parse_daily_snapshot(daily_df: pd.DataFrame):
+    """把 fund_open_fund_daily_em() 的全市场快照宽表解析成可入库结构。
+
+    纯函数（不触网、不触库），供 cmd_snapshot 调用、供测试离线验证。
+
+    返回 (nav_records, info_rows, snap_dates)：
+    - nav_records: [(fund_code, nav_date, unit_nav, acc_nav, daily_return)]
+      接口只给一个「日增长率」列，故只有最新一天带涨跌幅，较早一天记 0.0
+      （重跑不会覆盖历史行，见 insert_nav_batch 的 INSERT OR IGNORE）；
+    - info_rows:   [{'fund_code','fund_name','purchase_status','mgt_fee'}]
+      费率缺失保持 None（upsert 局部更新语义会保留旧值，批次 4.2）；
+    - snap_dates:  快照覆盖的交易日（升序，通常 2 天）。
+
+    货币基金等无「单位净值」口径的行被跳过（计划书 §8.3：进不了 fund_nav）。
+    """
+    unit_cols, acc_cols = {}, {}
+    ret_col = None
+    for c in daily_df.columns:
+        m = _DAILY_COL_RE.match(str(c))
+        if m:
+            (unit_cols if m.group(2) == "单位净值" else acc_cols)[m.group(1)] = c
+        elif str(c) == "日增长率":
+            ret_col = c
+    snap_dates = sorted(unit_cols)
+    latest = snap_dates[-1] if snap_dates else None
+
+    nav_records, info_rows = [], []
+    ncols = len(daily_df.columns)
+    for _, row in daily_df.iterrows():
+        code = str(row.iloc[0]).strip()
+        if not code:
+            continue
+
+        name = str(row.iloc[1]).strip()
+        status = str(row.iloc[-3]).strip() if ncols >= 9 else ""
+        info_rows.append({
+            "fund_code": code,
+            # 'nan'/'None' 视为未采到：置 None 让 upsert 保留旧值（不覆盖好名字/状态）
+            "fund_name": None if name in ("", "nan", "None") else name,
+            "purchase_status": "" if status in ("nan", "None") else status,
+            "mgt_fee": DataCollector._parse_fee(row.iloc[-1]) if ncols >= 11 else None,
+        })
+
+        ret = DataCollector._to_float(row[ret_col]) if ret_col is not None else 0.0
+        if not (-20 < ret < 20):
+            ret = 0.0
+        for d in snap_dates:
+            unit = DataCollector._to_float(row[unit_cols[d]])
+            if not unit:
+                continue  # 货币基金等无单位净值 → 跳过
+            acc = DataCollector._to_float(row[acc_cols[d]]) if d in acc_cols else 0.0
+            acc = acc if 0.1 <= acc < 100 else 0.0
+            nav_records.append((code, d, unit, acc, ret if d == latest else 0.0))
+    return nav_records, info_rows, snap_dates
 
 
 def quick_test():

@@ -10,6 +10,7 @@
     collect     采集全市场基金列表 + 指数估值
     index       更新指数估值(PE/PB)
     nav         采集候选基金净值历史（评分需要）
+    snapshot    全市场当日净值快照（1 次请求约 10 秒，日常增量主路径）
     enrich      补充基金详情（经理/费率等）
     hithink     同花顺 HiThink 连通测试
     calendar    刷新交易日历（T+1 确认 / 定投跳过节假日）
