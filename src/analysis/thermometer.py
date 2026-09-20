@@ -92,13 +92,16 @@ class MarketThermometer:
         degraded = [w for w, _, v in dims if v is None]
 
         total_w = sum(self.weights[w] for w, _ in used)
-        if total_w > 0:
-            temperature = sum(self.weights[w] * v for w, v in used) / total_w
+        # 全部维度缺失 → **不给温度读数**（黑箱验收审计 F-02）。
+        # 旧实现兜底成 50.0，会让"数据缺失"伪装成一个中性的真实读数，
+        # 还会顺着 _classify_temperature 一路给出"适中 / 保持定投 / 建议权益 35%"。
+        insufficient = total_w <= 0
+        if insufficient:
+            temperature = None
+            level, level_desc, action = "unknown", "数据不足", "数据不足，暂不给仓位建议"
         else:
-            temperature = 50.0
-            degraded = [w for w, _, _ in dims]
-
-        level, level_desc, action, _ = self._classify_temperature(temperature)
+            temperature = sum(self.weights[w] * v for w, v in used) / total_w
+            level, level_desc, action, _ = self._classify_temperature(temperature)
 
         # 估值分化检测（只看实际可用的估值维度）
         divergence = self._detect_divergence(pe_score, pb_score, erp_score)
@@ -107,17 +110,22 @@ class MarketThermometer:
         style = self._detect_market_style()
 
         # 仓位: 温度映射 + 分歧修正 (借鉴 ai-hedge-fund: 分歧→减仓)
-        base_equity = self._calc_target_equity(temperature) / 100.0
-        if divergence["level"] == "显著分歧":
-            base_equity *= 0.85
-        elif divergence["level"] == "轻微分歧":
-            base_equity *= 0.95
+        # 温度不可得时**不给仓位建议**（None），而不是拿兜底温度硬算。
+        if insufficient:
+            base_equity = None
+        else:
+            base_equity = self._calc_target_equity(temperature) / 100.0
+            if divergence["level"] == "显著分歧":
+                base_equity *= 0.85
+            elif divergence["level"] == "轻微分歧":
+                base_equity *= 0.95
 
         def _r(v):
             return float(round(v, 1)) if v is not None else None
 
         return {
-            "temperature": float(round(temperature, 1)),
+            "temperature": _r(temperature),
+            "insufficient_data": insufficient,
             "level": level,
             "level_desc": level_desc,
             "action": action,
@@ -131,7 +139,7 @@ class MarketThermometer:
             "degraded_dimensions": degraded,
             "divergence": divergence,
             "market_style": style,
-            "target_equity_pct": round(base_equity * 100, 1),
+            "target_equity_pct": (round(base_equity * 100, 1) if base_equity is not None else None),
         }
 
 

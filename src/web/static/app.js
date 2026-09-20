@@ -126,11 +126,13 @@ async function reloadHoldings(silent){
   const hc=document.getElementById('holdings-card');
   if(hc)hc.innerHTML=holdingsInner(port, (STATE.all&&STATE.all.plan)||{});
   // 总览 KPI 同步：市值 / 盈亏 / 总资产 / 已实现
-  const cash=((STATE.all&&STATE.all.plan)||{}).cash_reserve||0;
   const setT=(id,v)=>{const el=document.getElementById(id); if(el)el.textContent=v;};
   const setH=(id,v)=>{const el=document.getElementById(id); if(el)el.innerHTML=v;};
+  const pendAmt=(port.holdings||[]).filter(h=>h.status==='pending_confirm').reduce((s,h)=>s+(h.buy_amount||0),0);
   setT('kpi-mv', fmtMoney(port.total_market_value));
-  setT('kpi-assets', fmtMoney((port.total_market_value||0)+cash));
+  // 总资产 = 当前在仓市值（不叠加计划 cash_reserve，与 overviewKpis 同口径）
+  setT('kpi-assets', fmtMoney(port.total_market_value||0));
+  setH('kpi-assets-sub', '实时市值 '+fmtMoney(port.total_market_value)+(pendAmt>0?(' · 在途 '+fmtMoney(pendAmt)):''));
   setH('kpi-mv-sub', port.has_holdings?('盈亏 <span class="'+(port.total_pnl>=0?'pnl-pos':'pnl-neg')+'">'+fmtPct(port.total_return_pct)+'</span>'):'暂无持仓');
   setT('kpi-pnl', fmtMoney(port.total_pnl||0));
   setH('kpi-pnl-sub', '收益率 '+fmtPct(port.total_return_pct||0));
@@ -369,15 +371,16 @@ function overviewKpis(T,P,PL,S){
   S=S||{};
   const pnl=(S.total_pnl!=null)?S.total_pnl:(P.total_pnl||0);
   const ret=(S.total_return_pct!=null)?S.total_return_pct:(P.total_return_pct||0);
-  const assets=(S.total_assets!=null)?S.total_assets:((P.total_market_value||0)+(PL.cash_reserve||0));
+  const assets=(S.total_assets!=null)?S.total_assets:(P.total_market_value||0);
+  const pend=(S.pending_amount||0);
   const tgt=(PL.total_capital||0)-(PL.cash_reserve||0);
   // 后端的 level_desc 自带 emoji（TEMP_LEVELS）→ 在展示层用 esc() 剥离并转义
   return `<div class="kpi">
-      ${kpi('总资产', fmtMoney(assets), '市值 '+fmtMoney(P.total_market_value)+' + 现金 '+fmtMoney(PL.cash_reserve||0), null, 'kpi-assets')}
+      ${kpi('总资产', fmtMoney(assets), '实时市值 '+fmtMoney(P.total_market_value)+(pend>0?(' · 在途 '+fmtMoney(pend)):''), null, 'kpi-assets', 'kpi-assets-sub')}
       ${kpi('累计收益', fmtMoney(pnl), '收益率 '+fmtPct(ret), (pnl>=0?'var(--green)':'var(--red)'), 'kpi-pnl', 'kpi-pnl-sub')}
       ${kpi('已实现收益', fmtMoney(S.realized_pnl||0), (S.realized_count?('已了结 '+S.realized_count+' 笔'+(S.realized_fee?(' · 赎回费 '+fmtMoney(S.realized_fee)):'')):'暂无了结'), ((S.realized_pnl||0)>=0?'var(--green)':'var(--red)'), 'kpi-realized', 'kpi-realized-sub')}
-      ${kpi('市场温度', fmt(T.temperature)+'°', esc(T.level_desc||''), tempMeta(T.temperature||50)[3])}
-      ${kpi('建议权益仓位', (T.target_equity_pct||35)+'%', '固收 '+fmt(100-(T.target_equity_pct||35))+'%')}
+      ${kpi('市场温度', (T.temperature==null?'数据不足':fmt(T.temperature)+'°'), esc(T.level_desc||''), (T.temperature==null?'var(--dim)':tempMeta(T.temperature)[3]))}
+      ${kpi('建议权益仓位', (T.target_equity_pct==null?'—':(T.target_equity_pct+'%')), (T.target_equity_pct==null?'温度数据不足':('固收 '+fmt(100-T.target_equity_pct)+'%')))}
       ${kpi('持仓市值', fmtMoney(P.total_market_value), P.has_holdings? ('盈亏 '+fmtPct(P.total_return_pct)):'暂无持仓', null, 'kpi-mv', 'kpi-mv-sub')}
       ${kpi('计划投入', fmtMoney(PL.total_invested||0), '目标 '+fmtMoney(tgt), null, 'kpi-plan', 'kpi-plan-sub')}
     </div>
@@ -467,13 +470,20 @@ function allocCard(S){
 function ovTempCard(T){
   // tempMeta 返回 [level, label, action, color] 四项；原来解构了 5 个名字，
   // 导致 tAction 拿到颜色串 → 页面上直接显示 "var(--up)"，且 tColor 为 undefined。
-  const[tLvl,tLabel,tAction,tColor]=tempMeta(T.temperature||50);
-  let inner=`<div style="display:flex;align-items:baseline;gap:14px">
+  // 温度数据不足（全维度缺失，F-02）→ 不显示任何度数、不画进度条、不给建议。
+  const insufficient=(T.temperature==null);
+  const[tLvl,tLabel,tAction,tColor]=insufficient?['unknown','数据不足',(T.action||'数据不足，暂不给仓位建议'),'var(--dim)']:tempMeta(T.temperature);
+  let inner= insufficient
+    ? `<div style="display:flex;align-items:baseline;gap:14px">
+      <span class="temp-big" style="color:${tColor}">—</span>
+      <span class="temp-level" style="color:${tColor}">${tLabel}</span></div>
+    <div style="font-size:13px;margin-bottom:4px">${esc(tAction)}</div>`
+    : `<div style="display:flex;align-items:baseline;gap:14px">
       <span class="temp-big" style="color:${tColor}">${fmt(T.temperature)}°</span>
       <span class="temp-level" style="color:${tColor}">${tLabel}</span></div>
     <div class="temp-bar"><div class="temp-bar-fill" style="width:${T.temperature}%;background:${tColor}"></div></div>
-    <div style="font-size:13px;margin-bottom:4px">${tAction}</div>
-    <div class="temp-detail">
+    <div style="font-size:13px;margin-bottom:4px">${tAction}</div>`;
+  inner+=`<div class="temp-detail">
       <span>PE分位 ${fmtDim(T.components?.pe_score)}°</span><span>PB分位 ${fmtDim(T.components?.pb_score)}°</span>
       <span>性价比 ${fmtDim(T.components?.erp_score)}°</span><span>量能 ${fmtDim(T.components?.volume_score)}°</span>
       <span>情绪 ${fmtDim(T.components?.sentiment_score)}°</span></div>
@@ -487,7 +497,11 @@ function ovTempCard(T){
 }
 
 function ovAllocCard(T,P,PL){
-  const eq=T.target_equity_pct||35;
+  // 温度数据不足（全维度缺失，F-02）→ 目标仓位不存在，不给任何金额测算
+  if(T.target_equity_pct==null){
+    return card('仓位建议','',`<div class="stat-line" style="margin-top:8px">市场温度数据不足 → 目标仓位无法确定，暂不给仓位建议。请先完成数据采集（<code>python src/main.py collect</code> / <code>index</code>）。</div>`);
+  }
+  const eq=T.target_equity_pct;
   // 无持仓时用投资计划的总本金作为测算基数，避免与计划卡口径冲突
   const base=P.has_holdings?(P.total_invested||0):((PL.total_capital||0));
   let inner=`<div class="alloc-bar">

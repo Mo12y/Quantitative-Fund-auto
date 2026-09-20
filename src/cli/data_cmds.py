@@ -31,31 +31,54 @@ def _load_api_key():
 HITHINK_KEY = _load_api_key()
 
 
+def _invalidate_web_cache(db) -> None:
+    """采集类命令写完数据后，失效 Web 的 analysis_snapshot 快照。
+
+    为什么必须有（黑箱验收审计 F-08）：Web 的 `/api/funds` 等端点会把结果
+    落进 `analysis_snapshot` 并给 6 小时 TTL；**写持仓**会触发失效，但
+    **CLI 采集不会** —— 于是"跑完 init 回来打开页面，数字一个都没变"
+    （界面还端着采集前的空结果）。采集完成后显式清一次即可。
+    """
+    try:
+        n = db.clear_analysis_snapshots()
+        if n:
+            print(f"   ♻️ 已失效 Web 缓存快照 {n} 项（下次打开页面会自动重算）")
+    except Exception:
+        pass
+
+
 def cmd_test():
     """Phase 0: 测试数据接口"""
     quick_test()
 
 
 def cmd_init():
-    """一键初始化: 测试接口 → 采集数据 → 采集净值 → 补充详情（首次使用执行一次）"""
+    """一键初始化: 测试接口 → 采集数据 → 交易日历 → 采集净值 → 补充详情（首次使用执行一次）"""
     print("=" * 60)
-    print("🚀 一键初始化（首次使用执行一次，约 5-10 分钟）")
+    print("🚀 一键初始化（首次使用执行一次，约 15-25 分钟；净值采集最耗时）")
     print("=" * 60)
     print()
 
-    print("步骤 1/4: 测试数据接口...")
+    print("步骤 1/5: 测试数据接口...")
     cmd_test()
     print()
 
-    print("步骤 2/4: 采集基金列表与指数估值...")
+    print("步骤 2/5: 采集基金列表与指数估值...")
     cmd_collect()
     print()
 
-    print("步骤 3/4: 采集基金净值历史（最耗时，请耐心等待）...")
+    # 交易日历是 T+1 确认 / 定投跳节假日的基础（黑箱验收审计 F-06：
+    # 旧版 init 不含这一步，新用户跑完"一键初始化"后 trade_calendar 仍为空，
+    # 只能回退"跳过周末"，法定节假日会被当成交易日）。
+    print("步骤 3/5: 刷新交易日历（T+1 确认 / 定投跳过节假日）...")
+    cmd_calendar()
+    print()
+
+    print("步骤 4/5: 采集基金净值历史（最耗时，请耐心等待）...")
     cmd_nav()
     print()
 
-    print("步骤 4/4: 补充基金详情...")
+    print("步骤 5/5: 补充基金详情...")
     cmd_enrich()
     print()
 
@@ -115,6 +138,7 @@ def cmd_index():
             except Exception as e2:
                 print(f"      ❌ 仍失败: {e2}")
 
+    _invalidate_web_cache(db)
     db.close()
     print()
     print("=" * 60)
@@ -174,6 +198,7 @@ def cmd_collect():
     except Exception as e:
         print(f"        ❌ 失败: {e}")
 
+    _invalidate_web_cache(db)
     db.close()
     print()
     print("=" * 60)
@@ -248,6 +273,7 @@ def cmd_nav():
         if (i + 1) % 50 == 0:
             print(f"   进度: {i+1}/{total} (净值{success_nav} ok, 详情{success_detail} ok, {fail_count} fail)")
 
+    _invalidate_web_cache(db)
     db.close()
     print()
     print("=" * 60)
@@ -314,6 +340,7 @@ def cmd_snapshot():
                   f"交易日历为空，无法判定是否有缺口（可先跑 python src/main.py calendar）。")
 
     db.log_data_collection("fund_nav_snapshot", "success", new_rows)
+    _invalidate_web_cache(db)
     db.close()
     print()
     print("💡 snapshot 是日常增量主路径；历史回填仍需 nav（分层采样）。")
@@ -354,6 +381,7 @@ def cmd_enrich():
         if (i + 1) % 50 == 0:
             print(f"   进度: {i+1}/{len(existing_codes)} (新增{success}, 已有{skip})")
 
+    _invalidate_web_cache(db)
     db.close()
     print()
     print("=" * 60)
@@ -394,6 +422,7 @@ def cmd_calendar():
     else:
         print("ℹ️ 未获取到交易日历；将回退为“跳过周末”规则（T+1 仍可用，只是不识别法定节假日）。")
         print("   可放置 data/trade_calendar.csv（首行表头 trade_date）后重跑本命令。")
+    _invalidate_web_cache(db)
     db.close()
 
 

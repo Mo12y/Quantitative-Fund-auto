@@ -74,15 +74,21 @@ def cmd_temp():
 
     # 温度条
     t = temp['temperature']
-    bar = "█" * int(t / 5) + "░" * (20 - int(t / 5))
     comp = temp["components"]
 
     print("🌡️ 市场温度计 v2.0")
     print("=" * 50)
-    print(f"  [{bar}] {t}°C")
-    print(f"  状态: {temp['level_desc']}")
-    print(f"  建议: {temp['action']}")
-    print(f"  建议权益仓位: {temp['target_equity_pct']}%")
+    if t is None:
+        # 全维度缺失：不给温度读数（F-02）
+        print("  [数据不足] —— PE/PB/ERP/量能/情绪五个维度都没有数据，无法给出温度")
+        print(f"  状态: {temp['level_desc']}")
+        print(f"  建议: {temp['action']}")
+    else:
+        bar = "█" * int(t / 5) + "░" * (20 - int(t / 5))
+        print(f"  [{bar}] {t}°C")
+        print(f"  状态: {temp['level_desc']}")
+        print(f"  建议: {temp['action']}")
+        print(f"  建议权益仓位: {temp['target_equity_pct']}%")
     print()
     def _d(v):
         return f"{v:.0f}°" if v is not None else "缺失"
@@ -191,9 +197,13 @@ def cmd_rebalance():
 
     # 状态
     t = temp["temperature"]
-    bar = "█" * int(t / 5) + "░" * (20 - int(t / 5))
-    print(f"\n🌡️ 温度: [{bar}] {t}°C — {temp['level_desc']}")
-    print(f"📊 当前权益: {result['current_equity_pct']:.0f}% → 目标: {result['target_equity_pct']}%")
+    if t is None:
+        print(f"\n🌡️ 温度: [数据不足] — {temp['level_desc']}")
+        print(f"📊 当前权益: {result['current_equity_pct']:.0f}% → 目标: 数据不足")
+    else:
+        bar = "█" * int(t / 5) + "░" * (20 - int(t / 5))
+        print(f"\n🌡️ 温度: [{bar}] {t}°C — {temp['level_desc']}")
+        print(f"📊 当前权益: {result['current_equity_pct']:.0f}% → 目标: {result['target_equity_pct']}%")
     print(f"💰 总资产约: ¥{result['total_capital']:.0f} (含现金)")
 
     # 调仓建议

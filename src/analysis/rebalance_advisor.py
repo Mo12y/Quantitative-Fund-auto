@@ -80,6 +80,28 @@ class RebalanceAdvisor:
 
         target_equity_pct = temp["target_equity_pct"]
 
+        # 温度数据不足（全维度缺失 → target_equity_pct 为 None）→ 目标仓位无法确定，
+        # **不给任何调仓指令**（黑箱审计 F-02 的连带：旧实现会拿兜底 50.0 硬算出
+        # "建议权益 35%" 并据此给出大额买卖指令）。
+        if target_equity_pct is None:
+            return {
+                "current_equity_pct": round(current_equity_pct, 1),
+                "target_equity_pct": None,
+                "total_capital": round(total_capital, 2),
+                "portfolio_value": round(portfolio_value, 2),
+                "cash_available": round(cash, 2),
+                "need_rebalance": False,
+                "gap_pct": None,
+                "degraded": ["temperature"],
+                "temperature": temp,
+                "instructions": [],
+                "summary": {
+                    "verdict": "温度数据不足，暂不给出调仓建议",
+                    "detail": "PE/PB/ERP/量能/情绪五个维度都没有数据 → 目标仓位无法确定。"
+                              "请先完成数据采集（python src/main.py collect / index）。",
+                },
+            }
+
         # 3. 生成指令
         instructions = self._generate_instructions(
             holdings, temp, current_equity_pct, target_equity_pct,

@@ -68,8 +68,12 @@ class WeeklyReporter:
     def _print_minimal_report(self, temp_data: dict):
         """极简报告: 温度没变，别动。"""
         t = temp_data["temperature"]
-        bar = "█" * int(t / 5) + "░" * (20 - int(t / 5))
         level = temp_data["level_desc"]
+        if t is None:                      # 全维度缺失 → 不给温度（F-02）
+            bar_txt, tgt_txt = "[数据不足]", "数据不足"
+        else:
+            bar_txt = "[" + "█" * int(t / 5) + "░" * (20 - int(t / 5)) + "]"
+            tgt_txt = f"{temp_data['target_equity_pct']}%"
 
         self.console.print()
         self.console.print(Panel(
@@ -78,8 +82,8 @@ class WeeklyReporter:
             box=box.SIMPLE, style="cyan",
         ))
         self.console.print()
-        self.console.print(f"  🌡️ 温度: [{bar}] {t}°C — {level}")
-        self.console.print(f"  🎯 建议权益仓位: {temp_data['target_equity_pct']}%")
+        self.console.print(f"  🌡️ 温度: {bar_txt} {'' if t is None else f'{t}°C — '}{level}")
+        self.console.print(f"  🎯 建议权益仓位: {tgt_txt}")
         self.console.print()
         self.console.print(f"  [bold green]✅ 温度稳定，无需操作。[/bold green]")
         self.console.print()
@@ -92,12 +96,14 @@ class WeeklyReporter:
     @staticmethod
     def _generate_minimal_plain(temp_data: dict) -> str:
         t = temp_data["temperature"]
+        temp_txt = "[数据不足]" if t is None else f"{t}°C"
+        tgt_txt = "数据不足" if temp_data.get("target_equity_pct") is None else f"{temp_data['target_equity_pct']}%"
         lines = [
             "=" * 40,
             f"📊 本周基金简报 ({datetime.now().strftime('%Y-%m-%d')})",
             "=" * 40,
-            f"🌡️ 温度: {t}°C — {temp_data['level_desc']}",
-            f"🎯 建议权益: {temp_data['target_equity_pct']}%",
+            f"🌡️ 温度: {temp_txt} — {temp_data['level_desc']}",
+            f"🎯 建议权益: {tgt_txt}",
             "",
             "✅ 温度稳定，无需操作。",
             "",
@@ -151,11 +157,18 @@ class WeeklyReporter:
         level_desc = temp_data["level_desc"]
         action = temp_data["action"]
 
-        # 温度条
-        filled = int(temp / 5)
-        bar = "█" * filled + "░" * (20 - filled)
+        # 温度条（全维度缺失时 temp 为 None → 不给温度条，F-02）
+        if temp is None:
+            filled = 0
+            bar = "[数据不足]"
+            bar_color = "dim"
+        else:
+            filled = int(temp / 5)
+            bar = "█" * filled + "░" * (20 - filled)
 
-        if temp <= 20:
+        if temp is None:
+            bar_color = "dim"
+        elif temp <= 20:
             bar_color = "blue"
         elif temp <= 40:
             bar_color = "cyan"
@@ -216,6 +229,9 @@ class WeeklyReporter:
 
         self.console.print()
         self.console.print(f"[bold]🎯 仓位建议[/bold]")
+        if target_equity is None:          # 全维度缺失 → 没有目标仓位（F-02）
+            self.console.print("  [dim]市场温度数据不足 → 目标仓位无法确定，暂不给仓位建议。[/dim]")
+            return
         self.console.print(f"  建议权益仓位: [bold]{target_equity}%[/bold]")
         self.console.print(f"  建议债券/货币仓位: [bold]{100 - target_equity}%[/bold]")
 
@@ -388,9 +404,11 @@ class WeeklyReporter:
         lines.append(f"📊 每周基金操作建议 ({today})")
         lines.append("=" * 60)
 
-        lines.append(f"\n🌡️ 市场温度: {temp_data['temperature']}°C | {temp_data['level_desc']}")
+        _t = temp_data['temperature']
+        _tgt = temp_data.get('target_equity_pct')
+        lines.append(f"\n🌡️ 市场温度: {'[数据不足]' if _t is None else str(_t) + '°C'} | {temp_data['level_desc']}")
         lines.append(f"   建议: {temp_data['action']}")
-        lines.append(f"   建议权益仓位: {temp_data['target_equity_pct']}%")
+        lines.append(f"   建议权益仓位: {'数据不足' if _tgt is None else str(_tgt) + '%'}")
 
         # 质量筛选池
         lines.append(f"\n🔍 质量筛选基金池:")

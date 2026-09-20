@@ -100,6 +100,10 @@ class StrategyEngine:
         temp_data = self.thermometer.get_temperature()
         current_temp = temp_data["temperature"]
 
+        # 温度数据不足（全维度缺失）→ 不做"该不该调仓"的判断（F-02 连带）
+        if current_temp is None:
+            return False, "温度数据不足，暂不做调仓判断"
+
         # 无历史基准（首跑 / 状态过期），总是调仓
         if self._last_temp is None:
             self._last_temp = current_temp
@@ -199,7 +203,10 @@ class StrategyEngine:
             return {"total_cost": 0, "breakdown": [], "note": "无有效市值数据"}
 
         temp_data = self.thermometer.get_temperature()
-        target_eq = float(temp_data.get("target_equity_pct") or 0)
+        target_pct = temp_data.get("target_equity_pct")
+        if target_pct is None:                      # 温度数据不足 → 无法估算（F-02 连带）
+            return {"total_cost": 0, "breakdown": [], "note": "温度数据不足，无法估算调仓成本"}
+        target_eq = float(target_pct)
         equity_mv = sum(mv for h, mv in pos if self._is_equity(h.get("fund_code", "")))
         current_eq = equity_mv / total_mv * 100
         delta_pp = target_eq - current_eq

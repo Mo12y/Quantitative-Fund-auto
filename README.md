@@ -60,9 +60,11 @@ pip install -r requirements.txt
 python src/main.py init
 ```
 
-自动完成四步：测试数据接口 → 采集基金列表与指数估值 → 采集基金净值历史 → 补充基金详情（约 5-10 分钟）。
+自动完成五步：测试数据接口 → 采集基金列表与指数估值 → **刷新交易日历** → 采集基金净值历史 → 补充基金详情
+（实测约 15-25 分钟，净值采集最耗时；`enrich` 会另花几分钟补规模/经理）。
 
-> 也可以分步执行：`python src/main.py test` / `collect` / `nav` / `enrich`
+> 也可以分步执行：`python src/main.py test` / `collect` / `calendar` / `nav` / `enrich`
+> 采集类命令跑完会自动失效 Web 缓存快照，回到页面即可看到新数据。
 
 ### 3. 查看分析结果
 

@@ -469,15 +469,25 @@ def api_portfolio_curve():
 
 
 def _overview_stats(port: dict, plan: dict) -> dict:
-    """总览增强指标：总资产 / 累计收益 / 收益率 / 持仓分布 / 行业占比"""
+    """总览增强指标：总资产 / 累计收益 / 收益率 / 持仓分布 / 行业占比
+
+    总资产口径（2026-09-20 改）：**只算当前在仓资产**（实时按最新净值），
+    不再叠加投资计划的 `cash_reserve`。原因：plan.cash_reserve 是"计划出来的"
+    数字，与实盘无关 —— 空库时会把某个写死的计划金额当成用户的资产
+    （黑箱验收审计 F-01）。计划口径的现金弹药仍在 `cash_reserve` 字段里，
+    供计划卡/调仓建议使用，但**不参与总资产**。
+    """
     mv = float(port.get("total_market_value") or 0)
     invested = float(port.get("total_invested") or 0)
     pnl = float(port.get("total_pnl") or 0)
     cash = float(plan.get("cash_reserve") or 0)
     holdings = port.get("holdings") or []
     realized = port.get("realized") or {}
+    # 已下单未确认（在途）的申购金额 —— 单独展示，不计入"在仓总资产"
+    pending_amt = round(sum(float(h.get("buy_amount") or 0)
+                            for h in holdings if h.get("status") == "pending_confirm"), 2)
     return {
-        "total_assets": round(mv + cash, 2),          # 总资产 = 持仓市值 + 现金弹药
+        "total_assets": round(mv, 2),                 # 总资产 = 当前在仓市值（实时）
         "total_market_value": round(mv, 2),
         "total_invested": round(invested, 2),
         "total_pnl": round(pnl, 2),
@@ -486,6 +496,7 @@ def _overview_stats(port: dict, plan: dict) -> dict:
         "realized_count": int(realized.get("count") or 0),
         "total_return_pct": round((pnl / invested * 100) if invested else 0, 2),
         "cash_reserve": round(cash, 2),
+        "pending_amount": pending_amt,
         "holding_count": len([h for h in holdings if h.get("status") != "sold"]),
         "pending_count": len([h for h in holdings if h.get("status") == "pending_confirm"]),
         "type_alloc": port.get("alloc") or {},
@@ -852,6 +863,14 @@ def api_holdings_action():
                 return jsonify({"ok": False, "error": "缺少基金代码"})
             if amount <= 0:
                 return jsonify({"ok": False, "error": "买入金额需大于 0"})
+            # 代码存在性校验（黑箱验收审计 F-04）：未收录的代码一律拒绝。
+            # 旧实现只判"非空 + 金额>0"，导致打错的代码（如 999999）被**静默
+            # 写成一笔真持仓**并计入总资产，界面还不给任何提示。
+            # 若确实是库内没有的新基金，先跑 `python src/main.py collect` 收录。
+            if not db.get_fund_info(code):
+                return jsonify({"ok": False,
+                                "error": f"库内没有基金代码 {code} —— 请核对代码；"
+                                         f"若是新基金，先运行 python src/main.py collect 收录后再录入"})
             date_ = (str(q.get("date") or "").strip()) or _today()
             name = (str(q.get("name") or "").strip()) or (db.get_fund_name(code) or code)
             notes = (str(q.get("notes") or "").strip()) or ""

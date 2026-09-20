@@ -382,9 +382,13 @@ def cmd_strategy():
 
     # 温度
     t = temp["temperature"]
-    bar = "█" * int(t / 5) + "░" * (20 - int(t / 5))
-    print(f"\n🌡️ 当前温度: [{bar}] {t}°C — {temp['level_desc']}")
-    print(f"   建议权益仓位: {suggestion['target_equity_pct']}%")
+    if t is None:                          # 全维度缺失 → 不给温度（F-02）
+        print(f"\n🌡️ 当前温度: [数据不足] — {temp['level_desc']}")
+        print(f"   建议权益仓位: 数据不足")
+    else:
+        bar = "█" * int(t / 5) + "░" * (20 - int(t / 5))
+        print(f"\n🌡️ 当前温度: [{bar}] {t}°C — {temp['level_desc']}")
+        print(f"   建议权益仓位: {suggestion['target_equity_pct']}%")
 
     # 调仓判断
     print(f"\n📋 调仓判断:")
