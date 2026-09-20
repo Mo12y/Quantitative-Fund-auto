@@ -1,0 +1,181 @@
+#!/usr/bin/env python3
+"""
+阈值校准（参考毕设 analysis/benchmark_threshold.py 的范式）
+
+把 fund_scorer.THRESHOLDS 里那些**拍脑袋常数**，换成**同类基金群体分布的分位数**，
+并回答一个关键问题：**现有常数阈值在同类分布里到底位于第几分位？通过率多少？**
+
+只读脚本：不写任何表、不改任何业务代码。
+
+用法:
+    python scripts/calibrate_thresholds.py
+    python scripts/calibrate_thresholds.py --min-days 756     # 只算深历史基金
+
+口径:
+    - 估值序列一律用 acc_nav（累计净值），见 src/analysis/nav_series.py
+      —— 分红除息日 unit_nav 向下跳，会把回撤凭空放大
+    - 样本量分级（见 docs/基金推荐系统设计方案.md §3.4）：
+        n>=150 全量分位 / 100<=n<150 降到 P25-P75 / 30<=n<100 仅中位+IQR / n<30 不建
+"""
+import argparse
+import os
+import sqlite3
+import sys
+
+import numpy as np
+
+sys.stdout.reconfigure(encoding="utf-8", errors="replace")  # Windows GBK 控制台兜底
+
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, ROOT)
+DB_PATH = os.path.join(ROOT, "data", "fund_quant.db")
+
+TRADING_DAYS = 252
+
+# --- 类型聚合：把 44 种 fund_type 归成 6 组（见设计文档 §3.5）---
+TYPE_GROUPS = [
+    ("A 偏股混合", ["混合型-偏股"]),
+    ("B 灵活配置", ["混合型-灵活配置", "混合型-灵活", "混合型-平衡"]),
+    ("C 主动股票", ["股票型", "股票型-普通"]),
+    ("D 指数股票", ["股票型-标准指数", "股票型-增强指数", "指数型-股票"]),
+    ("E 债券", ["债券型-长债", "债券型-普通债券", "债券型-长期纯债", "债券型-中短债",
+                "债券型-短期纯债", "债券型-混合一级", "债券型-混合二级",
+                "债券型-利率债", "债券型-信用债", "债券型-可转债"]),
+    ("F QDII/其他", ["QDII-混合偏股", "QDII-普通股票", "QDII-混合灵活", "QDII-纯债",
+                     "指数型-海外股票", "FOF-稳健型", "FOF-均衡型", "FOF-进取型"]),
+]
+TYPE2GROUP = {t: g for g, ts in TYPE_GROUPS for t in ts}
+
+# --- 现有拍脑袋阈值（fund_scorer.THRESHOLDS）---
+CURRENT = {
+    "max_drawdown_1y": 35.0,     # 检查：<=35% 通过
+    "momentum_3m": 40.0,         # 检查：<=40% 通过（追涨警告）
+    "ann_vol": None,
+    "annual_return": None,
+    "sharpe": None,
+}
+
+MIN_N_FULL, MIN_N_MID, MIN_N_IQR = 150, 100, 30
+
+
+def load_navs(conn, min_days):
+    """返回 {fund_code: np.array(acc_nav 序列, 升序)}，只取 >= min_days 天的基金。"""
+    cur = conn.cursor()
+    cur.execute("""
+        SELECT n.fund_code, n.nav_date, COALESCE(n.acc_nav, n.unit_nav)
+        FROM fund_nav n
+        JOIN (SELECT fund_code FROM fund_nav GROUP BY fund_code HAVING COUNT(*) >= ?) d
+          ON d.fund_code = n.fund_code
+        WHERE COALESCE(n.acc_nav, n.unit_nav) > 0
+        ORDER BY n.fund_code, n.nav_date
+    """, (min_days,))
+    out = {}
+    for code, _d, v in cur.fetchall():
+        out.setdefault(code, []).append(float(v))
+    return {k: np.asarray(v, dtype=float) for k, v in out.items() if len(v) >= min_days}
+
+
+def metrics(vals):
+    """单只基金的指标。v 为累计净值序列（升序）。"""
+    n = len(vals)
+    if n < 60:
+        return None
+    ret = vals[-1] / vals[0] - 1
+    ann_ret = (1 + ret) ** (TRADING_DAYS / n) - 1
+    daily = np.diff(vals) / vals[:-1]
+    ann_vol = float(daily.std(ddof=1) * np.sqrt(TRADING_DAYS)) if daily.size > 1 else np.nan
+    peak = np.maximum.accumulate(vals)
+    mdd = float(((peak - vals) / peak).max() * 100)
+    # 近 1 年回撤（与 fund_scorer._check_drawdown 口径一致）
+    w = min(n, TRADING_DAYS)
+    seg = vals[-w:]
+    pk = np.maximum.accumulate(seg)
+    mdd1y = float(((pk - seg) / pk).max() * 100)
+    # 近 3 月动量
+    k = min(n - 1, 63)
+    mom3m = float((vals[-1] / vals[-1 - k] - 1) * 100)
+    sharpe = float((ann_ret - 0.02) / ann_vol) if ann_vol and ann_vol > 0 else np.nan
+    return {"annual_return": ann_ret * 100, "ann_vol": ann_vol * 100,
+            "max_drawdown_1y": mdd1y, "max_drawdown_all": mdd,
+            "momentum_3m": mom3m, "sharpe": sharpe}
+
+
+def grade(n):
+    if n >= MIN_N_FULL:
+        return "full", [1, 5, 10, 25, 50, 75, 90, 95, 99]
+    if n >= MIN_N_MID:
+        return "mid", [10, 25, 50, 75, 90]
+    if n >= MIN_N_IQR:
+        return "iqr_only", [25, 50, 75]
+    return "insufficient", [50]
+
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--min-days", type=int, default=756,
+                    help="最少净值天数（默认 756 ≈ 3 年）")
+    args = ap.parse_args()
+
+    conn = sqlite3.connect(f"file:{DB_PATH}?mode=ro", uri=True)
+    fi = {r[0]: (r[1] or "") for r in conn.execute("select fund_code, fund_type from fund_info")}
+    navs = load_navs(conn, args.min_days)
+    conn.close()
+    print(f"载入 {len(navs)} 只（净值 >= {args.min_days} 天）\n")
+
+    # 分组
+    groups = {}
+    for code, v in navs.items():
+        g = TYPE2GROUP.get(fi.get(code, ""))
+        if not g:
+            continue
+        m = metrics(v)
+        if m:
+            groups.setdefault(g, []).append(m)
+
+    METRICS = ["annual_return", "ann_vol", "max_drawdown_1y", "momentum_3m", "sharpe"]
+    LABEL = {"annual_return": "年化收益%", "ann_vol": "年化波动%",
+             "max_drawdown_1y": "近1年最大回撤%", "momentum_3m": "近3月动量%", "sharpe": "夏普"}
+
+    for g, rows in sorted(groups.items()):
+        n = len(rows)
+        lvl, pcts = grade(n)
+        flag = {"full": "✅ 全量", "mid": "⚠️ 中位+IQR", "iqr_only": "⚠️ 仅中位+IQR",
+                "insufficient": "❌ 样本不足，不建参照系"}[lvl]
+        print("=" * 92)
+        print(f"【{g}】 n={n}  {flag}")
+        print("=" * 92)
+        if lvl == "insufficient":
+            print("  样本 <30，跳过\n")
+            continue
+        print(f"  {'指标':16} " + " ".join(f"{'P'+str(p):>9}" for p in pcts) + f" {'均值':>9}")
+        for k in METRICS:
+            arr = np.array([r[k] for r in rows], dtype=float)
+            arr = arr[np.isfinite(arr)]
+            if arr.size == 0:
+                continue
+            cells = " ".join(f"{np.percentile(arr, p):>9.2f}" for p in pcts)
+            print(f"  {LABEL[k]:16} {cells} {arr.mean():>9.2f}")
+        # ★ 现有常数阈值在该组分布中的位置
+        print()
+        for k, c in CURRENT.items():
+            if c is None:
+                continue
+            arr = np.array([r[k] for r in rows], dtype=float)
+            arr = arr[np.isfinite(arr)]
+            if arr.size == 0:
+                continue
+            pct = float((arr <= c).mean() * 100)
+            print(f"  ★ 现有阈值 {LABEL[k]} <= {c:g}  →  位于同类 P{pct:.0f}，通过率 {pct:.1f}%")
+        print()
+
+    print("=" * 92)
+    print("怎么读这个结果")
+    print("=" * 92)
+    print("  · 通过率 ≈100%  → 阈值太松，等于没设（当前 max_drawdown_1y=35 大概率如此）")
+    print("  · 通过率 ≈50%   → 阈值在中位，属'一半淘汰'")
+    print("  · 通过率 <20%   → 阈值很严，要确认是否有依据")
+    print("  · 建议把阈值改为同类分位（如'回撤优于同类 P75'），市场波动变化时自动跟随")
+
+
+if __name__ == "__main__":
+    main()

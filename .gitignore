@@ -65,7 +65,9 @@ credentials.*
 logs/
 
 # --- AI 工具本地记忆（不应公开） ---
-.claude/
+# 只忽略 .claude 下的私有状态；skills/ 是方法论资产，纳入版本管理（单一副本，避免与 docs 漂移）
+.claude/*
+!.claude/skills/
 .workbuddy/
 
 # --- 第三方文档聚合（非项目内容） ---
