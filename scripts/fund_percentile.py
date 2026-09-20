@@ -1,4 +1,4 @@
-﻿#!/usr/bin/env python3
+#!/usr/bin/env python3
 """
 同类百分位参照系（设计方案 §4.2/§4.3 的实现）
 
@@ -78,9 +78,11 @@ def main():
     conn.close()
 
     groups = {}
-    for code, v in navs.items():
+    dropped = []
+    for code, (d, v) in navs.items():
         g = TYPE2GROUP.get(fi.get(code, ""))
         if not g:
+            dropped.append(fi.get(code, "") or "(未知类型)")
             continue
         m = metrics(v, d)
         if m:
@@ -88,6 +90,9 @@ def main():
             m["_name"] = name.get(code, "")
             m["_type"] = fi.get(code, "")
             groups.setdefault(g, []).append(m)
+    if dropped:
+        from collections import Counter
+        print(f"⚠️ 未映射类型 {len(dropped)} 只（显式报告，不静默丢弃）：{dict(Counter(dropped))}\n")
 
     payload = {}
     for g, rows in sorted(groups.items()):

@@ -83,7 +83,12 @@ MIN_N_FULL, MIN_N_MID, MIN_N_IQR = 150, 100, 30
 
 
 def load_navs(conn, min_days):
-    """返回 {fund_code: np.array(acc_nav 序列, 升序)}，只取 >= min_days 天的基金。"""
+    """返回 {fund_code: (dates_ndarray, vals_ndarray)}，只取 >= min_days 天的基金。
+
+    ⚠️ **同时返回日期**：净值序列可能有缺口，年化必须用日期跨度算（见 metrics 的说明）。
+    早先只返回净值，导致调用方无法用日期口径 —— 这个接口缺陷曾让我把债券基金
+    的年化高估了 135%。
+    """
     cur = conn.cursor()
     cur.execute("""
         SELECT n.fund_code, n.nav_date, COALESCE(n.acc_nav, n.unit_nav)
@@ -94,9 +99,12 @@ def load_navs(conn, min_days):
         ORDER BY n.fund_code, n.nav_date
     """, (min_days,))
     out = {}
-    for code, _d, v in cur.fetchall():
-        out.setdefault(code, []).append(float(v))
-    return {k: np.asarray(v, dtype=float) for k, v in out.items() if len(v) >= min_days}
+    for code, dt, v in cur.fetchall():
+        out.setdefault(code, ([], []))
+        out[code][0].append(str(dt))
+        out[code][1].append(float(v))
+    return {k: (np.asarray(d), np.asarray(v, dtype=float))
+            for k, (d, v) in out.items() if len(v) >= min_days}
 
 
 def metrics(vals, dates=None):
@@ -194,13 +202,18 @@ def main():
 
     # 分组
     groups = {}
-    for code, v in navs.items():
+    dropped = []
+    for code, (d, v) in navs.items():
         g = TYPE2GROUP.get(fi.get(code, ""))
         if not g:
+            dropped.append(fi.get(code, "") or "(未知类型)")
             continue
-        m = metrics(v)
+        m = metrics(v, d)
         if m:
             groups.setdefault(g, []).append(m)
+    if dropped:
+        from collections import Counter
+        print(f"  ⚠️ 未映射类型 {len(dropped)} 只（**显式报告，不静默丢弃**）：{dict(Counter(dropped))}\n")
 
     METRICS_LOCAL = METRICS  # 模块级已定义，此处仅为可读性
     LABEL_LOCAL = LABEL
