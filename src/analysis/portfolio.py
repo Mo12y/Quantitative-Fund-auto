@@ -193,8 +193,11 @@ class PortfolioTracker:
                                                shares=shares, status="holding")
                         for tx in self.db.get_transactions(holding_id=h["id"]):
                             if tx["kind"] == "buy" and tx.get("status") == "pending_confirm":
+                                # ⚠️ 必须一起回填 shares：只写 status/confirm_nav 会让买入流水的
+                                # shares 永远停在 0.0，日后 get_realized_pnl 会把整只 lot 跳过
+                                # → 该 lot 的卖出从「已实现收益」静默消失（实测漏计 ¥145.61）。
                                 self.db.update_transaction(tx["id"], status="confirmed",
-                                                           confirm_nav=nav)
+                                                           confirm_nav=nav, shares=shares)
                     n_buy += 1
 
                 elif st == "sell_pending":
@@ -829,12 +832,33 @@ class PortfolioTracker:
         for t in self.db.conn.execute("SELECT * FROM transactions ORDER BY id"):
             tx_by_holding.setdefault(t["holding_id"], []).append(dict(t))
 
+        def _buy_shares(t: dict) -> float:
+            """买入流水代表的份额。
+
+            直接取 `transactions.shares`；**若为 0 则按 SSOT 公式回退** `round(金额/确认净值, 2)`
+            （与 `add_buy_transaction` / `reconcile` 的份额算法完全一致）。
+
+            为什么必须回退：`reconcile()` 结算"下单时净值未公布"的买入时，历史实现
+            **只回填持仓的 shares，没回填买入流水的 shares**，留下 0.0。
+            于是本函数的 `shares <= 0: continue` 会把**整只 lot** 跳过 ——
+            该 lot 的卖出就从「已实现收益」里静默消失（实测漏计 ¥145.61）。
+            这是读路径自愈，**不改写任何历史记录**（铁律 2）。
+            """
+            s = float(t.get("shares") or 0)
+            if s > 0:
+                return s
+            amt = float(t.get("amount") or 0)
+            nav = float(t.get("confirm_nav") or t.get("buy_nav") or 0)
+            if amt > 0 and nav > 0:
+                return round(amt / nav, 2)
+            return 0.0
+
         sales = []
         total_gross = total_cost = total_fee = 0.0
         for hid, txs in tx_by_holding.items():
             h = holdings.get(hid) or {}
             # 该 lot 的初始投入（买入流水）
-            shares = sum(float(t.get("shares") or 0) for t in txs if t["kind"] == "buy")
+            shares = sum(_buy_shares(t) for t in txs if t["kind"] == "buy")
             cost = sum(float(t.get("amount") or 0) for t in txs if t["kind"] == "buy")
             if shares <= 0:
                 continue
@@ -845,7 +869,11 @@ class PortfolioTracker:
                 nav = float(t.get("confirm_nav") or 0)
                 if ss <= 0 or nav <= 0 or shares <= 0:
                     continue
-                sold_cost = round(ss * (cost / shares), 2)
+                # 卖出成本 = 按份额比例摊。**上限是该 lot 的总成本** ——
+                # 当「卖出份额 > 该 lot 推导份额」时（历史数据里卖出份额与买入流水不一致，
+                # 例如 #43 卖出 43.40 份但买入流水净值陈旧只推出 42.68 份），
+                # 不设上限会把成本摊到超过实际支付额（50.84 > 50），凭空造出一笔亏损。
+                sold_cost = round(min(ss * (cost / shares), cost), 2)
                 gross = round(ss * nav, 2)
                 fee = round(float(t.get("fee") or 0), 2)
                 pnl = round(gross - sold_cost - fee, 2)
