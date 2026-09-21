@@ -30,7 +30,11 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 DB_PATH = os.path.join(ROOT, "data", "fund_quant.db")
 
-TRADING_DAYS = 252
+TRADING_DAYS = 244
+# ⚠️ 经实测校准（原为 252 的国际惯例值）：
+# 统计 2014~2025 共 12 个完整年份的 A 股实际交易日（全体基金净值日期并集）：
+#   均值 244.7 / 中位 244 / 范围 243~247
+# 用 252 会把**年化波动高估 3.07%**。校准脚本：scripts/calibrate_constants.py §1.1
 
 # --- 类型聚合：把 44 种 fund_type 归成 6 组（见设计文档 §3.5）---
 TYPE_GROUPS = [
@@ -79,7 +83,14 @@ METRICS = ["annual_return", "ann_vol", "max_drawdown_1y", "momentum_3m", "sharpe
 LABEL = {"annual_return": "年化收益%", "ann_vol": "年化波动%",
          "max_drawdown_1y": "近1年最大回撤%", "momentum_3m": "近3月动量%", "sharpe": "夏普"}
 
-MIN_N_FULL, MIN_N_MID, MIN_N_IQR = 150, 100, 30
+MIN_N_FULL, MIN_N_MID, MIN_N_IQR = 100, 50, 30
+# ⚠️ 经 bootstrap 实测校准（原为 150/100/30，依据是口算而非实测）：
+# 判定标准 = 统计量的 90% 置信区间宽度 / 全样本 IQR，< 0.5 视为可用。
+# 实测（A 组 n=191 作真值池，400 次重采样，见 calibrate_constants.py §1.2）：
+#   P90：回撤 n=50→0.42×  夏普 n=50→0.46×  年化收益 n=100→0.50×（收益最难估）
+#   P25：n=30→0.32~0.66×   n=50→0.22~0.47×
+# → P10/P90 需 n≥100；P25/P75 需 n≥50；n<50 只用中位+IQR
+
 
 
 def load_navs(conn, min_days):
