@@ -1,0 +1,110 @@
+{
+ "checked_at": "2026-09-21T08:49:13.657583+08:00",
+ "stale_days_threshold": 10,
+ "count_no_recent_data": 1,
+ "count_fetch_empty": 19,
+ "no_recent_data": [
+  {
+   "fund_code": "000417",
+   "last_nav": "2026-08-10",
+   "days_stale": 42
+  }
+ ],
+ "fetch_empty": [
+  {
+   "fund_code": "000002",
+   "last_nav": null,
+   "days_stale": null
+  },
+  {
+   "fund_code": "000012",
+   "last_nav": null,
+   "days_stale": null
+  },
+  {
+   "fund_code": "000108",
+   "last_nav": null,
+   "days_stale": null
+  },
+  {
+   "fund_code": "000140",
+   "last_nav": null,
+   "days_stale": null
+  },
+  {
+   "fund_code": "000154",
+   "last_nav": null,
+   "days_stale": null
+  },
+  {
+   "fund_code": "000155",
+   "last_nav": null,
+   "days_stale": null
+  },
+  {
+   "fund_code": "000157",
+   "last_nav": null,
+   "days_stale": null
+  },
+  {
+   "fund_code": "000158",
+   "last_nav": null,
+   "days_stale": null
+  },
+  {
+   "fund_code": "000159",
+   "last_nav": null,
+   "days_stale": null
+  },
+  {
+   "fund_code": "000160",
+   "last_nav": null,
+   "days_stale": null
+  },
+  {
+   "fund_code": "000161",
+   "last_nav": null,
+   "days_stale": null
+  },
+  {
+   "fund_code": "000162",
+   "last_nav": null,
+   "days_stale": null
+  },
+  {
+   "fund_code": "000163",
+   "last_nav": null,
+   "days_stale": null
+  },
+  {
+   "fund_code": "000164",
+   "last_nav": null,
+   "days_stale": null
+  },
+  {
+   "fund_code": "000470",
+   "last_nav": null,
+   "days_stale": null
+  },
+  {
+   "fund_code": "000472",
+   "last_nav": null,
+   "days_stale": null
+  },
+  {
+   "fund_code": "000514",
+   "last_nav": null,
+   "days_stale": null
+  },
+  {
+   "fund_code": "000565",
+   "last_nav": null,
+   "days_stale": null
+  },
+  {
+   "fund_code": "000582",
+   "last_nav": null,
+   "days_stale": null
+  }
+ ]
+}
