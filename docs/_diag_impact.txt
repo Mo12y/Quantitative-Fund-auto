@@ -1,0 +1,139 @@
+﻿=== 1. 哪 40 行 unit_nav <= 0 ===
+    ('000425', '2026-09-20', 0.0, 0.0)
+    ('000425', '2026-09-19', 0.0, 0.0)
+    ('000425', '2026-09-18', 0.0, 0.0)
+    ('000425', '2026-09-17', 0.0, 0.0)
+    ('000425', '2026-09-16', 0.0, 0.0)
+    ('000425', '2026-09-15', 0.0, 0.0)
+    ('000425', '2026-09-14', 0.0, 0.0)
+    ('000425', '2026-09-13', 0.0, 0.0)
+    ('000425', '2026-09-12', 0.0, 0.0)
+    ('000425', '2026-09-11', 0.0, 0.0)
+    ('000425', '2026-09-10', 0.0, 0.0)
+    ('000425', '2026-09-09', 0.0, 0.0)
+    ('000425', '2026-09-08', 0.0, 0.0)
+    ('000425', '2026-09-07', 0.0, 0.0)
+    ('000425', '2026-09-06', 0.0, 0.0)
+
+=== 2. acc_nav = 0.0 的基金，是否在深历史池(>=756天)里 ===
+   code     name                 type               days   zero recent  last
+   000425   长盛添利宝货币B             货币型-普通货币             20     20     20  2026-09-20 [!! 近期窗口内有 0.0]
+   000476   广发天天利货币B             货币型-普通货币             20     20     20  2026-09-20 [!! 近期窗口内有 0.0]
+   007696   嘉实融享货币               货币型-浮动净值              2      2      2  2026-09-18 [!! 近期窗口内有 0.0]
+   007708   中银瑞福浮动净值型货币A         货币型-浮动净值              2      2      2  2026-09-18 [!! 近期窗口内有 0.0]
+   007709   中银瑞福浮动净值型货币C         货币型-浮动净值              2      2      2  2026-09-18 [!! 近期窗口内有 0.0]
+   007805   华宝浮动净值货币             货币型-浮动净值              2      2      2  2026-09-18 [!! 近期窗口内有 0.0]
+   007868   汇添富汇鑫货币A             货币型-浮动净值              2      2      2  2026-09-18 [!! 近期窗口内有 0.0]
+   007869   汇添富汇鑫货币B             货币型-浮动净值              2      2      2  2026-09-18 [!! 近期窗口内有 0.0]
+   511880   银华日利ETF              货币型-普通货币              2      2      2  2026-09-18 [!! 近期窗口内有 0.0]
+   006285   鹏华全球中短债(QDII)美元现汇A   QDII-混合债              1      1      1  2026-09-17 [!! 近期窗口内有 0.0]
+   008321   鹏华全球中短债(QDII)美元现汇C   QDII-混合债              1      1      1  2026-09-17 [!! 近期窗口内有 0.0]
+   025588   光大阳光香港精选混合(QDII)A美   QDII-混合偏股             1      1      1  2026-09-17 [!! 近期窗口内有 0.0]
+   005661   嘉实资源精选股票C            股票型-普通             1879     12      0  2026-09-18 [DEEP]
+   005663   嘉实金融精选股票C            股票型-普通             2030      8      0  2026-09-18 [DEEP]
+   006605   嘉实消费精选股票C            股票型-普通             1788      8      0  2026-09-18 [DEEP]
+   000206   易方达投资级信用债债券C         债券型-长期纯债           3152      6      0  2026-09-18 [DEEP]
+   000266   易方达恒久添利1年定开债C        债券型-中短债            2005      6      0  2026-09-18 [DEEP]
+   003231   创金合信医疗保健股票C          股票型-普通             2408      5      0  2026-09-18 [DEEP]
+   000112   易方达纯债1年定开债C          债券型-中短债            2085      4      0  2026-09-18 [DEEP]
+   003985   嘉实新能源新材料股票C          股票型-普通             2297      4      0  2026-09-18 [DEEP]
+   005304   嘉实医药健康股票C            股票型-普通             2109      3      0  2026-09-18 [DEEP]
+   005152   农银沪深300指数C           股票型-标准指数           2071      2      0  2026-09-18 [DEEP]
+   007134   嘉实长青竞争优势股票C          股票型-普通             1764      2      0  2026-09-18 [DEEP]
+   001711   安信新趋势混合C             混合型-灵活配置           2383      1      0  2026-09-18 [DEEP]
+   001770   前海开源嘉鑫混合C            混合型-灵活配置           2350      1      0  2026-09-18 [DEEP]
+   001834   长盛战略新兴产业混合C          混合型-灵活配置           2693      1      0  2026-09-18 [DEEP]
+   003299   嘉实物流产业股票C            股票型-普通             2350      1      0  2026-09-18 [DEEP]
+   003647   创金合信中证1000指数增强C      股票型-增强指数           2375      1      0  2026-09-18 [DEEP]
+   005627   富国中证高端制造指数增强型(LOF)   股票型-增强指数           1132      1      0  2026-09-18 [DEEP]
+   010388   易方达医药生物股票C           股票型-普通             1417      1      0  2026-09-18 [DEEP]
+
+   acc=0.0 基金总数 30 | 其中在深历史池 18 | 近期窗口内有 0.0 的 12
+
+=== 3. acc_nav IS NULL 的基金是否在深历史池 ===
+   NULL 行数: 13959
+   受影响基金: 110
+   其中 >=756 天的: 109
+
+   NULL 分布 top10:
+     161123 null=1079 / total=2755
+     502013 null=1079 / total=2754
+     502048 null=1079 / total=2789
+     502003 null=1078 / total=2732
+     502006 null=1078 / total=2747
+     502010 null=1077 / total=2732
+     502053 null=1076 / total=2703
+     161122 null=1057 / total=2756
+     161811 null=1055 / total=4115
+     161121 null=981 / total=2756
+
+=== 4. 007868 / 007858 为什么只有 2 行 ===
+   007868 rows=2     2026-09-17..2026-09-18  ('汇添富汇鑫货币A', '货币型-浮动净值', '暂停申购')
+   007858 rows=2     2026-09-17..2026-09-18  ('鹏华浮动净值型发起式货币', '货币型-浮动净值', '限大额')
+   007696 rows=2     2026-09-17..2026-09-18  ('嘉实融享货币', '货币型-浮动净值', '暂停申购')
+   511880 rows=2     2026-09-17..2026-09-18  ('银华日利ETF', '货币型-普通货币', '场内交易')
+   000425 rows=20    2026-09-01..2026-09-20  ('长盛添利宝货币B', '货币型-普通货币', '')
+
+=== 5. 货币型基金在 fund_nav 里的整体情况 ===
+   货币型-普通货币           funds=55    rows=3457      avg_days=1665
+   货币型-浮动净值           funds=8     rows=1713      avg_days=1685
+
+=== 6. 指标代码是否使用 daily_return ===
+   scripts\collect_deep_nav.py:145  nav_sql = """INSERT INTO fund_nav (fund_code, nav_date, unit_nav, acc_nav, daily_return)
+   scripts\collect_deep_nav.py:150  daily_return=COALESCE(excluded.daily_return, fund_nav.daily_return)"""
+   scripts\collect_incremental.py:147  sql = """INSERT INTO fund_nav (fund_code, nav_date, unit_nav, acc_nav, daily_return)
+   scripts\collect_incremental.py:152  daily_return=COALESCE(excluded.daily_return, fund_nav.daily_return)"""
+   scripts\selfcheck_data_quality.py:11  A2 daily_return 与 acc_nav 的实际变化是否吻合（口径是否自洽）
+   scripts\selfcheck_data_quality.py:73  # ---------- A2 daily_return 与 acc_nav 变化是否吻合 ----------
+   scripts\selfcheck_data_quality.py:81  select fund_code, nav_date, unit_nav, acc_nav, daily_return
+   scripts\selfcheck_data_quality.py:110  report["checks"]["A2_daily_return_consistency"] = {
+   scripts\selfcheck_data_quality.py:119  print(f"[A2] daily_return vs acc_nav 吻合 {a2_ok:,}/{a2_tot:,} = {a2_ok/a2_tot*100:.2f}%"
+   scripts\selfcheck_data_quality.py:140  select count(*) from fund_nav where daily_return is not null and abs(daily_return) > 20
+   scripts\selfcheck_data_quality.py:143  select fund_code, nav_date, daily_return, unit_nav, acc_nav from fund_nav
+   scripts\selfcheck_data_quality.py:144  where daily_return is not null and abs(daily_return) > 20
+   scripts\selfcheck_data_quality.py:145  order by abs(daily_return) desc limit 10
+   scripts\selfcheck_data_quality.py:149  where daily_return is not null and abs(daily_return) > 20
+   scripts\selfcheck_data_quality.py:155  print(f"[B2] |daily_return| > 20% : {b2:,} 行 / {b2_funds:,} 只 ({b2/total*100:.5f}%)")
+   scripts\selfcheck_data_quality.py:177  fatal.append(f"A2 daily_return 与 acc_nav 吻合率仅 {a2_ok/a2_tot*100:.2f}%")
+   scripts\_diag_acc_nav.py:40  for r in cur.execute("select nav_date, unit_nav, acc_nav, daily_return from fund_nav where fund_code='160641' 
+   scripts\_diag_acc_nav.py:44  for r in cur.execute("select nav_date, unit_nav, acc_nav, daily_return from fund_nav where fund_code='007858' 
+   scripts\_diag_impact.py:76  print("\n=== 6. 指标代码是否使用 daily_return ===")
+   scripts\_diag_impact.py:88  if 'daily_return' in txt:
+   scripts\_diag_impact.py:90  if 'daily_return' in line:
+   src\analysis\drawdown_warning.py:69  compute_daily_returns, compute_adjusted_nav, month_end_dates, compute_features,
+   src\analysis\drawdown_warning.py:658  ret_wide = compute_daily_returns(nav_wide)
+   src\analysis\portfolio_simulation.py:64  compute_daily_returns, month_end_dates, compute_features,
+   src\analysis\portfolio_simulation.py:450  ret_wide = compute_daily_returns(nav_wide)
+   src\analysis\vol_model_comparison.py:59  compute_daily_returns, month_end_dates, monthly_realized_vol,
+   src\analysis\vol_model_comparison.py:710  ret_wide = compute_daily_returns(nav_wide)
+   src\analysis\vol_predictor.py:42  - daily_return 列被实测为不可靠，本模块从 unit_nav 重新计算日收益
+   src\analysis\vol_predictor.py:180  日收益从此处 unit_nav pct_change 计算（daily_return 列实测不可靠）。
+   src\analysis\vol_predictor.py:259  def compute_daily_returns(nav_wide):
+   src\analysis\vol_predictor.py:1002  lines.append("2. **daily_return 列实测不可靠**: 本模块从 `unit_nav` 用 pct_change 重新计算日收益，"
+   src\analysis\vol_predictor.py:1301  ret_wide = compute_daily_returns(nav_wide)
+   src\cli\backtest_cmds.py:79  df_nav["daily_return"] = df_nav["unit_nav"].pct_change() * 100
+   src\cli\backtest_cmds.py:80  returns_arr = df_nav["daily_return"].dropna().values
+   src\data\collector.py:444  daily_return = self._to_float(row.iloc[ret_idx]) if ret_idx is not None else 0.0
+   src\data\collector.py:445  if not (-20 < daily_return < 20):
+   src\data\collector.py:446  daily_return = 0.0
+   src\data\collector.py:449  records.append((str(fund_code), nav_date, unit_nav, acc_nav, daily_return))
+   src\data\collector.py:609  - nav_records: [(fund_code, nav_date, unit_nav, acc_nav, daily_return)]
+   src\data\database.py:161  daily_return REAL,
+   src\data\database.py:496  nav_records: [(fund_code, nav_date, unit_nav, acc_nav, daily_return), ...]
+   src\data\database.py:503  INSERT OR IGNORE INTO fund_nav (fund_code, nav_date, unit_nav, acc_nav, daily_return)
+   src\data\hithink_collector.py:363  daily_return = 0.0
+   src\data\hithink_collector.py:366  records.append((str(fund_code), nav_date, float(unit_nav), float(adj_nav), daily_return))
+   tests\test_batch4_recsys.py:43  "INSERT OR REPLACE INTO fund_nav (fund_code, nav_date, unit_nav, acc_nav, daily_return) "
+   tests\test_buy_fee_shares.py:48  db.conn.execute("INSERT OR REPLACE INTO fund_nav (fund_code, nav_date, unit_nav, acc_nav, daily_return) "
+   tests\test_confirm_lag.py:145  db.conn.execute("INSERT OR REPLACE INTO fund_nav (fund_code, nav_date, unit_nav, acc_nav, daily_return) "
+   tests\test_drawdown_labels.py:17  from src.analysis.vol_predictor import compute_adjusted_nav, compute_daily_returns
+   tests\test_drawdown_labels.py:66  # compute_daily_returns 与复权净值都基于同一套异常过滤
+   tests\test_drawdown_labels.py:67  ret = compute_daily_returns(nav)
+   tests\test_portfolio_curve.py:7  db.conn.execute("INSERT OR REPLACE INTO fund_nav (fund_code, nav_date, unit_nav, acc_nav, daily_return) "
+   tests\test_portfolio_signal_lag.py:32  def _daily_returns():
+   tests\test_portfolio_signal_lag.py:81  _daily_returns(), _pred(vol_by_month), _index_df(),
+   tests\test_purchase_status.py:30  "INSERT OR REPLACE INTO fund_nav (fund_code, nav_date, unit_nav, acc_nav, daily_return) "
+   tests\test_trade_rules.py:109  db.conn.execute("INSERT OR REPLACE INTO fund_nav (fund_code, nav_date, unit_nav, acc_nav, daily_return) "
+   tests\test_web_api.py:19  "INSERT OR REPLACE INTO fund_nav (fund_code, nav_date, unit_nav, acc_nav, daily_return) "
+   tests\test_web_api.py:21  db.conn.execute("INSERT OR REPLACE INTO fund_nav (fund_code, nav_date, unit_nav, acc_nav, daily_return) "
+   tests\test_web_api.py:163  "(fund_code, nav_date, unit_nav, acc_nav, daily_return) VALUES ('C1',?,?,?,0)",

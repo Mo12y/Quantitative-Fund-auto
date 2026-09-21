@@ -1,0 +1,10 @@
+﻿### src\analysis\fund_scorer.py
+### src\analysis\fund_scorer.py
+not found
+
+  82|             fund_code, fund_name, fund_type, mgt_fee, fund_size,
+ 131|                 "fund_size": info.get("fund_size", 0) or 0,
+ 216|         size = float(fund_info.get("fund_size") or 0)
+ 228|         批次 4.10：`custodian_fee` 大量以 0 填充（0 ≠ 真实托管费为 0）。
+ 233|         cust_v = float(fund_info.get("custodian_fee") or 0)
+ 390|         metrics["fund_size_yi"] = size

@@ -1,0 +1,39 @@
+﻿======================================================================
+scripts/calibrate_thresholds.py
+  15|     - 估值序列一律用 acc_nav（累计净值），见 src/analysis/nav_series.py
+  16|       —— 分红除息日 unit_nav 向下跳，会把回撤凭空放大
+  75|     "momentum_3m": 40.0,         # 检查：<=40% 通过（追涨警告）
+  96| def load_navs(conn, min_days):
+ 105|         SELECT n.fund_code, n.nav_date, COALESCE(n.acc_nav, n.unit_nav)
+ 109|         WHERE COALESCE(n.acc_nav, n.unit_nav) > 0
+ 110|         ORDER BY n.fund_code, n.nav_date
+ 138|     if dates is not None and len(dates) == n:
+ 148|     ann_ret = (1 + ret) ** (1.0 / years) - 1 if years > 0 else np.nan
+ 157|     if dates is not None and len(dates) == n:
+ 174|     if dates is not None and len(dates) == n:
+ 184|     mom3m = float((vals[-1] / vals[j0] - 1) * 100) if j0 < n and vals[j0] > 0 else np.nan
+ 186|     sharpe = float((ann_ret - 0.02) / ann_vol) if ann_vol and ann_vol > 0 else np.nan
+======================================================================
+src/analysis/nav_series.py
+   8| | **估值 / 收益序列**（收益、波动、回撤、动量、夏普、筛选打分、回测） | **`acc_nav` 累计净值** | `backtest`、`fund_scorer`、`historical_recommender` |
+   9| | **成交定价**（成交价、确认净值、份额折算） | **`unit_nav` 单位净值** | `portfolio._get_nav_exact` |
+  13| 分红除息日，`unit_nav` 向下跳、`acc_nav` 不跳（累计净值把分红加了回去）。
+  14| 拿 `unit_nav` 算收益，等于把"基金把一部分净值还给你"当成一次**真实下跌**：
+  23| 反过来，**成交价只能用 `unit_nav`** —— 那才是当天真正买卖的价格。
+  24| `acc_nav` 是人为构造的复权序列，用它定价会买到一个不存在的价格。
+  26| ## acc_nav 缺失怎么办
+  28| 采集器对不合法/缺失的累计净值写入 **0.0**（见 `collector.py`），
+  29| 所以不能只用 `COALESCE(acc_nav, unit_nav)`。统一按行回退到 `unit_nav`：
+  30| 实测 587 只基金中 545 只 acc_nav 完整、42 只仅有个位数坏行（多为早期数据），
+  35| # 原始 SQL 用：acc_nav 有效则取之，否则回退 unit_nav。
+  36| # 需要表别名时传 alias（如 valuation_nav_sql("f") → "f.acc_nav"）。
+  37| VALUATION_NAV_SQL = "CASE WHEN acc_nav IS NOT NULL AND acc_nav > 0 THEN acc_nav ELSE unit_nav END"
+  43|     return (f"CASE WHEN {p}acc_nav IS NOT NULL AND {p}acc_nav > 0 "
+  44|             f"THEN {p}acc_nav ELSE {p}unit_nav END")
+  51|         if a > 0:
+  58|         return 0.0
+  62|     """pandas：从含 `unit_nav`/`acc_nav` 两列的 DataFrame 得到估值净值 Series。"""
+  64|     unit = pd.to_numeric(df["unit_nav"], errors="coerce")
+  65|     if "acc_nav" not in df.columns:
+  67|     acc = pd.to_numeric(df["acc_nav"], errors="coerce")
+  68|     return acc.where(acc > 0, unit)

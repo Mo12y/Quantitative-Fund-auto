@@ -1,0 +1,48 @@
+﻿✓ 快照存在: _snapshot_20260921_092812_post_collect.db
+
+[0] 补采前填充率
+  [before] fund_info 填充率（分母 27,864）:
+      fund_size            550    2.0%
+      manager_tenure         0    0.0%
+      manager_name      18,691   67.1%
+      purchase_fee      17,807   63.9%
+      custodian_fee          0    0.0%
+      establish_date       550    2.0%
+      mgt_fee           27,314   98.0%
+
+[1] 目标 18,677 只 | 已有缓存 0 只
+    本次待采 25 只
+        25/25  成功 25 失败 0  23.8 只/秒  剩余约 0 分钟
+
+[2] 补采后填充率
+  [after] fund_info 填充率（分母 27,864）:
+      fund_size            569    2.0%
+      manager_tenure        25    0.1%
+      manager_name      18,691   67.1%
+      purchase_fee      17,807   63.9%
+      custodian_fee          0    0.0%
+      establish_date       550    2.0%
+      mgt_fee           27,314   98.0%
+
+[3] fund_profile_extra 验证
+    行数 25
+    fund_size             25  100.0%
+    manager_tenure        25  100.0%
+    fee_actual            25  100.0%
+    peer_pct              25  100.0%
+    ret_1y                25  100.0%
+    stock_pct             25  100.0%
+    fund_size_date        25  100.0%
+
+    抽样 5 条:
+      ('000001', 39.38, '2026-06-30', '郑晓辉', 14.78, 0.15, 1.5, 41.93, 1339, 2306, 22.4)
+      ('000003', 0.45, '2026-06-30', '邵强', 7.59, 0.08, 0.8, 3.16, 1688, 1743, -3.7)
+      ('000004', 0.6, '2026-06-30', '邵强', 7.59, 0.0, 0.0, 3.1, 1689, 1743, -4.09)
+      ('000006', 13.3, '2026-06-30', '盛丰衍', 9.83, 0.15, 1.5, 73.61, 1429, 5414, 23.99)
+      ('000008', 17.87, '2026-06-30', '李直', 8.74, 0.12, 1.2, 40.55, 3116, 5241, 9.66)
+
+[4] 死阈值复活检查（4 个依赖字段）
+    fund_size            569 / 27,864  2.0%   ← min_size_yi 0.5亿 / max_size_yi 200亿
+    manager_tenure        25 / 27,864  0.1%   ← min_manager_years 2年
+
+缓存: data\fund_profile_cache.jsonl

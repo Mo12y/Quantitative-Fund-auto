@@ -1,0 +1,32 @@
+{
+  "checks": {
+    "scale": {
+      "rows": 22905610,
+      "funds": 24061,
+      "date_min": "2001-09-21",
+      "date_max": "2026-09-20"
+    },
+    "acc_nav_null": {
+      "rows": 14083,
+      "funds": 140
+    },
+    "ssot_valid_points": {
+      "valid": 22905570,
+      "unusable": 40
+    },
+    "daily_return_semantics": {
+      "pairs": 617929,
+      "match_unit_nav_rate": 0.9930493632763635,
+      "match_acc_nav_rate": 0.7974880609260935
+    },
+    "extreme_daily_return": {
+      "rows": 147,
+      "funds": 125
+    }
+  },
+  "verdict": {
+    "fatal": [],
+    "warn": [],
+    "pass": true
+  }
+}

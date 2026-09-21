@@ -74,3 +74,6 @@ logs/
 
 # --- 第三方文档聚合（非项目内容） ---
 docs/llms-full.md
+
+# --- fund profile parse cache (re-collectable in ~9 min via collect_fund_profile.py) ---
+data/fund_profile_cache.jsonl

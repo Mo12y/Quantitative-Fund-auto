@@ -437,9 +437,16 @@ class DataCollector:
             nav_date = str(row.iloc[0])
             unit_nav = self._to_float(row.iloc[1])
 
-            acc_nav = self._to_float(row.iloc[acc_idx]) if acc_idx is not None else 0.0
-            # 累计净值应落在合理净值区间；异常(如日增长率被误判)则归 0，避免污染
-            acc_nav = acc_nav if 0.1 <= acc_nav < 100 else 0.0
+            # ⚠️ 缺失/异常一律写 **None（"未知"）**，不要写 0.0。
+            # 0.0 是「净值等于零」的断言，不是「不知道」：
+            #   - nav_series.VALUATION_NAV_SQL 靠 `acc_nav > 0` 判定有效性，写 None 同样安全；
+            #   - 但任何朴素的 `COALESCE(acc_nav, unit_nav)` 会被 0.0 骗过去 —— 0.0 不是 NULL，
+            #     COALESCE 原样返回 0.0，下游若再 `WHERE ... > 0` 就会**整行丢弃**而不是回退 unit_nav。
+            # 实测（scripts/selfcheck_data_quality.py）：0.0 哨兵曾命中 30 只基金 / 124 行，
+            # 其中 007868 汇添富汇鑫货币A 真实累计净值 112.25 因超出 [0.1,100) 被夹为 0.0。
+            acc_nav = self._to_float(row.iloc[acc_idx]) if acc_idx is not None else None
+            # 累计净值应落在合理净值区间；异常(如日增长率被误判)则记 None，避免污染
+            acc_nav = acc_nav if (acc_nav is not None and 0.1 <= acc_nav < 100) else None
 
             daily_return = self._to_float(row.iloc[ret_idx]) if ret_idx is not None else 0.0
             if not (-20 < daily_return < 20):

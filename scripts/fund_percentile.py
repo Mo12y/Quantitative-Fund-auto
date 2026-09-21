@@ -75,7 +75,8 @@ def main():
     fi = {r[0]: (r[1] or "") for r in conn.execute("select fund_code, fund_type from fund_info")}
     name = {r[0]: (r[1] or "") for r in conn.execute("select fund_code, fund_name from fund_info")}
     navs = load_navs(conn, args.min_days)
-    conn.close()
+    # ⚠️ 不要在这里 conn.close()：navs 是**惰性**的（NavStream），关闭连接会让迭代失败。
+    #    连接在 main 结束时才关。
 
     groups = {}
     dropped = []
@@ -154,7 +155,13 @@ def main():
                 p = top["_pct"][k]
                 arrow = "↑" if p >= 60 else ("↓" if p <= 40 else "→")
                 print(f"    {LABEL[k]:14} {top[k]:>9.2f}   同类 P{p:.0f}  {arrow}")
-            print(f"    ⚠️ 未评估：规模 · 费率 · 经理年限（数据缺失）")
+            # ⚠️ 2026-09-21 更正：此处原写「未评估：规模·费率·经理年限（数据缺失）」。
+            #    该断言已过期 —— 全量补采（scripts/collect_fund_profile.py）已把
+            #    fund_size 填到 66.9%（覆盖池内 99.7%）、manager_tenure 填到 67.0%。
+            #    但这些字段目前**尚未进入本脚本的打分链路**（本脚本只做净值维度的百分位），
+            #    所以说「未纳入打分」是对的，说「数据缺失」是错的。
+            print(f"    ⚠️ 未纳入本脚本打分：规模 · 费率 · 经理年限"
+                  f"（数据已具备，见 fund_profile_extra，待接入筛选链路）")
             print(f"    ⚠️ 样本受限：本组 {n} 只，{flag}")
             print(f"    ⚠️ 幸存者偏差：仅统计净值 ≥{args.min_days} 天的存续基金")
             print()
@@ -191,6 +198,7 @@ def main():
     print("  · 权重 0.6/0.4 属【推测】，待 ML 文档 §3 的 L1 评估台检验")
     print("  · 参照系随时间漂移，正式上线前须做逐月稳定性验证（设计方案 §4.5）")
     print("  · 本输出为客观统计对比，不构成投资建议")
+    conn.close()
 
 
 if __name__ == "__main__":

@@ -1,0 +1,85 @@
+﻿==============================================================================
+FUND 160641
+  js size: 54330
+  name   : 鹏华丰锐债券LOF
+  code   : 160641
+  Data_netWorthTrend : len=295
+     first 2: [{"x": 1751904000000, "y": 101.3681, "equityReturn": 0, "unitMoney": ""}, {"x": 1751990400000, "y": 101.3673, "equityReturn": 0.0, "unitMoney": ""}]
+     last  2: [{"x": 1789574400000, "y": 104.6427, "equityReturn": -0.07, "unitMoney": ""}, {"x": 1789660800000, "y": 105.0209, "equityReturn": 0.36, "unitMoney": ""}]
+  Data_ACWorthTrend : len=295
+     first 2: [[1751904000000, 1.4567], [1751990400000, 1.4567]]
+     last  2: [[1789574400000, 1.5097], [1789660800000, 1.5135]]
+  --- tail comparison (unit=netWorthTrend.y, acc=ACWorthTrend[1]) ---
+     ts=1789401600000 unit=104.3137 acc=1.5064 equityReturn=0.01
+     ts=1789488000000 unit=104.7157 acc=1.5104 equityReturn=0.39
+     ts=1789574400000 unit=104.6427 acc=1.5097 equityReturn=-0.07
+     ts=1789660800000 unit=105.0209 acc=1.5135 equityReturn=0.36
+
+==============================================================================
+FUND 007858
+  js size: 253548
+  name   : 鹏华浮动净值型发起式货币
+  code   : 007858
+  Data_netWorthTrend : len=1698
+     first 2: [{"x": 1567094400000, "y": 100.017, "equityReturn": 0.0066, "unitMoney": ""}, {"x": 1567699200000, "y": 100.0635, "equityReturn": 0, "unitMoney": ""}]
+     last  2: [{"x": 1789574400000, "y": 110.8426, "equityReturn": 0.0, "unitMoney": ""}, {"x": 1789660800000, "y": 110.8462, "equityReturn": 0.0, "unitMoney": ""}]
+  Data_ACWorthTrend : len=1699
+     first 2: [[1567008000000, null], [1567094400000, 1.0002]]
+     last  2: [[1789574400000, 1.1134], [1789660800000, 1.1135]]
+  --- tail comparison (unit=netWorthTrend.y, acc=ACWorthTrend[1]) ---
+     ts=1789401600000 unit=110.8355 acc=1.1134 equityReturn=0.0
+     ts=1789488000000 unit=110.8391 acc=1.1134 equityReturn=0.0
+     ts=1789574400000 unit=110.8426 acc=1.1134 equityReturn=0.0
+     ts=1789660800000 unit=110.8462 acc=1.1135 equityReturn=0.0
+
+==============================================================================
+FUND 007868
+  js size: 258858
+  name   : 汇添富汇鑫货币A
+  code   : 007868
+  Data_netWorthTrend : len=1667
+     first 2: [{"x": 1568217600000, "y": 100.0157, "equityReturn": 0, "unitMoney": ""}, {"x": 1568908800000, "y": 100.0847, "equityReturn": 0, "unitMoney": ""}]
+     last  2: [{"x": 1789574400000, "y": 112.2544, "equityReturn": 0.0, "unitMoney": ""}, {"x": 1789660800000, "y": 112.2577, "equityReturn": 0.0, "unitMoney": ""}]
+  Data_ACWorthTrend : len=1668
+     first 2: [[1568044800000, null], [1568217600000, 100.0157]]
+     last  2: [[1789574400000, 112.2544], [1789660800000, 112.2577]]
+  --- tail comparison (unit=netWorthTrend.y, acc=ACWorthTrend[1]) ---
+     ts=1789401600000 unit=112.2509 acc=112.2509 equityReturn=0.0
+     ts=1789488000000 unit=112.2495 acc=112.2495 equityReturn=0.0
+     ts=1789574400000 unit=112.2544 acc=112.2544 equityReturn=0.0
+     ts=1789660800000 unit=112.2577 acc=112.2577 equityReturn=0.0
+
+==============================================================================
+FUND 161810
+  js size: 590165
+  name   : 银华内需精选混合(LOF)A
+  code   : 161810
+  Data_netWorthTrend : len=4143
+     first 2: [{"x": 1249401600000, "y": 1.0, "equityReturn": 0, "unitMoney": ""}, {"x": 1249574400000, "y": 0.982, "equityReturn": -2.5432, "unitMoney": ""}]
+     last  2: [{"x": 1789574400000, "y": 4.694, "equityReturn": -3.67, "unitMoney": ""}, {"x": 1789660800000, "y": 4.735, "equityReturn": 0.87, "unitMoney": ""}]
+  Data_ACWorthTrend : len=4143
+     first 2: [[1249401600000, 0.952], [1249574400000, 0.934]]
+     last  2: [[1789574400000, 4.463], [1789660800000, 4.502]]
+  --- tail comparison (unit=netWorthTrend.y, acc=ACWorthTrend[1]) ---
+     ts=1789401600000 unit=4.769 acc=4.534 equityReturn=-1.04
+     ts=1789488000000 unit=4.873 acc=4.633 equityReturn=2.18
+     ts=1789574400000 unit=4.694 acc=4.463 equityReturn=-3.67
+     ts=1789660800000 unit=4.735 acc=4.502 equityReturn=0.87
+
+==============================================================================
+FUND 000001
+  js size: 759062
+  name   : 华夏成长混合
+  code   : 000001
+  Data_netWorthTrend : len=6010
+     first 2: [{"x": 1008604800000, "y": 1.0, "equityReturn": 0, "unitMoney": ""}, {"x": 1008864000000, "y": 1.0, "equityReturn": 0.0, "unitMoney": ""}]
+     last  2: [{"x": 1789574400000, "y": 1.298, "equityReturn": 0.15, "unitMoney": ""}, {"x": 1789660800000, "y": 1.333, "equityReturn": 2.7, "unitMoney": ""}]
+  Data_ACWorthTrend : len=6010
+     first 2: [[1008604800000, 1.0], [1008864000000, 1.0]]
+     last  2: [[1789574400000, 3.871], [1789660800000, 3.906]]
+  --- tail comparison (unit=netWorthTrend.y, acc=ACWorthTrend[1]) ---
+     ts=1789401600000 unit=1.25 acc=3.823 equityReturn=1.21
+     ts=1789488000000 unit=1.296 acc=3.869 equityReturn=3.68
+     ts=1789574400000 unit=1.298 acc=3.871 equityReturn=0.15
+     ts=1789660800000 unit=1.333 acc=3.906 equityReturn=2.7
+

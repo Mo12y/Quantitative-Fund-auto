@@ -1,4 +1,4 @@
-﻿#!/usr/bin/env python3
+#!/usr/bin/env python3
 """
 参照系稳定性验证（设计方案 §4.5）—— **修正版**
 
@@ -63,6 +63,10 @@ def metrics_at(vals, idx, dates=None):
     ⚠️ **必须传 dates**：净值序列可能有缺口（实测 576 只里 135 只点数明显少于
     应有交易天数，最严重比值 0.437）。用「点数/252」当年数会把年化**严重高估**
     （实测债券基金最坏高估 135%）。年化与近1年回撤一律用**日期**而非点数。
+
+    ⚠️ `dates` 应是**已经是 Python list**（调用方在流式循环外转换一次）。
+    旧版这里写 `list(dates[:idx])`，在 45 个月末 × 1.6 万只 = 72 万次调用下，
+    每次都要把 numpy 字符串数组转成 Python list —— 约 14 亿次转换，实测会跑几十分钟。
     """
     import bisect
     from datetime import date as _d, timedelta as _td
@@ -74,7 +78,7 @@ def metrics_at(vals, idx, dates=None):
     ret = v[-1] / v[0] - 1
 
     if dates is not None and len(dates) >= idx:
-        ds = list(dates[:idx])
+        ds = dates[:idx] if isinstance(dates, list) else list(dates[:idx])
         try:
             years = max((_d.fromisoformat(str(ds[-1])) - _d.fromisoformat(str(ds[0]))).days / 365.25, 1e-6)
         except Exception:
@@ -119,60 +123,56 @@ def main():
     conn = sqlite3.connect(f"file:{DB_PATH}?mode=ro", uri=True)
     fi = {r[0]: (r[1] or "") for r in conn.execute("select fund_code, fund_type from fund_info")}
     cur = conn.cursor()
-    cur.execute("""
-        SELECT fund_code, nav_date, COALESCE(acc_nav, unit_nav)
-        FROM fund_nav
-        WHERE fund_code IN (SELECT fund_code FROM fund_nav
-                            GROUP BY fund_code HAVING COUNT(*) >= ?)
-          AND COALESCE(acc_nav, unit_nav) > 0
-        ORDER BY fund_code, nav_date
-    """, (args.min_days,))
-    series = {}
-    for code, dt, v in cur.fetchall():
-        series.setdefault(code, ([], []))
-        series[code][0].append(dt)
-        series[code][1].append(float(v))
-    conn.close()
-    data = {c: (np.array(d), np.array(v)) for c, (d, v) in series.items()}
-    print(f"载入 {len(data)} 只（总历史 >= {args.min_days} 天）")
 
-    all_dates = sorted({d for d, _ in data.values() for d in d})
-    month_end = {}
-    for d in all_dates:
-        month_end[d[:7]] = d
+    # ── 全市场月末交易日（一条聚合查询，避免把 2,300 万行净值读进内存）──
+    month_end = {m: d for m, d in cur.execute(
+        "SELECT substr(nav_date,1,7) AS m, MAX(nav_date) FROM fund_nav GROUP BY m")}
     months = sorted(month_end)
     if args.start:
         months = [m for m in months if m >= args.start]
-    print(f"验证期: {months[0]} ~ {months[-1]}（{len(months)} 个月末）\n")
+    print(f"验证期: {months[0]} ~ {months[-1]}（{len(months)} 个月末）")
 
-    # ── 逐月末、逐组：算每只基金的百分位与综合分（严格无前视）──
-    panel = {}       # g -> m -> {code: {"pct":…, "score":…}}
-    dist_hist = {}   # (g,k) -> [(m, median)]  仅用于**描述市场状态**
-    for m in months:
-        cut = month_end[m]
-        per_group = {}
-        for code, (dates, vals) in data.items():
-            g = TYPE2GROUP.get(fi.get(code, ""))
-            if not g:
-                continue
-            idx = int(np.searchsorted(dates, cut, side="right"))
+    # ── 流式逐只算「各月末指标」，只存小字典（内存 O(单只序列)，不 O(全样本)）──
+    # 教训：旧版把 11,440 只 × 平均 2,000 点 ≈ 2,300 万行读进 Python list，
+    # 需 5GB+，而本机实测空闲内存仅 2.2GB —— 必 OOM。改为流式。
+    from calibrate_thresholds import iter_navs
+    per_month = {}          # m -> {code: metrics}
+    gof = {}                # code -> group
+    n_fund = 0
+    for code, dates_np, vals in iter_navs(conn, args.min_days):
+        g = TYPE2GROUP.get(fi.get(code, ""))
+        if not g:
+            continue
+        n_fund += 1
+        gof[code] = g
+        dates = [str(x) for x in dates_np]      # 只转一次（见 metrics_at 的性能说明）
+        for m in months:
+            idx = int(np.searchsorted(dates_np, month_end[m], side="right"))
             if idx < args.min_days:
                 continue
             mm = metrics_at(vals, idx, dates)
             if mm:
-                mm["_code"] = code
-                per_group.setdefault(g, []).append(mm)
-        for g, rows in per_group.items():
+                per_month.setdefault(m, {})[code] = mm
+    print(f"流式载入 {n_fund:,} 只（总历史 >= {args.min_days} 天）")
+
+    # ── 逐月末、逐组：算百分位与综合分（严格无前视）──
+    panel = {}       # g -> m -> {code: {"pct":…, "score":…}}
+    dist_hist = {}   # (g,k) -> [(m, median)]  仅用于**描述市场状态**
+    for m in months:
+        by_group = {}
+        for code, mm in per_month.get(m, {}).items():
+            by_group.setdefault(gof[code], []).append((code, mm))
+        for g, rows in by_group.items():
             if len(rows) < MIN_N_IQR:
                 continue
             dist = {}
             for k in METRICS:
-                arr = np.array([r[k] for r in rows], dtype=float)
+                arr = np.array([r[k] for _c, r in rows], dtype=float)
                 dist[k] = arr[np.isfinite(arr)]
                 if dist[k].size:
                     dist_hist.setdefault((g, k), []).append((m, float(np.median(dist[k]))))
             entry = {}
-            for r in rows:
+            for code, r in rows:
                 ps = {}
                 for k in METRICS:
                     arr, v = dist[k], r[k]
@@ -181,8 +181,8 @@ def main():
                         if SCORE_DIR.get(k) is False:
                             p = 100.0 - p
                         ps[k] = p
-                entry[r["_code"]] = {"pct": ps,
-                                     "score": sum(ps.get(k, 50.0) * w for k, w in SCORE_W.items())}
+                entry[code] = {"pct": ps,
+                               "score": sum(ps.get(k, 50.0) * w for k, w in SCORE_W.items())}
             panel.setdefault(g, {})[m] = entry
 
     # ── 市场状态描述（**不作稳定性判定**）──

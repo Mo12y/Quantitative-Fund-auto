@@ -1,0 +1,35 @@
+﻿==========================================================================
+数据修复：缺失哨兵 0.0 → NULL   [APPLY]
+==========================================================================
+快照: data\_snapshot_20260921_092812_post_collect.db
+  快照 2,420,752,384 字节 | 源库 2,420,752,384 字节 | 差 +0
+  快照 sha256 校验: ✅ 一致
+
+待修：acc_nav=0.0 124 行 | unit_nav<=0 40 行
+  受影响基金：acc 30 只 / unit 2 只
+  回滚清单已写: data\_repair_rollback_sentinel.json
+
+已修：acc_nav → NULL 124 行 | unit_nav → NULL 40 行
+
+--- 验证 ---
+  acc_nav=0.0 残留   0
+  unit_nav<=0 残留   0
+  总行数              22905610
+  acc_nav NULL     14083
+  PRAGMA quick_check: ok
+
+--- 行为中性验证：SSOT 口径下受影响基金的点数应不变 ---
+python : Traceback (most recent call last):
+At line:1 char:172
++ ... -Fund-auto; python scripts/repair_sentinel_nav.py --apply 2>&1 | Out- ...
++                 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (Traceback (most recent call last)::String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+  File "D:\DSH\projects\Quantitative-Fund-auto\scripts\repair_sentinel_nav.py", line 134, in <module>
+    sys.exit(main())
+             ~~~~^^
+  File "D:\DSH\projects\Quantitative-Fund-auto\scripts\repair_sentinel_nav.py", line 123, in main
+    from src.analysis.nav_series import VALUATION_NAV_SQL  # noqa: E402
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+ModuleNotFoundError: No module named 'src'

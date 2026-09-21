@@ -1,0 +1,174 @@
+﻿========================================================================================
+FUND 110022  易方达消费行业股票   js=563777 bytes
+========================================================================================
+var 列表(27): ishb, fS_name, fS_code, fund_sourceRate, fund_Rate, fund_minsg, stockCodes, zqCodes, stockCodesNew, zqCodesNew, syl_1n, syl_6y, syl_3y, syl_1y, Data_fundSharesPositions, Data_netWorthTrend, Data_ACWorthTrend, Data_grandTotal, Data_rateInSimilarType, Data_rateInSimilarPersent, Data_fluctuationScale, Data_holderStructure, Data_assetAllocation, Data_performanceEvaluation, Data_currentFundManager, Data_buySedemption, swithSameType
+
+-- 标量字符串字段 --
+   fS_name                          = 易方达消费行业股票
+   fS_code                          = 110022
+   fund_sourceRate                  = 1.50
+   fund_Rate                        = 0.15
+   fund_minsg                       = 10
+   zqCodes                          = 1270452,1270462,1136551,1137041
+   zqCodesNew                       = 0.127045,0.127046,1.113655,1.113704
+   syl_1n                           = -24.01
+   syl_6y                           = -13.56
+   syl_3y                           = 4.89
+   syl_1y                           = -3.96
+
+-- 数值字段 --
+
+-- 数组/对象字段（长度 + 头部样本）--
+   Data_fundSharesPositions         len=21     [[1787241600000, 98.92], [1787500800000, 95.0]]
+   Data_netWorthTrend               len=3890   [{"x": 1282233600000, "y": 1.0, "equityReturn": 0, "unitMoney": ""}, {"x": 1282838400000, "y": 1.001, "equityReturn": 0.1, "unitMoney": ""}]
+   Data_ACWorthTrend                len=3890   [[1282233600000, 1.0], [1282838400000, 1.001]]
+   Data_grandTotal                  len=3      [{"name": "易方达消费行业股票", "data": [[1773763200000, 0], [1773849600000, -1.51], [1773936000000, -1.97], [1774195200000, -4.61], [1774281600000, -4.03], [1774368000000, -3.2], [1774454400000, -4.
+   Data_rateInSimilarType           len=3336   [{"x": 1357228800000, "y": 40, "sc": "41"}, {"x": 1357488000000, "y": 21, "sc": "22"}]
+   Data_rateInSimilarPersent        len=3336   [[1357228800000, 2.44], [1357488000000, 4.55]]
+   Data_currentFundManager          len=1      [{"id": "30189741", "pic": "https://pdf.dfcfw.com/pdf/H8_30189741_1.JPG", "name": "萧楠", "star": 4, "workTime": "13年又361天", "fundSize": "192.42亿(4只基金)", "power": {"avr": "69.35", "categories"
+
+========================================================================================
+FUND 000001  华夏成长混合   js=759062 bytes
+========================================================================================
+var 列表(27): ishb, fS_name, fS_code, fund_sourceRate, fund_Rate, fund_minsg, stockCodes, zqCodes, stockCodesNew, zqCodesNew, syl_1n, syl_6y, syl_3y, syl_1y, Data_fundSharesPositions, Data_netWorthTrend, Data_ACWorthTrend, Data_grandTotal, Data_rateInSimilarType, Data_rateInSimilarPersent, Data_fluctuationScale, Data_holderStructure, Data_assetAllocation, Data_performanceEvaluation, Data_currentFundManager, Data_buySedemption, swithSameType
+
+-- 标量字符串字段 --
+   fS_name                          = 华夏成长混合
+   fS_code                          = 000001
+   fund_sourceRate                  = 1.50
+   fund_Rate                        = 0.15
+   fund_minsg                       = 10
+   zqCodes                          = 0198271,5244622,0197921
+   zqCodesNew                       = 1.019827,0.524462,1.019792
+   syl_1n                           = 22.4
+   syl_6y                           = 23.08
+   syl_3y                           = -7.88
+   syl_1y                           = -5.39
+
+-- 数值字段 --
+
+-- 数组/对象字段（长度 + 头部样本）--
+   Data_fundSharesPositions         len=21     [[1787241600000, 95.0], [1787500800000, 98.85]]
+   Data_netWorthTrend               len=6010   [{"x": 1008604800000, "y": 1.0, "equityReturn": 0, "unitMoney": ""}, {"x": 1008864000000, "y": 1.0, "equityReturn": 0.0, "unitMoney": ""}]
+   Data_ACWorthTrend                len=6010   [[1008604800000, 1.0], [1008864000000, 1.0]]
+   Data_grandTotal                  len=3      [{"name": "华夏成长混合", "data": [[1773763200000, 0], [1773849600000, -2.59], [1773936000000, -3.14], [1774195200000, -6.65], [1774281600000, -5.08], [1774368000000, -2.95], [1774454400000, -4.8]
+   Data_rateInSimilarType           len=3336   [{"x": 1357228800000, "y": 49, "sc": "163"}, {"x": 1357488000000, "y": 46, "sc": "163"}]
+   Data_rateInSimilarPersent        len=3336   [[1357228800000, 69.94], [1357488000000, 71.78]]
+   Data_currentFundManager          len=2      [{"id": "30040527", "pic": "https://pdf.dfcfw.com/pdf/H8_30040527_1.JPG", "name": "郑晓辉", "star": 5, "workTime": "14年又286天", "fundSize": "116.55亿(4只基金)", "power": {"avr": "82.47", "categories
+
+========================================================================================
+FUND 003376  广发中债7-10年国开债指数A   js=377033 bytes
+========================================================================================
+var 列表(27): ishb, fS_name, fS_code, fund_sourceRate, fund_Rate, fund_minsg, stockCodes, zqCodes, stockCodesNew, zqCodesNew, syl_1n, syl_6y, syl_3y, syl_1y, Data_fundSharesPositions, Data_netWorthTrend, Data_ACWorthTrend, Data_grandTotal, Data_rateInSimilarType, Data_rateInSimilarPersent, Data_fluctuationScale, Data_holderStructure, Data_assetAllocation, Data_performanceEvaluation, Data_currentFundManager, Data_buySedemption, swithSameType
+
+-- 标量字符串字段 --
+   fS_name                          = 广发中债7-10年国开债指数A
+   fS_code                          = 003376
+   fund_sourceRate                  = 0.50
+   fund_Rate                        = 0.05
+   fund_minsg                       = 10
+   zqCodes                          = 
+   zqCodesNew                       = 
+   syl_1n                           = 4.25
+   syl_6y                           = 2.56
+   syl_3y                           = 0.76
+   syl_1y                           = 0.01
+
+-- 数值字段 --
+
+-- 数组/对象字段（长度 + 头部样本）--
+   Data_fundSharesPositions         len=21     [[1787241600000, 0.0], [1787500800000, 0.0]]
+   Data_netWorthTrend               len=2433   [{"x": 1474819200000, "y": 1.0, "equityReturn": 0, "unitMoney": ""}, {"x": 1474905600000, "y": 1.0001, "equityReturn": 0.0, "unitMoney": ""}]
+   Data_ACWorthTrend                len=2433   [[1474819200000, 1.0], [1474905600000, 1.0001]]
+   Data_grandTotal                  len=3      [{"name": "广发中债7-10年国开", "data": [[1773763200000, 0], [1773849600000, 0.01], [1773936000000, 0.03], [1774195200000, -0.01], [1774281600000, 0], [1774368000000, -0.01], [1774454400000, 0.01],
+   Data_rateInSimilarType           len=2369   [{"x": 1482681600000, "y": 25, "sc": "32"}, {"x": 1482768000000, "y": 25, "sc": "33"}]
+   Data_rateInSimilarPersent        len=2369   [[1482681600000, 21.88], [1482768000000, 24.24]]
+   Data_currentFundManager          len=2      [{"id": "30698631", "pic": "https://pdf.dfcfw.com/pdf/H8_30698631_1.PNG", "name": "吴迪", "star": 5, "workTime": "6年又138天", "fundSize": "827.03亿(23只基金)", "power": {"avr": "81.60", "categories"
+
+========================================================================================
+FUND 160641  鹏华丰锐债券LOF   js=54330 bytes
+========================================================================================
+var 列表(27): ishb, fS_name, fS_code, fund_sourceRate, fund_Rate, fund_minsg, stockCodes, zqCodes, stockCodesNew, zqCodesNew, syl_1n, syl_6y, syl_3y, syl_1y, Data_fundSharesPositions, Data_netWorthTrend, Data_ACWorthTrend, Data_grandTotal, Data_rateInSimilarType, Data_rateInSimilarPersent, Data_fluctuationScale, Data_holderStructure, Data_assetAllocation, Data_performanceEvaluation, Data_currentFundManager, Data_buySedemption, swithSameType
+
+-- 标量字符串字段 --
+   fS_name                          = 鹏华丰锐债券LOF
+   fS_code                          = 160641
+   fund_sourceRate                  = 0.80
+   fund_Rate                        = 0.08
+   fund_minsg                       = 1000
+   zqCodes                          = 
+   zqCodesNew                       = 
+   syl_1n                           = 4.13
+   syl_6y                           = 2.28
+   syl_3y                           = -4.59
+   syl_1y                           = -1.73
+
+-- 数值字段 --
+
+-- 数组/对象字段（长度 + 头部样本）--
+   Data_fundSharesPositions         len=21     [[1787241600000, 20.17], [1787500800000, 20.17]]
+   Data_netWorthTrend               len=295    [{"x": 1751904000000, "y": 101.3681, "equityReturn": 0, "unitMoney": ""}, {"x": 1751990400000, "y": 101.3673, "equityReturn": 0.0, "unitMoney": ""}]
+   Data_ACWorthTrend                len=295    [[1751904000000, 1.4567], [1751990400000, 1.4567]]
+   Data_grandTotal                  len=3      [{"name": "鹏华丰锐债券LOF", "data": [[1773763200000, 0], [1773849600000, -0.16], [1773936000000, 0.09], [1774195200000, -0.44], [1774281600000, -0.28], [1774368000000, 0.01], [1774454400000, -0.2
+   Data_rateInSimilarType           len=234    [{"x": 1759939200000, "y": 655, "sc": "1367"}, {"x": 1760025600000, "y": 833, "sc": "1374"}]
+   Data_rateInSimilarPersent        len=234    [[1759939200000, 52.08], [1760025600000, 39.37]]
+   Data_currentFundManager          len=1      [{"id": "30334535", "pic": "https://pdf.dfcfw.com/pdf/H8_30334535_1.JPG", "name": "刘方正", "star": 4, "workTime": "11年又196天", "fundSize": "3.88亿(19只基金)", "power": {"avr": "76.85", "categories"
+
+========================================================================================
+FUND 007868  汇添富汇鑫货币A   js=258858 bytes
+========================================================================================
+var 列表(27): ishb, fS_name, fS_code, fund_sourceRate, fund_Rate, fund_minsg, stockCodes, zqCodes, stockCodesNew, zqCodesNew, syl_1n, syl_6y, syl_3y, syl_1y, Data_fundSharesPositions, Data_netWorthTrend, Data_ACWorthTrend, Data_grandTotal, Data_rateInSimilarType, Data_rateInSimilarPersent, Data_fluctuationScale, Data_holderStructure, Data_assetAllocation, Data_performanceEvaluation, Data_currentFundManager, Data_buySedemption, swithSameType
+
+-- 标量字符串字段 --
+   fS_name                          = 汇添富汇鑫货币A
+   fS_code                          = 007868
+   fund_sourceRate                  = 0.00
+   fund_Rate                        = 0.00
+   fund_minsg                       = 99999999999999
+   zqCodes                          = 
+   zqCodesNew                       = 
+   syl_1n                           = 1.05
+   syl_6y                           = 0.5
+   syl_3y                           = 0.24
+   syl_1y                           = 0.08
+
+-- 数值字段 --
+
+-- 数组/对象字段（长度 + 头部样本）--
+   Data_fundSharesPositions         len=0      []
+   Data_netWorthTrend               len=1667   [{"x": 1568217600000, "y": 100.0157, "equityReturn": 0, "unitMoney": ""}, {"x": 1568908800000, "y": 100.0847, "equityReturn": 0, "unitMoney": ""}]
+   Data_ACWorthTrend                len=1668   [[1568044800000, null], [1568217600000, 100.0157]]
+   Data_grandTotal                  len=3      [{"name": "汇添富汇鑫货币A", "data": [[1773763200000, 0], [1773849600000, 0.0], [1773936000000, 0.01], [1774195200000, 0.02], [1774281600000, 0.02], [1774368000000, 0.02], [1774454400000, 0.03], [1
+   Data_rateInSimilarType           len=1647   [{"x": 1575907200000, "y": 4, "sc": "8"}, {"x": 1575993600000, "y": 4, "sc": "8"}]
+   Data_rateInSimilarPersent        len=1647   [[1575907200000, 50.0], [1575993600000, 50.0]]
+   Data_currentFundManager          len=1      [{"id": "30681334", "pic": "https://pdf.dfcfw.com/pdf/H8_30681334_1.JPG", "name": "王骏杰", "star": 5, "workTime": "6年又27天", "fundSize": "2638.34亿(27只基金)", "power": {"avr": "81.82", "categories
+
+========================================================================================
+FUND 050025  博时标普500ETF联接A   js=517504 bytes
+========================================================================================
+var 列表(27): ishb, fS_name, fS_code, fund_sourceRate, fund_Rate, fund_minsg, stockCodes, zqCodes, stockCodesNew, zqCodesNew, syl_1n, syl_6y, syl_3y, syl_1y, Data_fundSharesPositions, Data_netWorthTrend, Data_ACWorthTrend, Data_grandTotal, Data_rateInSimilarType, Data_rateInSimilarPersent, Data_fluctuationScale, Data_holderStructure, Data_assetAllocation, Data_performanceEvaluation, Data_currentFundManager, Data_buySedemption, swithSameType
+
+-- 标量字符串字段 --
+   fS_name                          = 博时标普500ETF联接A
+   fS_code                          = 050025
+   fund_sourceRate                  = 1.20
+   fund_Rate                        = 0.12
+   fund_minsg                       = 10
+   zqCodes                          = 
+   zqCodesNew                       = 
+   syl_1n                           = 10.13
+   syl_6y                           = 11.11
+   syl_3y                           = 2.1
+   syl_1y                           = -1.61
+
+-- 数值字段 --
+
+-- 数组/对象字段（长度 + 头部样本）--
+   Data_fundSharesPositions         len=16     [[1787241600000, 35.64], [1787587200000, 35.64]]
+   Data_netWorthTrend               len=3385   [{"x": 1339603200000, "y": 1.0, "equityReturn": 0, "unitMoney": ""}, {"x": 1339689600000, "y": 1.0, "equityReturn": 0.0, "unitMoney": ""}]
+   Data_ACWorthTrend                len=3385   [[1339603200000, 1.0], [1339689600000, 1.0]]
+   Data_grandTotal                  len=3      [{"name": "博时标普500ETF联", "data": [[1773676800000, 0], [1773763200000, -1.39], [1773849600000, -1.54], [1773936000000, -3.04], [1774195200000, -1.76], [1774281600000, -2.28], [1774368000000, 
+   Data_rateInSimilarType           len=3260   [{"x": 1357228800000, "y": 16, "sc": "21"}, {"x": 1357488000000, "y": 16, "sc": "21"}]
+   Data_rateInSimilarPersent        len=3260   [[1357228800000, 23.81], [1357488000000, 23.81]]
+   Data_currentFundManager          len=1      [{"id": "30352716", "pic": "https://pdf.dfcfw.com/pdf/H8_30352716_1.PNG", "name": "万琼", "star": 5, "workTime": "11年又108天", "fundSize": "592.71亿(29只基金)", "power": {"avr": "81.92", "categories
+

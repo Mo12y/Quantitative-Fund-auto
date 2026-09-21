@@ -1,0 +1,74 @@
+﻿==============================================================================
+FUND 007868
+  name=汇添富汇鑫货币A  src_net=1667 src_acw=1668 db_rows=2
+   UNIT MISMATCH 2026-09-17 src=112.2577 db=112.2544
+   ACC  MISMATCH 2026-09-17 src=112.2577 db=0.0
+   -> unit bad 1 / acc bad 1
+==============================================================================
+FUND 007858
+  name=鹏华浮动净值型发起式货币  src_net=1698 src_acw=1699 db_rows=2
+   UNIT MISMATCH 2026-09-17 src=110.8462 db=110.8426
+   ACC  MISMATCH 2026-09-17 src=1.1135 db=1.1134
+   -> unit bad 1 / acc bad 1
+==============================================================================
+FUND 160641
+  name=鹏华丰锐债券LOF  src_net=295 src_acw=295 db_rows=295
+   UNIT MISMATCH 2025-07-08 src=101.3673 db=101.3681
+   UNIT MISMATCH 2025-07-09 src=101.3727 db=101.3673
+   ACC  MISMATCH 2025-07-09 src=1.4568 db=1.4567
+   UNIT MISMATCH 2025-07-10 src=101.3904 db=101.3727
+   ACC  MISMATCH 2025-07-10 src=1.4569 db=1.4568
+   ACC  MISMATCH 2025-07-14 src=1.4571 db=1.457
+   -> unit bad 233 / acc bad 224
+==============================================================================
+FUND 161810
+  name=银华内需精选混合(LOF)A  src_net=4143 src_acw=4143 db_rows=4143
+   UNIT MISMATCH 2009-10-12 src=0.954 db=0.946
+   ACC  MISMATCH 2009-10-12 src=0.907 db=0.899
+   UNIT MISMATCH 2009-10-13 src=0.957 db=0.954
+   ACC  MISMATCH 2009-10-13 src=0.91 db=0.907
+   UNIT MISMATCH 2009-10-14 src=0.961 db=0.957
+   ACC  MISMATCH 2009-10-14 src=0.914 db=0.91
+   -> unit bad 3181 / acc bad 3175
+==============================================================================
+FUND 000001
+  name=华夏成长混合  src_net=6010 src_acw=6010 db_rows=6010
+   UNIT MISMATCH 2002-01-31 src=1.009 db=1.002
+   ACC  MISMATCH 2002-01-31 src=1.009 db=1.002
+   UNIT MISMATCH 2002-02-04 src=1.012 db=1.011
+   ACC  MISMATCH 2002-02-04 src=1.012 db=1.011
+   UNIT MISMATCH 2002-02-05 src=1.009 db=1.012
+   ACC  MISMATCH 2002-02-05 src=1.009 db=1.012
+   -> unit bad 4510 / acc bad 4511
+==============================================================================
+FUND 110022
+  name=易方达消费行业股票  src_net=3890 src_acw=3890 db_rows=3890
+   UNIT MISMATCH 2010-10-26 src=1.014 db=1.019
+   ACC  MISMATCH 2010-10-26 src=1.014 db=1.019
+   UNIT MISMATCH 2010-10-27 src=1.013 db=1.014
+   ACC  MISMATCH 2010-10-27 src=1.013 db=1.014
+   UNIT MISMATCH 2010-10-28 src=1.017 db=1.013
+   ACC  MISMATCH 2010-10-28 src=1.017 db=1.013
+   -> unit bad 2987 / acc bad 2987
+==============================================================================
+FUND 003376
+  name=广发中债7-10年国开债指数A  src_net=2433 src_acw=2433 db_rows=2433
+   UNIT MISMATCH 2016-09-26 src=1.0001 db=1.0
+   ACC  MISMATCH 2016-09-26 src=1.0001 db=1.0
+   UNIT MISMATCH 2016-09-27 src=1.0002 db=1.0001
+   ACC  MISMATCH 2016-09-27 src=1.0002 db=1.0001
+   UNIT MISMATCH 2016-09-28 src=1.0003 db=1.0002
+   ACC  MISMATCH 2016-09-28 src=1.0003 db=1.0002
+   -> unit bad 1834 / acc bad 1834
+
+==============================================================================
+SUMMARY over 7 funds
+  unit_match         453
+  unit_mismatch      12747
+  acc_match          467
+  acc_mismatch       12733
+  acc_null_in_src    0
+  acc_zero_in_db     1
+  missing_in_db      6936
+
+problems sample: [('007868', '2026-09-17', 112.2577, 0.0), ('007858', '2026-09-17', 1.1135, 1.1134), ('160641', '2025-07-09', 1.4568, 1.4567), ('160641', '2025-07-10', 1.4569, 1.4568), ('160641', '2025-07-14', 1.4571, 1.457), ('161810', '2009-10-12', 0.907, 0.899), ('161810', '2009-10-13', 0.91, 0.907), ('161810', '2009-10-14', 0.914, 0.91), ('000001', '2002-01-31', 1.009, 1.002), ('000001', '2002-02-04', 1.012, 1.011)]
