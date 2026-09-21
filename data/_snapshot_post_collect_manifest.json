@@ -1,0 +1,18 @@
+{
+ "snapshot": "data/_snapshot_20260921_092812_post_collect.db",
+ "created_at": "20260921_092812",
+ "source_db": "data/fund_quant.db",
+ "bytes": 2420752384,
+ "sha256": "09a914c7d2bd942a73cfa7f0e16725b5ed57dc723a18a52dbd2799c656dacb71",
+ "quick_check": "ok",
+ "stats": {
+  "fund_nav_rows": 22905610,
+  "funds_with_nav": 24061,
+  "deep_history_756": 11440,
+  "ge_252": 16050,
+  "opened_pool": 18677,
+  "opened_with_deep": 11423,
+  "coverage": 0.6116
+ },
+ "note": "全量采集完成后的原始快照；验证清单尚未执行（用户要求中午再做）"
+}
