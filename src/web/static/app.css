@@ -18,7 +18,8 @@
   }
   *{margin:0;padding:0;box-sizing:border-box}
   html{scroll-behavior:smooth}
-  body{font-family:var(--font-sans);background:var(--bg);color:var(--text);line-height:1.5;min-height:100vh}
+  body{font-family:var(--font-sans);background:var(--bg);color:var(--text);line-height:1.5;min-height:100vh;
+    font-variant-numeric:tabular-nums}
 
   /* ===== top bar ===== */
   .header{position:sticky;top:0;z-index:20;height:56px;background:var(--canvas);backdrop-filter:blur(8px);border-bottom:1px solid var(--hairline);padding:0 24px;display:flex;align-items:center;justify-content:space-between}
@@ -232,3 +233,20 @@
   .chip.active{background:var(--surface-2);color:var(--up)}
   .chip.paused{background:var(--surface-2);color:var(--warn)}
   .dca-item{border:1px solid var(--border);border-radius:9px;padding:10px 12px;margin:8px 0;background:var(--bg2)}
+
+  /* —— 前端重构：语义工具类（收敛内联样式，2026-09-22）——
+     token 仍取自 DESIGN.md；这些只是把散落在 JS 里的重复 style 收拢成类。 */
+  .u-right{float:right}
+  .u-inline{display:inline}
+  .u-mt6{margin-top:6px}
+  .u-mt8{margin-top:8px}
+  .u-mt10{margin-top:10px}
+  .u-tdim{color:var(--dim);font-size:12px}
+  .u-tmuted{color:var(--muted)}
+  .u-twarn{color:var(--warn)}
+  .u-tgreen{color:var(--green)}
+  .u-tink{color:var(--ink)}
+  .u-pillwarn{background:var(--surface-2);color:var(--warn)}
+  .u-sub{font-size:13px;margin-bottom:4px}
+  .u-subhead{font-size:13px;font-weight:700;color:var(--ink);margin:14px 0 6px}
+  .u-flexbase{display:flex;align-items:baseline;gap:14px}

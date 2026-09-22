@@ -40,10 +40,13 @@ def test_y_axis_zero_symmetric():
 
 def test_zero_line_bold_and_area_split_by_sign():
     body = _fn_body("portfolioChartSVG")
-    # 零轴加粗 + 0% 标注（盈亏分界）
+    # 零轴加粗 + 0% 标注（盈亏分界）。
+    # 注：不校验具体颜色 —— 颜色已收敛到 token（var(--ink-subtle)），
+    # 写死色值会在任何颜色重构时误伤（2026-09-22 前端重构已踩）。
     assert re.search(r'<text[^>]*>0%</text>', body), "零轴须有 0% 标注"
-    assert re.search(r'stroke="#8a8f98"[^/]*stroke-width="1\.4"', body) or \
-           re.search(r'stroke-width="1\.4"[^/]*stroke="#8a8f98"', body), "零轴须加粗"
+    zero = re.search(r'<line[^>]*stroke-width="1\.4"[^>]*/>', body)
+    assert zero and 'y1="${y0}"' in zero.group(0) and 'y2="${y0}"' in zero.group(0), \
+        "零轴须是横贯 y0 的加粗线（stroke-width 1.4）"
     # 零上绿 / 零下红：同一份面积被两个 clipPath 分别裁剪着色
     assert 'fill="url(#cgUp)" clip-path="url(#cpUp)"' in body, "零轴上方应裁剪为绿色面积"
     assert 'fill="url(#cgDn)" clip-path="url(#cpDn)"' in body, "零轴下方应裁剪为红色面积"
@@ -51,8 +54,8 @@ def test_zero_line_bold_and_area_split_by_sign():
     assert re.search(r'<clipPath id="cpDn"><rect [^/]*y="\$\{y0\}"', body), "下裁剪区从零轴起"
     cg_up = re.search(r'<linearGradient id="cgUp".*?</linearGradient>', body, re.S)
     cg_dn = re.search(r'<linearGradient id="cgDn".*?</linearGradient>', body, re.S)
-    assert cg_up and "#27a644" in cg_up.group(0), "零上面积用绿色（涨）"
-    assert cg_dn and "#e5484d" in cg_dn.group(0), "零下面积用红色（跌）"
+    assert cg_up and "var(--up)" in cg_up.group(0), "零上面积用绿色（涨）"
+    assert cg_dn and "var(--down)" in cg_dn.group(0), "零下面积用红色（跌）"
 
 
 def test_curve_card_keeps_top_text_and_annotates_methodology():
