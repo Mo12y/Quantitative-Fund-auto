@@ -12,7 +12,47 @@ function pct(v,d){return v==null?'—':(Number(v).toFixed(d)+'%');}
 function pCell(v){if(v==null)return'<span class="nsig">—</span>';return`<span class="${v<0.05?'sig':'nsig'}">${v.toFixed(3)}</span>`;}
 const sleep=ms=>new Promise(r=>setTimeout(r,ms));
 // 三态之「失败态」：给出可点的重试入口（DESIGN.md:98 要求失败须有原因 + 重试）
-function retryBtn(call){/* 用 esc() 转义后放进双引号属性：单引号会被编码成 &#39;，浏览器解码后仍是合法 JS */return ' <button class="btn mini" style="margin-left:6px" onclick="'+esc(call)+'">重试</button>';}
+function retryBtn(call){/* data-retry 由全局点击委托分发（见下方 document click），不再内联 onclick —— 去 eval 风险 */return ' <button class="btn mini u-ml6" data-retry="'+esc(call)+'">重试</button>';}
+
+
+// ========== 全局点击委托（2026-09-22）：替代内联 onclick ==========
+// 数据按钮用 data-action + data-* 传参；重试按钮用 data-retry 传原调用串。
+// 函数都在顶层（function/const 声明），点击时已在作用域内，直接 switch 调用，零 eval。
+document.addEventListener('click', function(e){
+  const t = e.target;
+  const el = (t && t.closest) ? t.closest('[data-action],[data-retry]') : null;
+  if(!el) return;
+  if(el.dataset.action){
+    const id = el.dataset.id, op = el.dataset.op, mode = el.dataset.mode, code = el.dataset.code;
+    switch(el.dataset.action){
+      case 'showPool': showPool(mode||'type'); break;
+      case 'dcaRun': dcaRun(id==='all'?'all':Number(id)); break;
+      case 'dcaBackfill': dcaBackfill(Number(id)); break;
+      case 'dcaToggle': dcaToggle(Number(id), op); break;
+      case 'dcaAdd': dcaAdd(); break;
+      case 'dcaSync': dcaSync(); break;
+      case 'editPlanMeta': editPlanMeta(); break;
+      case 'addPlanItem': addPlanItem(); break;
+      case 'updateNavThenReload': updateNavThenReload(); break;
+      case 'reloadHoldings': reloadHoldings(false); break;
+      case 'actBuy': actBuy(); break;
+      case 'editPlanItem': if(el.dataset.prevent) e.preventDefault(); editPlanItem(Number(id), code); break;
+      case 'actHolding': actHolding(op, Number(id)); break;
+    }
+    return;
+  }
+  const r = el.dataset.retry;
+  if(r){
+    switch(r){
+      case 'loadDca()': loadDca(); break;
+      case 'boot()': boot(); break;
+      case "showPool('board')": showPool('board'); break;
+      case 'loadSentiment()': loadSentiment(); break;
+      case 'loadSectors(true)': loadSectors(true); break;
+      case 'loadQuantModels()': loadQuantModels(); break;
+    }
+  }
+});
 
 function tempMeta(t){
   if(t<=20)return['cold','极冷','大胆加仓','var(--primary)']
@@ -202,19 +242,19 @@ function dcaItemHTML(p){
   const lbl=st==='active'?'进行中':'已暂停';
   const exp=p.expected_periods, done=p.executed_periods, pend=p.pending_periods;
   const un=p.unlinked_periods||0;
-  const cnt=(exp!=null)?`<span class="pill">应投 ${exp}</span><span class="pill" class="pill u-tgreen">已投 ${done}</span>${
-      pend?`<span class="pill" class="pill u-pillwarn">待补录 ${pend}</span>`:''}${
-      un?`<span class="pill" class="pill u-pillwarn" title="这些期次标着已执行，但没有对应的买入凭证（旧口径遗留）。先跑 scripts/link_dca_periods.py 看补链方案，确认后再 --apply。">缺凭证 ${un}</span>`:''}`:'';
+  const cnt=(exp!=null)?`<span class="pill">应投 ${exp}</span><span class="pill u-tgreen">已投 ${done}</span>${
+      pend?`<span class="pill u-pillwarn">待补录 ${pend}</span>`:''}${
+      un?`<span class="pill u-pillwarn" title="这些期次标着已执行，但没有对应的买入凭证（旧口径遗留）。先跑 scripts/link_dca_periods.py 看补链方案，确认后再 --apply。">缺凭证 ${un}</span>`:''}`:'';
   return `<div class="dca-item"><div class="bar-row">
       <span style="color:var(--text)"><b>${esc(p.fund_name)}</b> <span class="fund-code">${esc(p.fund_code)}</span> <span class="chip ${st}">${lbl}</span></span>
       <span class="b2">每期 ${fmtMoney(p.amount_per_period)} / ${esc(p.frequency)}</span></div>
     <div class="bar-row" style="margin-top:4px"><span>${cnt}</span>
       <span class="qtag">已投 ${p.total_periods} 期 · 累计 ${fmtMoney(p.total_amount)} · 下期 ${esc(p.next_run_date||'-')} ${p.due?'· 到期':''}${p.last_synced_at?` · 同步于 ${esc(p.last_synced_at)}`:''}</span></div>
-    <div class="act-row" class="act-row u-mt6">
-      <button class="btn mini ok"${p.due?'':' disabled'} title="${p.due?'可执行一期':'尚未到期'}" onclick="dcaRun(${p.id})">执行${p.due?'到期':'一期'}</button>
-      <button class="btn mini"${pend?'':' disabled'} title="${pend?'补录所有待投期次':'无待补录'}" onclick="dcaBackfill(${p.id})">补录${pend?' '+pend+' 期':''}</button>
-      <button class="btn mini" onclick="dcaToggle(${p.id},'${st==='active'?'pause':'resume'}')">${st==='active'?'暂停':'恢复'}</button>
-      <button class="btn mini danger" onclick="dcaToggle(${p.id},'delete')">删除</button>
+    <div class="act-row u-mt6">
+      <button class="btn mini ok"${p.due?'':' disabled'} title="${p.due?'可执行一期':'尚未到期'}" data-action="dcaRun" data-id="${p.id}">执行${p.due?'到期':'一期'}</button>
+      <button class="btn mini"${pend?'':' disabled'} title="${pend?'补录所有待投期次':'无待补录'}" data-action="dcaBackfill" data-id="${p.id}">补录${pend?' '+pend+' 期':''}</button>
+      <button class="btn mini" data-action="dcaToggle" data-id="${p.id}" data-op="${st==='active'?'pause':'resume'}">${st==='active'?'暂停':'恢复'}</button>
+      <button class="btn mini danger" data-action="dcaToggle" data-id="${p.id}" data-op="delete">删除</button>
     </div></div>`;
 }
 async function loadDca(){
@@ -233,11 +273,11 @@ async function loadDca(){
         ${sel('daily','')}${sel('weekly','weekly')}${sel('biweekly','')}${sel('monthly','')}
       </select>
       <input id="dca-date" type="date" placeholder="开始日期(默认今天)">
-      <button class="btn ok" onclick="dcaAdd()">添加定投</button>
+      <button class="btn ok" data-action="dcaAdd">添加定投</button>
     </div>
     <div class="act-row"><span class="qtag">频率：daily=日 / weekly=周 / biweekly=双周 / monthly=月（非交易日不顺延扣款）</span>
-      <button class="btn mini primary" style="margin-left:auto" onclick="dcaSync()">同步定投期次</button>
-      <button class="btn mini" onclick="dcaRun('all')" ${plans.some(p=>p.due&&p.status==='active')?'':'disabled'}>执行全部到期</button></div>`;
+      <button class="btn mini primary" style="margin-left:auto" data-action="dcaSync">同步定投期次</button>
+      <button class="btn mini" data-action="dcaRun" data-id="all" ${plans.some(p=>p.due&&p.status==='active')?'':'disabled'}>执行全部到期</button></div>`;
     if(!plans.length){ h+='<div class="empty">暂无定投计划 · 上方添加</div>'; }
     else{ for(const p of plans)h+=dcaItemHTML(p); }
     el.innerHTML=h;
@@ -391,7 +431,7 @@ function overviewKpis(T,P,PL,S){
       ${kpi('持仓市值', fmtMoney(P.total_market_value), P.has_holdings? ('盈亏 '+fmtPct(P.total_return_pct)):'暂无持仓', null, 'kpi-mv', 'kpi-mv-sub')}
       ${kpi('计划投入', fmtMoney(PL.total_invested||0), '目标 '+fmtMoney(tgt), null, 'kpi-plan', 'kpi-plan-sub')}
     </div>
-    <div class="qtag" class="qtag u-mt8">口径：历史持仓成本按旧口径（确认日 T+1 净值）；新流水按申请日 T 净值定价。已实现收益含赎回费（持有 &lt;7 天按 1.5%）。<br>「收益」= 金额法（市值 − 剩余成本）÷ 剩余成本，即<b>我赚了多少</b>；与「基金净值涨跌」（净值比值法，不含份额舍入）会有约 0.1% 的差 —— 那是份额四舍五入到 2 位造成的，两数不可混用。</div>`;
+    <div class="qtag u-mt8">口径：历史持仓成本按旧口径（确认日 T+1 净值）；新流水按申请日 T 净值定价。已实现收益含赎回费（持有 &lt;7 天按 1.5%）。<br>「收益」= 金额法（市值 − 剩余成本）÷ 剩余成本，即<b>我赚了多少</b>；与「基金净值涨跌」（净值比值法，不含份额舍入）会有约 0.1% 的差 —— 那是份额四舍五入到 2 位造成的，两数不可混用。</div>`;
 }
 
 function portfolioChartSVG(C){
@@ -455,7 +495,7 @@ function curveCard(C){
     <div class="qlegend"><span class="k"><span class="sw" style="background:var(--up)"></span>零轴上方（盈利区间）</span>
       <span class="k"><span class="sw" style="background:var(--down)"></span>零轴下方（亏损区间）</span>
       ${nIn?`<span class="qtag">另有 ${nIn} 笔未入仓${amtIn?`（约 ${fmtMoney(amtIn)}）`:''}未计入</span>`:''}</div>
-    <div class="qtag" class="qtag u-mt6">口径：本图只画「已起算」的持仓，起点为最早起算日、末点为净值末日；「未入仓」= 待确认买入 + 起算日晚于末点的持仓，它们尚未计入市值与成本，等确认/起算后会自动进来。图中收益率 = pnl / 累计成本，为资金加权持仓收益率（非时间加权）；与「已实现收益（含赎回费）」是两个不同口径，勿混用。</div></div>`;
+    <div class="qtag u-mt6">口径：本图只画「已起算」的持仓，起点为最早起算日、末点为净值末日；「未入仓」= 待确认买入 + 起算日晚于末点的持仓，它们尚未计入市值与成本，等确认/起算后会自动进来。图中收益率 = pnl / 累计成本，为资金加权持仓收益率（非时间加权）；与「已实现收益（含赎回费）」是两个不同口径，勿混用。</div></div>`;
 }
 
 function allocBars(title, obj, bg){
@@ -510,7 +550,7 @@ function ovTempCard(T){
 function ovAllocCard(T,P,PL){
   // 温度数据不足（全维度缺失，F-02）→ 目标仓位不存在，不给任何金额测算
   if(T.target_equity_pct==null){
-    return card('仓位建议','',`<div class="stat-line" class="stat-line u-mt8">市场温度数据不足 → 目标仓位无法确定，暂不给仓位建议。请先完成数据采集（<code>python src/main.py collect</code> / <code>index</code>）。</div>`);
+    return card('仓位建议','',`<div class="stat-line u-mt8">市场温度数据不足 → 目标仓位无法确定，暂不给仓位建议。请先完成数据采集（<code>python src/main.py collect</code> / <code>index</code>）。</div>`);
   }
   const eq=T.target_equity_pct;
   // 无持仓时用投资计划的总本金作为测算基数，避免与计划卡口径冲突
@@ -542,8 +582,8 @@ function planHTML(PL){
   const funds=PL.funds||[];
   let h=`<h2>投资计划 <span class="sub">— ${esc(PL.name||'')} · 起始 ${esc(PL.start_date||'')}</span>
       <span class="u-right">
-        <button class="btn mini" onclick="editPlanMeta()">编辑计划</button>
-        <button class="btn mini" onclick="addPlanItem()">添加基金</button>
+        <button class="btn mini" data-action="editPlanMeta">编辑计划</button>
+        <button class="btn mini" data-action="addPlanItem">添加基金</button>
       </span></h2>
     <div class="act-row" style="margin:0 0 10px">
       <span class="qtag">${esc(PL.goal||'未填目标')}</span>
@@ -556,14 +596,14 @@ function planHTML(PL){
       <span class="b2">总资金 ${fmtMoney(PL.total_capital||0)} · 现金弹药 ${fmtMoney(PL.cash_reserve||0)}</span>
     </div>
     <div class="prog" style="height:8px"><div style="width:${Math.min(100,pct)}%;background:var(--primary)"></div></div>
-    <div class="qtag" class="qtag u-mt8">各基金的目标与进度已并入下方「持仓明细」逐只显示（不再重复列出）。计划基金 ${funds.length} 只。</div>`;
+    <div class="qtag u-mt8">各基金的目标与进度已并入下方「持仓明细」逐只显示（不再重复列出）。计划基金 ${funds.length} 只。</div>`;
   return h;
 }
 
 function navHintHTML(){
   const txt=NAVINFO.latest?('净值截至 '+esc(NAVINFO.latest)):'本地无净值';
   const warn=NAVINFO.stale?`<span style="color:var(--yellow)">· 落后于今日，金额可能偏旧</span>
-     <button class="btn mini" onclick="updateNavThenReload()">更新净值</button>`:'';
+     <button class="btn mini" data-action="updateNavThenReload">更新净值</button>`:'';
   return `<div class="hint" id="nav-hint">${txt} ${warn}</div>`;
 }
 function curveSVG(curve,color){
@@ -603,7 +643,7 @@ function groupHoldingsByFund(holds){
 }
 function holdingsHTML(P,PL){
   let h=`<h2>持仓明细 <span class="sub">— 按基金汇总 · 展开看分笔；收益自各自起算日算起</span>
-      <button class="btn mini" class="btn mini u-right" onclick="reloadHoldings(false)">刷新涨跌</button></h2>
+      <button class="btn mini u-right" data-action="reloadHoldings">刷新涨跌</button></h2>
     <div class="stat-line"><b>投入</b> ${fmtMoney(P.total_invested)} · <b>市值</b> ${fmtMoney(P.total_market_value)} · <b class="${P.total_pnl>=0?'pnl-pos':'pnl-neg'}">${fmtPct(P.total_return_pct)}</b>（累计 ${fmtMoney(P.total_pnl)}）</div>
     ${navHintHTML()}`;
   // 加仓 / 买入新基金 表单
@@ -616,7 +656,7 @@ function holdingsHTML(P,PL){
       <input id="buy-date" type="date" placeholder="日期(默认今天)">
       <label class="qtag" style="display:inline-flex;align-items:center;gap:4px">
         <input type="checkbox" id="buy-after" style="min-width:auto"> 15:00后提交</label>
-      <button class="btn primary" onclick="actBuy()">记买入</button>
+      <button class="btn primary" data-action="actBuy">记买入</button>
     </div></div>`;
   const holds=(P.holdings||[]).filter(x=>x.id!=null);
   if(!holds.length){ h+='<div class="empty">暂无持仓 · 用上方「加仓」录入第一笔</div>'; return h; }
@@ -633,7 +673,7 @@ function holdingsHTML(P,PL){
     const pf=planMap[g.code];
     const planLine=pf?`<div class="fg-plan">计划 ${pf.role?esc(pf.role)+' · ':''}目标 ${fmtMoney(pf.target)} · 已投 ${fmtMoney(pf.invested)} · ${pv(pf.progress_pct,0)}%${
         (pf.next&&pf.next.amount>0)?` · 下一笔 ${fmtMoney(pf.next.amount)}`:''}${
-        pf.item_id?` <button class="btn mini" onclick="event.preventDefault();editPlanItem(${pf.item_id},'${esc(g.code)}')">改计划</button>`:''}</div>`
+        pf.item_id?` <button class="btn mini" data-action="editPlanItem" data-prevent="1" data-id="${pf.item_id}" data-code="${esc(g.code)}">改计划</button>`:''}</div>`
       :'';
     let perf;
     if(g.allPending){
@@ -660,13 +700,13 @@ function holdingsHTML(P,PL){
         <td>${esc(l.effective_date||'—')}</td>
         <td>${fmtMoney(l.buy_amount)}</td>
         <td>${(Number(l.shares)||0).toFixed(2)}</td>
-        <td>${esc(l.confirm_date||'—')}${l.legacy_rule_deviation?`<span class="pill" class="pill u-pillwarn" title="该笔按旧规则记账：确认日 ${esc(l.legacy_rule_deviation.stored)}。按现行规则（QDII T+2 确认 / 非交易日不再叠加 15:00 顺延）应为 ${esc(l.legacy_rule_deviation.current_rule)}。历史记录不回填，仅标注。">旧口径</span>`:''}</td>
+        <td>${esc(l.confirm_date||'—')}${l.legacy_rule_deviation?`<span class="pill u-pillwarn" title="该笔按旧规则记账：确认日 ${esc(l.legacy_rule_deviation.stored)}。按现行规则（QDII T+2 确认 / 非交易日不再叠加 15:00 顺延）应为 ${esc(l.legacy_rule_deviation.current_rule)}。历史记录不回填，仅标注。">旧口径</span>`:''}</td>
         <td>${esc(l.accrual_start||'—')}</td>
         <td>${esc(st)}</td>
         <td style="white-space:nowrap">
-          <button class="btn mini ok" ${l.status==='pending_confirm'?'disabled':''} onclick="actHolding('sell',${l.id})">减仓</button>
-          <button class="btn mini" onclick="actHolding('update',${l.id})">改</button>
-          <button class="btn mini danger" onclick="actHolding('delete',${l.id})">删</button>
+          <button class="btn mini ok" ${l.status==='pending_confirm'?'disabled':''} data-action="actHolding" data-op="sell" data-id="${l.id}">减仓</button>
+          <button class="btn mini" data-action="actHolding" data-op="update" data-id="${l.id}">改</button>
+          <button class="btn mini danger" data-action="actHolding" data-op="delete" data-id="${l.id}">删</button>
         </td></tr>`;
     }
     h+=`</tbody></table></div></details>`;
@@ -674,7 +714,7 @@ function holdingsHTML(P,PL){
   // 已了结：把卖出后的落袋盈亏与赎回费摊开（原先这部分完全不在报表里）
   const RZ=P.realized||{};
   if(RZ.count){
-    h+=`<details class="fund-group" class="fund-group u-mt10"><summary style="grid-template-columns:1fr auto">
+    h+=`<details class="fund-group u-mt10"><summary style="grid-template-columns:1fr auto">
       <span class="fg-line"><span class="fg-name">已了结（${RZ.count} 笔）</span>
         <span class="qtag">已实现 <b style="color:${(RZ.total_pnl||0)>=0?'var(--up)':'var(--down)'}">${fmtMoney(RZ.total_pnl)}</b> · 赎回费合计 ${fmtMoney(RZ.total_fee)}</span></span>
       <span class="num qtag">展开明细</span></summary>
@@ -691,7 +731,7 @@ function holdingsHTML(P,PL){
         <td style="color:${(s.pnl||0)>=0?'var(--up)':'var(--down)'}">${fmtMoney(s.pnl)}</td></tr>`).join('')}
       </tbody></table></div></details>`;
   }
-  h+=`<div class="qtag" class="qtag u-mt10">历史持仓成本按<b>旧口径</b>（确认日 T+1 净值）计算，仅新流水按<b>申请日 T 净值</b>定价。
+  h+=`<div class="qtag u-mt10">历史持仓成本按<b>旧口径</b>（确认日 T+1 净值）计算，仅新流水按<b>申请日 T 净值</b>定价。
     评估历史回填的影响：<code>python scripts/rebuild_costs_dryrun.py</code>（只读，不改数据）</div>`;
   return h;
 }
@@ -724,7 +764,7 @@ function rebalanceHTML(RB,P){
       <span style="float:right;font-weight:700;color:${ac[inst.action]||'var(--text)'}">${fmtMoney(inst.amount)}</span><br>
       <span class="u-tdim">${esc(inst.reason||'')}</span></div>`;
   }
-  h+=`<div class="qtag" class="qtag u-mt8">操作前确认持有天数 — 不满7天有 1.5% 惩罚赎回费</div>`;
+  h+=`<div class="qtag u-mt8">操作前确认持有天数 — 不满7天有 1.5% 惩罚赎回费</div>`;
   return h;
 }
 
@@ -732,8 +772,8 @@ function poolHTML(F){
   const funds=F.funds||[];
   let head=`<h2>基金质量筛选池 <span class="sub">— 不推荐“买哪只”，只排除有坑的</span>
       <span class="u-right">
-        <button class="btn mini" onclick="showPool('type')">按类型</button>
-        <button class="btn mini primary" onclick="showPool('board')">按板块总榜</button>
+        <button class="btn mini" data-action="showPool" data-mode="type">按类型</button>
+        <button class="btn mini primary" data-action="showPool" data-mode="board">按板块总榜</button>
       </span></h2>`;
   if(!funds.length)return head+'<div class="empty">暂无基金数据 · 运行 python src/main.py nav && python src/main.py enrich</div>';
   const summary=F.summary||{};
@@ -776,7 +816,7 @@ function peerLine(f){
   const P=f.percentiles||{};
   const comp=(P.sharpe!=null&&P.max_drawdown_1y!=null)?Math.round(0.6*P.sharpe+0.4*P.max_drawdown_1y):null;
   const nm=(g==='F QDII/其他')
-    ?` <span class="qtag" class="qtag u-twarn" title="F 组是 QDII/FOF/货币/商品/REITs 的大杂烩，与厂商同类口径的 ρ 仅 0.52（A/B/C/D 为 0.94~0.99）→ 可比性弱于其他组">同类为大类口径</span>`:'';
+    ?` <span class="qtag u-twarn" title="F 组是 QDII/FOF/货币/商品/REITs 的大杂烩，与厂商同类口径的 ρ 仅 0.52（A/B/C/D 为 0.94~0.99）→ 可比性弱于其他组">同类为大类口径</span>`:'';
   return `<span class="qtag">同类 P<b>${comp!=null?comp:'—'}</b> · ${esc(g||'—')}${n?(' · '+Number(n).toLocaleString()+' 只对照'):''}${asof?(' · 截至 '+esc(asof)):''}</span>${nm}`;
 }
 function posChip(f){
@@ -799,7 +839,7 @@ function poolRow(f){
   const scoreTag=sc!==null?`<span class="qtag" title="综合评分：类型桶内归一化百分位">评分 ${sc}</span>`:'<span class="qtag" title="综合评分缺失">评分 --</span>';
   // 申购状态是独立一轴：限大额不影响质量等级，单独挂标签（不静默、也不误导）
   const ps=f.purchase_status||'';
-  const psTag=ps?`<span class="pill" class="pill u-pillwarn" title="${esc(f.purchasable||ps)}">${esc(ps)}</span>`:'';
+  const psTag=ps?`<span class="pill u-pillwarn" title="${esc(f.purchasable||ps)}">${esc(ps)}</span>`:'';
   return `<div class="fund-row">
     <span><span class="fund-code">${esc(f.code)}</span>${riskBadge(f.risk)}</span>
     <span class="fund-name" title="${esc(name)}">${esc(name.length>26?name.slice(0,26)+'…':name)}${psTag}</span>
@@ -869,7 +909,7 @@ async function showPool(mode,_attempt){
 function boardPoolHTML(d){
   const boards=d.boards||[];
   let h=`<h2>基金质量筛选池 <span class="sub">— 按行业板块总榜（每板块前 ${d.size||20}）</span>
-      <span class="u-right"><button class="btn mini" onclick="showPool('type')">按类型</button></span></h2>
+      <span class="u-right"><button class="btn mini" data-action="showPool" data-mode="type">按类型</button></span></h2>
     <div class="stat-line">共 ${d.total_funds||0} 只候选 · ${boards.length} 个板块 · 组内“稳健优先 → 夏普 → 动量”排序</div>`;
   if(!boards.length)return h+'<div class="empty">暂无可展示的板块分组</div>';
   boards.forEach((b,i)=>{
@@ -949,7 +989,7 @@ async function loadSectors(retries=5){
       }
       if(momentum.length){h+=`<div class="u-subhead">动量领涨</div>`;for(const s of momentum.slice(0,3)){h+=`<div class="fund-row" style="grid-template-columns:1fr auto"><span class="fund-name">${esc(s.name)}</span><span class="fund-meta"><span class="u-tgreen">近1月${(s.ret_1m||0)>=0?'+':''}${pv(s.ret_1m,1)}%</span><span class="qtag">3月${(s.ret_3m||0)>=0?'+':''}${pv(s.ret_3m,0)}%</span></span></div>`;}}
       if(value.length){h+=`<div class="u-subhead">超跌候选（逆向）</div>`;for(const s of value.slice(0,3)){h+=`<div class="fund-row" style="grid-template-columns:1fr auto"><span class="fund-name">${esc(s.name)}</span><span class="fund-meta"><span style="color:var(--red)">近1月${(s.ret_1m||0)>=0?'+':''}${pv(s.ret_1m,1)}%</span><span class="qtag">回撤${pv(s.max_dd,0)}%</span></span></div>`;}}
-      h+=`</div></div><div class="qtag" class="qtag u-mt10">评分 = 动量40% + 趋势30% + 风险调整30%${age?' · 缓存于 '+esc(age):''}</div>`;
+      h+=`</div></div><div class="qtag u-mt10">评分 = 动量40% + 趋势30% + 风险调整30%${age?' · 缓存于 '+esc(age):''}</div>`;
       card.innerHTML=h; card.dataset.done='1'; return;
     }catch(e){
       if(attempt<retries-1){card.innerHTML='<div class="loading"><span class="spinner"></span>等待数据就绪... ('+(attempt+2)+'/'+retries+')</div>';await sleep(3000);}
