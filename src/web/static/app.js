@@ -338,15 +338,10 @@ function renderApp(){
   const d=STATE.all; if(!d)return;
   const T=d.temp||{}, F=d.funds||{funds:[],summary:{}}, P=d.portfolio||{}, PL=d.plan||{funds:[]}, RB=d.rebalance||{};
   const hasHold=P.has_holdings, hasPlan=!!(PL.funds&&PL.funds.length);
-  const seg=head=>`<div class="sec-head"><div><div class="t">${head[0]}</div><div class="s">${head[1]||''}</div></div></div>`;
   let out='';
 
-  // ---------- 总览 ----------
-  out+=`<section class="view active" data-view="overview">${seg(['总览','总资产 · 累计收益 · 市场温度 · 目标仓位 · 市场信号'])}
-    ${overviewKpis(T,P,PL,d.stats)}
-    <div class="grid">${curveCard(d.curve)}${ovTempCard(T)}${ovAllocCard(T,P,PL)}${card('市场信号','LPR / PMI / 基金公告','<div id="sentiment-card"><div class="loading"><span class="spinner"></span>扫描中...</div></div>')}
-      ${allocCard(d.stats)}
-    </div></section>`;
+  // ---------- 总览 ----------（单一实现见 overviewSectionHTML，消除双渲染路径）
+  out+=overviewSectionHTML(T,P,PL,d.stats,d.curve);
 
   // ---------- 持仓 / 计划 / 调仓 ----------
   let inner='';
@@ -354,17 +349,17 @@ function renderApp(){
   inner+=`<div class="card full" id="holdings-card">${holdingsHTML(P,PL)}</div>`;
   inner+=`<div class="card full" id="rebalance-card">${rebalanceInner(RB,P)}</div>`;
   inner+=card('定投计划','添加 / 暂停恢复 / 执行到期期数 / 删除', '<div id="dca-wrap"><div class="loading"><span class="spinner"></span>加载定投计划...</div></div>','full');
-  out+=`<section class="view" data-view="position">${seg(['持仓 · 计划 · 调仓','你的投资组合与执行建议'])}<div class="grid">${inner}</div></section>`;
+  out+=`<section class="view" data-view="position">${secHead('持仓 · 计划 · 调仓','你的投资组合与执行建议')}<div class="grid">${inner}</div></section>`;
 
   // ---------- 筛选池 ----------
-  out+=`<section class="view" data-view="pool">${seg(['基金质量筛选池','不推荐“买哪只”，只排除有坑的'])}<div class="grid"><div class="card full" id="pool-card">${poolHTML(F)}</div></div></section>`;
+  out+=`<section class="view" data-view="pool">${secHead('基金质量筛选池','不推荐“买哪只”，只排除有坑的')}<div class="grid"><div class="card full" id="pool-card">${poolHTML(F)}</div></div></section>`;
 
   // ---------- 板块 ----------
-  out+=`<section class="view" data-view="sector">${seg(['行业板块排名','31个申万一级行业 · 动量+趋势+风险'])}
+  out+=`<section class="view" data-view="sector">${secHead('行业板块排名','31个申万一级行业 · 动量+趋势+风险')}
     <div class="grid">${card('板块排名','','<div id="sector-card"><div class="loading"><span class="spinner"></span>板块数据加载中...</div></div>','full')}</div></section>`;
 
   // ---------- 量化模型 ----------
-  out+=`<section class="view" data-view="quant">${seg(['量化模型','vol 预测 · 回撤预警 · 组合模拟（OOS 2023-2026）'])}
+  out+=`<section class="view" data-view="quant">${secHead('量化模型','vol 预测 · 回撤预警 · 组合模拟（OOS 2023-2026）')}
     <div class="grid">${card('量化模型','','<div id="quant-card"><div class="loading"><span class="spinner"></span>模型结果加载中...</div></div>','full')}</div></section>`;
 
   out+=`<div class="foot"><span>操作均在页面内完成并写入本地数据库；加仓/减仓后会自动重算持仓与调仓建议。</span></div>`;
@@ -1078,14 +1073,20 @@ function setBusy(b){ document.body.classList.toggle('busy', b); }
 function secHead(t,s){return`<div class="sec-head"><div><div class="t">${t}</div><div class="s">${s||''}</div></div></div>`;}
 
 // ========== 首屏：轻量总览先出（不等筛选/调仓） ==========
-function overviewViewHTML(T,P,PL,S,C){
-  const hasHold=P.has_holdings, hasPlan=!!(PL.funds&&PL.funds.length);
+// 总览 section 的**单一实现**（2026-09-22 消除双渲染路径）：
+// 以前 renderApp（全量）与 overviewViewHTML（快速首屏）各拼一份总览，改一处漏一处。
+// 现在两条路径都调这里。
+function overviewSectionHTML(T,P,PL,S,C){
   return `<section class="view active" data-view="overview">${secHead('总览','总资产 · 累计收益 · 市场温度 · 目标仓位 · 市场信号')}
     ${overviewKpis(T,P,PL,S)}
     <div class="grid">${curveCard(C)}${ovTempCard(T)}${ovAllocCard(T,P,PL)}${card('市场信号','LPR / PMI / 基金公告','<div id="sentiment-card"><div class="loading"><span class="spinner"></span>扫描中...</div></div>')}
       ${allocCard(S)}
     </div></section>`;
 }
+function overviewViewHTML(T,P,PL,S,C){
+  return overviewSectionHTML(T,P,PL,S,C);
+}
+
 async function loadOverviewFast(fresh){
   try{
     const r=await fetch('/api/overview'+(fresh?'?fresh=1':''));
