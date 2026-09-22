@@ -63,12 +63,13 @@ class TestParseDailySnapshot:
         assert all(r[0] != "000003" for r in records)        # 货币基金无单位净值 → 跳过
         row = next(i for i in info if i["fund_code"] == "000003")
         assert row["purchase_status"] == "开放申购"          # 但申购状态仍可用
-        assert row["mgt_fee"] == 0.0  # '0.00%' 解析为 0；upsert 侧 0 不覆盖（_has_new_value）
+        # ⚠️ 2026-09-22 正名：该列是**手续费（申购费）**，不是管理费 → 键名改为 purchase_fee
+        assert row["purchase_fee"] == 0.0  # '0.00%' 解析为 0；upsert 侧 0 不覆盖（_has_new_value）
 
     def test_fee_missing_stays_none(self):
         _, info, _ = parse_daily_snapshot(_snapshot_df())
         row = next(i for i in info if i["fund_code"] == "000002")
-        assert row["mgt_fee"] is None                        # '--' → None，不清旧值
+        assert row["purchase_fee"] is None                   # '--' → None，不清旧值
 
     def test_info_does_not_clear_existing_values(self, db):
         """upsert 集成：快照行里 fee=None 时，库内已有费率必须保留（批次 4.2 语义）。"""

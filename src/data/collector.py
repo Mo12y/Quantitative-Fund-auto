@@ -352,16 +352,21 @@ class DataCollector:
             if extra.get("fund_name"):
                 fund_name = extra["fund_name"]
 
-            # 解析费率：缺列时保持 None（不再默认 "0%" —— 那会把缺失解析成 0，
-            # upsert 的字段保护拦不住 0，见批次 4.2）
-            mgt_fee = self._parse_fee(extra.get("fee_str"))
+            # ⚠️ 正名（2026-09-22）：daily 表最后一列按源码注释是**手续费（申购费，打折后）**
+            #     （见本文件 line ~331 的列说明：[-3]申购状态 [-2]赎回状态 [-1]手续费）。
+            #     历史实现把它写进了 `mgt_fee`（管理费），导致"偏股混合管理费中位数 0.15%"
+            #     这种不可能的分布（真相：0.15 = 1.5% 申购费打 1 折）。
+            #     真·管理费率需走 akshare `fund_fee_em(symbol, '运作费用')`（实测可用，见脚本 fee 命令）。
+            #     这里改为写入 `purchase_fee`（fund_info 本来就有这一列），mgt_fee 不再被冒充。
+            # 缺列时保持 None（**不默认 "0%"** —— 那会把缺失解析成 0，upsert 的字段保护拦不住 0，见批次 4.2）
+            purchase_fee = self._parse_fee(extra.get("fee_str"))
 
             fund = {
                 "fund_code": code,
                 "fund_name": fund_name,
                 "fund_type": fund_type,
                 "purchase_status": extra.get("purchase_status", ""),
-                "mgt_fee": mgt_fee,
+                "purchase_fee": purchase_fee,
             }
             self.db.upsert_fund_info(fund)
             count += 1
@@ -461,6 +466,41 @@ class DataCollector:
         # 于是出现"报净值 600 只 ok、库里只有 305 只有净值"的假成功。
         # 空返回（源头没数据）与真失败必须能被区分开。
         return len(records)
+
+    def collect_fund_fee(self, fund_code: str):
+        """真·运作费率：管理费 / 托管费 / 销售服务费（akshare `fund_fee_em`，源=天天基金）。
+
+        为什么需要它（2026-09-22 实测）：
+        `fund_info.mgt_fee` 历史上装的是**手续费（申购费，打折后）**，不是管理费 ——
+        见 `save_fund_list` 的列说明「[-3]申购状态 [-2]赎回状态 [-1]手续费」。
+        后果是"偏股混合管理费中位数 0.15%"这种不可能的分布
+        （真相：0.15 = 1.5% 申购费打 1 折）。对照实测：
+            000021 华夏优势增长混合：库里 mgt_fee=0.15  vs  真管理费 1.20% / 托管 0.20%
+            007029 易方达中证500联接C：库里 0.15，真管理费恰好也是 0.15（指数基金）
+
+        返回 {'mgt_fee','custodian_fee','sales_service_fee'}（缺失为 None），失败返回 None。
+        实测 8/8 成功、0.60s/只（含货币/债券/QDII/ETF联接）。
+        """
+        try:
+            import akshare as ak
+            df = ak.fund_fee_em(symbol=str(fund_code), indicator="运作费用")
+            if df is None or df.empty:
+                return None
+            vals = list(df.iloc[0])
+            out = {"mgt_fee": None, "custodian_fee": None, "sales_service_fee": None}
+            pairs = {"管理费率": "mgt_fee", "托管费率": "custodian_fee",
+                     "销售服务费率": "sales_service_fee"}
+            for i in range(0, len(vals) - 1, 2):
+                k = str(vals[i]).strip()
+                v = str(vals[i + 1]).strip() if i + 1 < len(vals) else ""
+                for key, field in pairs.items():
+                    if key in k:
+                        out[field] = self._parse_fee(v)
+            if all(v is None for v in out.values()):
+                return None           # 三项都没解析出来 → 视为未采到（不写 0 冒充）
+            return out
+        except Exception:
+            return None
 
     def save_index_val_to_db(self, index_code: str, pe_df: pd.DataFrame, pb_df: pd.DataFrame,
                              daily_df: pd.DataFrame = None):
@@ -587,15 +627,27 @@ class DataCollector:
 
     @staticmethod
     def _parse_fee(fee_str) -> Optional[float]:
-        """解析费率字符串: '0.15%' → 0.15, '1.50%' → 1.50。
+        """解析费率字符串 → 百分数数值。
 
-        **采集失败返回 None 而不是 0**（批次 4.2）：把「没采到」解析成 0
-        会被下游当成真零费率，且 upsert 的字段保护拦不住 0（COALESCE 只拦
-        NULL）。缺数据必须保持 None，让 upsert 保留旧值。
+        · `'0.15%'` / `'1.50%'` → 0.15 / 1.5（原行为）
+        · **容忍带单位的串**（2026-09-22 新增）：akshare `fund_fee_em` 返回的是
+          `'1.20%（每年）'` 这种格式，旧实现只 `replace('%','')` → 直接 None，
+          导致真管理费率采不到。改为提取**第一个数字**。
+        · 无数字（`'---'` / `'nan'` / 空）→ **None 而不是 0**（批次 4.2）：
+          把「没采到」解析成 0 会被下游当成真零费率，且 upsert 的字段保护
+          拦不住 0（COALESCE 只拦 NULL）。缺数据必须保持 None，让 upsert 保留旧值。
         """
+        if fee_str is None:
+            return None
+        s = str(fee_str).strip()
+        if not s or s.lower() in ("nan", "none", "--", "---", "-"):
+            return None
+        m = _RE_NUM.search(s)
+        if not m:
+            return None
         try:
-            return float(str(fee_str).replace("%", "").strip())
-        except (ValueError, TypeError):
+            return float(m.group(0))
+        except ValueError:
             return None
 
     @staticmethod
@@ -606,6 +658,9 @@ class DataCollector:
         except (ValueError, TypeError):
             return 0.0
 
+
+# 费率串里的数字（容忍 '1.20%（每年）' / '0.15%' / '1.5' 等写法）
+_RE_NUM = re.compile(r"-?\d+(?:\.\d+)?")
 
 # 快照宽表里带日期的净值列名：'2026-09-18-单位净值' / '2026-09-18-累计净值'
 _DAILY_COL_RE = re.compile(r"^(\d{4}-\d{2}-\d{2})-(单位净值|累计净值)$")
@@ -651,7 +706,10 @@ def parse_daily_snapshot(daily_df: pd.DataFrame):
             # 'nan'/'None' 视为未采到：置 None 让 upsert 保留旧值（不覆盖好名字/状态）
             "fund_name": None if name in ("", "nan", "None") else name,
             "purchase_status": "" if status in ("nan", "None") else status,
-            "mgt_fee": DataCollector._parse_fee(row.iloc[-1]) if ncols >= 11 else None,
+            # ⚠️ 正名（2026-09-22）：最后一列是**手续费（申购费）**，不是管理费。
+            #     历史实现写进了 mgt_fee → 产生"偏股混合管理费 0.15%"的假分布。
+            #     真管理费走 akshare fund_fee_em（见 collector 的费率采集路径）。
+            "purchase_fee": DataCollector._parse_fee(row.iloc[-1]) if ncols >= 11 else None,
         })
 
         ret = DataCollector._to_float(row[ret_col]) if ret_col is not None else 0.0
