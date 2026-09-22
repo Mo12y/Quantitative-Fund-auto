@@ -32,35 +32,15 @@ sys.path.insert(0, ROOT)
 
 # ── SSOT：复用校准脚本的口径 ──────────────────────────────
 from calibrate_thresholds import (        # noqa: E402
-    DB_PATH, LABEL, METRICS, TYPE2GROUP, grade, load_navs, metrics,
+    DB_PATH, LABEL, METRICS, grade, load_navs,
 )
 
-# 方向：True = 越大越好，False = 越小越好
-DIRECTION = {
-    "annual_return": True,
-    "ann_vol": False,          # 波动越低越好（同收益下）
-    "max_drawdown_1y": False,  # 回撤越小越好
-    "momentum_3m": None,       # 中性（不参与"优劣"，只作追涨警示）
-    "sharpe": True,
-}
-
-# ⚠️ 综合分只用**相互独立**的维度，避免重复计分。
-# 实测 A 组 Spearman 相关：
-#     夏普 ↔ 年化收益 = 0.97   ← 几乎冗余（夏普 = 收益/波动）
-#     回撤 ↔ 年化波动 = 0.78   ← 高度冗余
-#     夏普 ↔ 回撤     = -0.04  ← 真正独立 ✅
-# 所以综合分只用 夏普 + 回撤，其余维度**只展示、不计分**。
-# （这正是毕设的教训：peak_intensity 与 cv 相关 0.945 被替换掉）
-WEIGHT = {"sharpe": 0.6, "max_drawdown_1y": 0.4}
-DISPLAY_ONLY = ["annual_return", "ann_vol", "momentum_3m"]
-
-
-def pct_of(arr, v, higher_better):
-    """v 在 arr 中的百分位（0-100）。higher_better=False 时反转，使"好"=高分。"""
-    if arr.size == 0 or not np.isfinite(v):
-        return None
-    p = float((arr <= v).mean() * 100)
-    return p if higher_better else 100.0 - p
+# ── SSOT：百分位计算与方向/权重定义已下沉到 src，脚本与 API 共用同一份实现 ──
+# （原在本文件的 DIRECTION / WEIGHT / DISPLAY_ONLY / pct_of 已上移，
+#   见 src/analysis/peer_percentile.py。不要在这里重新定义。）
+from src.analysis.peer_percentile import (  # noqa: E402
+    DIRECTION, DISPLAY_ONLY, WEIGHT, build_group_arrays, pct_of,
+)
 
 
 def main():
@@ -72,28 +52,15 @@ def main():
     args = ap.parse_args()
 
     conn = sqlite3.connect(f"file:{DB_PATH}?mode=ro", uri=True)
-    fi = {r[0]: (r[1] or "") for r in conn.execute("select fund_code, fund_type from fund_info")}
     name = {r[0]: (r[1] or "") for r in conn.execute("select fund_code, fund_name from fund_info")}
-    navs = load_navs(conn, args.min_days)
+    # 分组 + 指标组装走共用实现（src/analysis/peer_percentile.py），脚本不自己来一遍。
     # ⚠️ 不要在这里 conn.close()：navs 是**惰性**的（NavStream），关闭连接会让迭代失败。
     #    连接在 main 结束时才关。
-
-    groups = {}
-    dropped = []
-    for code, (d, v) in navs.items():
-        g = TYPE2GROUP.get(fi.get(code, ""))
-        if not g:
-            dropped.append(fi.get(code, "") or "(未知类型)")
-            continue
-        m = metrics(v, d)
-        if m:
-            m["_code"] = code
-            m["_name"] = name.get(code, "")
-            m["_type"] = fi.get(code, "")
-            groups.setdefault(g, []).append(m)
-    if dropped:
+    groups, unmapped, _ = build_group_arrays(args.min_days, conn=conn)
+    if unmapped:
         from collections import Counter
-        print(f"⚠️ 未映射类型 {len(dropped)} 只（显式报告，不静默丢弃）：{dict(Counter(dropped))}\n")
+        print(f"⚠️ 未映射类型 {sum(unmapped.values())} 只（显式报告，不静默丢弃）："
+              f"{dict(unmapped)}\n")
 
     payload = {}
     for g, rows in sorted(groups.items()):

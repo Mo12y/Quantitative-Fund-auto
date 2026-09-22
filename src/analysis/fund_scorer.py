@@ -20,6 +20,7 @@ from typing import Optional
 from ..data.database import Database
 from .nav_series import valuation_nav_series
 from .risk_free import RISK_FREE_ANNUAL
+from . import peer_percentile
 
 # 申购状态分类（D2）——
 #   `暂停申购` / `封闭期`：**买不进去**，直接排除出推荐池；
@@ -45,21 +46,78 @@ class FundScreener:
     """基金质量筛选器 v3.0"""
 
     # 质量门槛
+    #
+    # ⚠️⚠️ 改任何阈值之前先读这一段（本批次 A1 确立的设计原则）⚠️⚠️
+    #   同一个数字在不同组里的含义可以差 100 倍，所以先分类：
+    #
+    #   ① 「绝对概念」→ 保留**绝对限值**，不随同侪分布浮动。
+    #      典型：费率上限、回撤容忍度。"回撤超过 35% 就不推荐"是一句
+    #      **风险偏好声明**，不是相对排名 —— 牛市里全市场回撤都小时，
+    #      相对化会变成"矮子里拔将军"，把该拦的也放进来。
+    #
+    #   ② 「相对概念」→ 改用**组内分位**。
+    #      典型：追涨（momentum_warning）。"涨得多不多"本质是相对同侪的。
+    #
+    #   依据（上一批次实测）：常数阈值选出的集合是 P75 的**严格超集**（重合 100%）
+    #   → 换分位**不改变选出谁**；但同一个 35 在 A 组淘汰 19%、在 E 组只淘汰 0.2%
+    #   —— **跨组强度完全不一致**。这才是换分位的真正价值（跨组一致性），不是"选得更准"。
     THRESHOLDS = {
         "min_age_months": 12,       # 成立至少1年
         "min_size_yi": 0.5,         # 规模至少5千万
         "max_size_yi": 200,         # 规模不超过200亿（太大不灵活）
         "max_total_fee": 2.0,       # 总费率(管理+托管)不超过2.0%
         "warn_total_fee": 1.5,      # 总费率超过1.5%提示注意
-        "max_drawdown_1y": 35,      # 近1年最大回撤不超过35%
-        "min_manager_years": 2,     # 基金经理从业至少2年
-        "momentum_warning": 40,     # 近3月涨幅>40%→追涨警告
+        # 近1年最大回撤不超过35% —— **绝对门槛**（见上①，不参与分位化）。
+        # 但它的**实测跨组位置**极不均匀，必须知道（上一批次实测）：
+        #     A 偏股混合 P81（淘汰 19%） | B 灵活配置 P86 | C 主动股票 P82
+        #     D 指数股票 P94 | E 债券 P100（只淘汰 0.2%） | F QDII/其他 P96
+        # → **在 D/E/F 组它几乎不设限**（E 组等于没有回撤门槛）。
+        #   未来若要动它，请按组分别论证，不要一刀切。
+        "max_drawdown_1y": 35,
+        # 基金经理从业至少2年 —— ⚠️ 注意：本阈值**从未被任何代码使用**（死阈值）。
+        # `manager_tenure` 数据已具备（67.0%），但**没有对应的检查方法**。
+        # 见 docs/参照系接入执行报告.md §2（A4 实测）。
+        "min_manager_years": 2,
+        # 近3月涨幅>40%→追涨警告 —— 实测**已失效**（各组通过率 99.3%~100%）。
+        # 本批次改为组内 P90，见 _check_momentum 与 `momentum_warning_pct`。
+        "momentum_warning": 40,
     }
+    # 分位化的阈值（与上面的常数不同：这些按**组内分位**取，随参照系走）
+    #   momentum_warning_pct = 90 → 追涨线 = 该组 momentum_3m 的 P90
+    # （本项目自定阈值，依据是**实测分布**而非文献 —— 上一批次实测常数 40 在各组
+    #   位于 P99~P100，通过率 99.3%~100%，等于没有这条检查。）
+    MOMENTUM_WARNING_PCT = 90
 
     def __init__(self, db: Database, risk_free_rate: float = RISK_FREE_ANNUAL):
         self.db = db
         # 无风险利率：单一真源（批次 4.7），全项目统一 0.02，不得各自硬编码
         self.risk_free_rate = risk_free_rate
+        # 参照系分位缓存：**懒加载**（进程内只读一次盘）。
+        # 没有缓存时不做任何猜测 —— 由 _momentum_threshold 返回 None，
+        # 调用方如实声明"参照系未构建"（铁律 5）。
+        self._peer_cache = None
+        self._peer_loaded = False
+
+    def _peer_dist(self) -> dict | None:
+        if not self._peer_loaded:
+            self._peer_cache = peer_percentile.load_cache()
+            self._peer_loaded = True
+        return self._peer_cache
+
+    def _momentum_threshold(self, fund_type: str):
+        """返回 (该组 momentum_3m 的 P90, 组名)；不可得时 (None, 组名或 None)。
+
+        为什么不是常数：上一批次实测 `momentum_warning = 40` 在各组位于 P99~P100
+        （通过率 99.3%~100%），等于没有这条检查；而各组 P90 实测是
+        A 3.93 / B 2.85 / C 9.42 / D 4.29 / E 0.87 / F 0.52 —— 相差 18 倍。
+        同一个 "40" 对不同组毫无意义，"追涨"必须按组内相对位置判定。
+        """
+        g = peer_percentile.group_of(fund_type)
+        if not g:
+            return None, None
+        thr = peer_percentile.threshold(self._peer_dist(), g, "momentum_3m",
+                                        self.MOMENTUM_WARNING_PCT)
+        return thr, g
 
     # =================================================================
     # 主接口
@@ -284,18 +342,37 @@ class FundScreener:
             return "warn", f"⚠️ {max_dd:.0f}%(偏高)", None, round(max_dd, 1)
         return "pass", f"✅ {max_dd:.0f}%", None, round(max_dd, 1)
 
-    def _check_momentum(self, vals) -> tuple:
-        """追涨风险检查 → (level, check_text, warning, mom_3m)"""
+    def _check_momentum(self, vals, fund_type: str = None) -> tuple:
+        """追涨风险检查 → (level, check_text, warning, mom_3m)
+
+        **阈值 = 组内 P90**（A1 原则：追涨是相对概念，不能跨组用同一常数）。
+
+        为什么必须改：上一批次实测常数 `40` 在各组位于 P99~P100（通过率 99.3%~100%），
+        而各组 P90 是 A 3.93 / B 2.85 / C 9.42 / D 4.29 / E 0.87 / F 0.52 —— 相差 18 倍。
+
+        ⚠️ 取不到参照系时**不退回常数 40**（那等于恢复一条已证失效的检查，
+        违反"数据缺失必须声明"）。改为如实声明"跳过"，由上层展示。
+        """
         if len(vals) < 63:
             return "unknown", "⚠️ 数据不足", None, None
         mom = float((vals[-1] / vals[-63] - 1) * 100)
-        if mom > self.THRESHOLDS["momentum_warning"]:
-            return "warn", f"🔴 近3月涨{mom:.0f}%(追涨!)", f"近3月涨幅{mom:.0f}%过高，此时买入有追涨风险", round(mom, 1)
+        thr, group = self._momentum_threshold(fund_type)
+        if thr is None:
+            # 显式声明缺什么，不静默放行、也不用假值顶替
+            why = ("类型未映射到参照系组" if group is None
+                   else "参照系未构建（缺 data/peer_distributions.json）")
+            return "unknown", f"⊘ {why}，跳过追涨检查", None, round(mom, 1)
+        if mom > thr:
+            return ("warn",
+                    f"🔴 近3月涨{mom:.1f}%（超同类P{self.MOMENTUM_WARNING_PCT}线 {thr:.1f}%）",
+                    f"近3月涨幅{mom:.1f}% 高于同组（{group}）的 P{self.MOMENTUM_WARNING_PCT} "
+                    f"参考线 {thr:.1f}%，处于追涨区",
+                    round(mom, 1))
         if mom > 25:
             return "warn", f"⚠️ 近3月涨{mom:.0f}%", None, round(mom, 1)
         if mom < -20:
             return "warn", f"💡 近3月跌{abs(mom):.0f}%(可能超跌)", None, round(mom, 1)
-        return "pass", f"✅ 近3月{mom:+.0f}%", None, round(mom, 1)
+        return "pass", f"✅ 近3月{mom:+.1f}%(P{self.MOMENTUM_WARNING_PCT}线 {thr:.1f}%)", None, round(mom, 1)
 
     def _check_sharpe(self, vals) -> tuple:
         """风险调整收益检查 → (level, check_text, warning, sharpe, ann_vol)"""
@@ -403,7 +480,9 @@ class FundScreener:
             metrics["max_drawdown_1y"] = max_dd
 
         # ---- 检查5: 动量(追涨风险) ----
-        levels["追涨风险"], checks["追涨风险"], w, mom = self._check_momentum(vals)
+        # 需要 fund_type 才能定位"同组"（阈值 = 该组 P90），故把类型传进去。
+        levels["追涨风险"], checks["追涨风险"], w, mom = self._check_momentum(
+            vals, fund_info.get("fund_type"))
         if w:
             warnings.append(w)
         if mom is not None:

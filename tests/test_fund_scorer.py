@@ -70,12 +70,14 @@ def make_db_with_nav(
 class TestRiskLabeling(unittest.TestCase):
     """风险标签判定（核心逻辑，临时库合成数据）"""
 
-    def _screen(self, db, fee=None, size=None):
+    def _screen(self, db, fee=None, size=None, fund_type="混合型-偏股"):
+        """注意 fund_type 用**可映射到参照系组的真实类型**（批次 A 起动量阈值
+        取自组内 P90，类型未映射时检查会正确地声明「类型未映射」而不是给结论）。"""
         screener = FundScreener(db)
         info = {
             "fund_code": CODE,
             "fund_name": "测试基金",
-            "fund_type": "混合型",
+            "fund_type": fund_type,
             "establish_date": "2020-01-01",
             "fund_size": size if size is not None else 10.0,
             "mgt_fee": fee if fee is not None else 0.6,
@@ -84,10 +86,25 @@ class TestRiskLabeling(unittest.TestCase):
         return screener._screen_single_fund(CODE, info)
 
     def test_healthy_fund_is_green(self):
-        """平稳上涨 + 低费率 + 规模适中 → 🟢 稳健"""
+        """平稳上涨 + 低费率 + 规模适中 → 🟢 稳健
+
+        注意（批次 A）：追涨阈值改为**组内 P90** 后，"平稳上涨"的合成基金
+        （3 月约 +6.3%）会超过 A 组实测 P90(3.93%) 而被判追涨 —— 这是新语义的
+        正确行为。本测试只针对费率/规模，故把参照系换成"P90 很高"的桩，
+        隔离动量维度，避免把两件事混在一个断言里。
+        """
+        import sys as _s
+        _s.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        from unittest.mock import patch
+        from src.analysis import peer_percentile as pp
+        neutral = {"version": pp.CACHE_VERSION,
+                   "groups": {"A 偏股混合": {"n": 500, "quality_level": "full",
+                                             "grid": {"momentum_3m": {"p50": 0.0, "p75": 5.0,
+                                                                      "p90": 99.0}}}}}
         db, path = make_db_with_nav()
         try:
-            r = self._screen(db)
+            with patch.object(FundScreener, "_peer_dist", lambda self: neutral):
+                r = self._screen(db)
             self.assertIsNotNone(r)
             self.assertEqual(r["risk_label"], "🟢 稳健")
         finally:
@@ -118,10 +135,21 @@ class TestRiskLabeling(unittest.TestCase):
             os.unlink(path)
 
     def test_momentum_surge_warns(self):
-        """最后63天暴涨约50% → 追涨警告 → 🟡 注意"""
+        """最后63天暴涨约50% → 超同组 P90 参考线 → 追涨警告 → 🟡 注意
+
+        批次 A 起"追涨"阈值 = **组内 P90**（A1：相对概念）。因此本测试必须
+        给定参照系缓存；否则会（正确地）声明"参照系未构建"而非给结论。
+        """
+        from unittest.mock import patch
+        from src.analysis import peer_percentile as pp
+        fake = {"version": pp.CACHE_VERSION,
+                "groups": {"A 偏股混合": {"n": 500, "quality_level": "full",
+                                          "grid": {"momentum_3m": {"p50": -10.0, "p75": -1.8,
+                                                                   "p90": 3.93}}}}}
         db, path = make_db_with_nav(daily_ret=0.0001, surge_from=187)
         try:
-            r = self._screen(db)
+            with patch.object(FundScreener, "_peer_dist", lambda self: fake):
+                r = self._screen(db)
             self.assertIsNotNone(r)
             self.assertEqual(r["risk_label"], "🟡 注意")
             self.assertTrue(any("追涨" in w for w in r["risk_reasons"]))

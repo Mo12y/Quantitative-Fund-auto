@@ -35,6 +35,8 @@ data/*_results/
 
 # --- 运行时缓存 ---
 data/sectors_cache.json
+# 同类百分位参照系分位表（由 scripts 级脚本重算，85s 可重现；不进版本管理）
+data/peer_distributions.json
 
 # --- 真实持仓截图（市值/盈亏/定投明细，直观程度高于 investment_plan.py）---
 docs/screenshots/
