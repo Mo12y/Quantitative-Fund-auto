@@ -113,7 +113,7 @@ class TestBoardApiBackwardCompat:
     def test_board_keeps_old_fields_and_adds_new(self, client, monkeypatch):
         c, dbp = client
         monkeypatch.setattr(pp, "load_cache", lambda path=None: _cache())
-        r = c.get("/api/funds/board?size=5&limit=50")
+        r = c.get("/api/funds/board?size=5&limit=50&fresh=1")
         assert r.status_code == 200
         body = r.get_json()
         assert body["ok"] is True
@@ -128,10 +128,82 @@ class TestBoardApiBackwardCompat:
     def test_funds_api_keeps_old_fields_and_adds_new(self, client, monkeypatch):
         c, dbp = client
         monkeypatch.setattr(pp, "load_cache", lambda path=None: _cache())
-        r = c.get("/api/funds")
+        r = c.get("/api/funds?fresh=1")
         assert r.status_code == 200
         d = r.get_json()["data"]
         assert set(("funds", "summary")).issubset(d.keys())
         for f in d["funds"]:
             for k in PEER_KEYS:
                 assert k in f
+
+
+class TestColdStartWarming:
+    """冷启动**不得阻塞**（2026-09-22：全市场快照后筛选池冷算 ~110s）。
+
+    旧行为会让 /api/all、/api/funds、/api/funds/board 同步算 110 秒 → 前端 180s 超时。
+    新契约：无可用缓存时立刻返回 status=warming + retry_in，由后台预热、前端轮询。
+    """
+
+    def test_funds_returns_warming_immediately(self, client, monkeypatch):
+        import time as _t
+        c, dbp = client
+        monkeypatch.setattr(pp, "load_cache", lambda path=None: _cache())
+        monkeypatch.setattr(webapp, "_start_funds_warm", lambda *a, **k: None)   # 隔离后台线程，专注契约
+        t0 = _t.time()
+        b = c.get("/api/funds").get_json()
+        assert _t.time() - t0 < 2.0, "冷启动必须立刻返回，不能同步算 110 秒"
+        assert b["status"] == "warming" and b["data"] is None
+        assert b["retry_in"] > 0
+
+    def test_board_returns_warming_immediately(self, client, monkeypatch):
+        import time as _t
+        c, dbp = client
+        monkeypatch.setattr(webapp, "_start_funds_warm", lambda *a, **k: None)
+        t0 = _t.time()
+        b = c.get("/api/funds/board?size=5&limit=50").get_json()
+        assert _t.time() - t0 < 2.0
+        assert b["status"] == "warming" and b["data"] is None
+
+    def test_fresh_1_bypasses_warming(self, client, monkeypatch):
+        """fresh=1 是"我要现在就算"的显式意图，不受 warming 短路影响。"""
+        c, dbp = client
+        monkeypatch.setattr(pp, "load_cache", lambda path=None: _cache())
+        monkeypatch.setattr(webapp, "_start_funds_warm", lambda *a, **k: None)
+        d = c.get("/api/funds?fresh=1").get_json()["data"]
+        assert d is not None and "funds" in d
+
+
+class TestColdStartWarming:
+    """冷启动**不得阻塞**（2026-09-22：全市场快照后筛选池冷算 ~110s）。
+
+    旧行为会让 /api/all、/api/funds、/api/funds/board 同步算 110 秒 → 前端 180s 超时。
+    新契约：无可用缓存时立刻返回 status=warming + retry_in，由后台预热、前端轮询。
+    """
+
+    def test_funds_returns_warming_immediately(self, client, monkeypatch):
+        import time as _t
+        c, dbp = client
+        monkeypatch.setattr(pp, "load_cache", lambda path=None: _cache())
+        monkeypatch.setattr(webapp, "_start_funds_warm", lambda *a, **k: None)   # 隔离后台线程，专注契约
+        t0 = _t.time()
+        b = c.get("/api/funds").get_json()
+        assert _t.time() - t0 < 2.0, "冷启动必须立刻返回，不能同步算 110 秒"
+        assert b["status"] == "warming" and b["data"] is None
+        assert b["retry_in"] > 0
+
+    def test_board_returns_warming_immediately(self, client, monkeypatch):
+        import time as _t
+        c, dbp = client
+        monkeypatch.setattr(webapp, "_start_funds_warm", lambda *a, **k: None)
+        t0 = _t.time()
+        b = c.get("/api/funds/board?size=5&limit=50").get_json()
+        assert _t.time() - t0 < 2.0
+        assert b["status"] == "warming" and b["data"] is None
+
+    def test_fresh_1_bypasses_warming(self, client, monkeypatch):
+        """fresh=1 是"我要现在就算"的显式意图，不受 warming 短路影响。"""
+        c, dbp = client
+        monkeypatch.setattr(pp, "load_cache", lambda path=None: _cache())
+        monkeypatch.setattr(webapp, "_start_funds_warm", lambda *a, **k: None)
+        d = c.get("/api/funds?fresh=1").get_json()["data"]
+        assert d is not None and "funds" in d

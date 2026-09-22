@@ -287,12 +287,24 @@ async function refresh(){
   await loadAll(false);                 // 常规刷新：命中缓存，保持当前视图
   document.getElementById('updateTime').textContent='更新于 '+new Date().toLocaleTimeString('zh-CN');
 }
-async function loadAll(fresh){
+async function loadAll(fresh,_attempt){
   const app=document.getElementById('app');
+  const attempt=_attempt||0;
   if(!ready)app.innerHTML='<div class="loading"><span class="spinner"></span>正在加载数据...</div>';
   try{
     const r=await fetch('/api/all'+(fresh?'?fresh=1':''));
     const j=await r.json();
+    // 冷启动不阻塞（2026-09-22）：全市场快照后筛选池冷算 ~110s，服务端返回 warming，
+    // 由前端按 retry_in 轮询 —— 与 /api/sectors 同一套模式，绝不挂 180 秒等超时。
+    if(j.status==='warming'){
+      const wait=Math.max(5,Math.min(j.retry_in||15,30));
+      app.innerHTML='<div class="card"><h2>正在准备数据</h2><div class="empty">'
+        +'首次启动需要计算筛选池（全市场约 1–2 分钟，之后走缓存）。'
+        +'<span class="spinner"></span> 第 '+(attempt+1)+' 次等待，'+wait+' 秒后自动重试</div></div>';
+      if(attempt<14){ await sleep(wait*1000); return loadAll(fresh,attempt+1); }
+      app.innerHTML='<div class="card"><h2>计算时间偏长</h2><div class="empty">后台仍在计算，可稍后手动刷新。'+retryBtn('boot()')+'</div></div>';
+      return;
+    }
     if(!j.ok){app.innerHTML='<div class="card"><h2>加载失败</h2><div class="empty" style="color:var(--down)">'+esc(j.error||j.data?.error||'未知错误')+retryBtn('boot()')+'</div></div>';return;}
     STATE.all=j.data; ready=true;
     renderApp();
@@ -836,13 +848,22 @@ async function loadRec(el){
   }
 }
 // 第 8 项：按板块总榜（每板块前 20，不折叠截断）
-async function showPool(mode){
+async function showPool(mode,_attempt){
   const el=document.getElementById('pool-card');
   if(!el)return;
+  const attempt=_attempt||0;
   if(mode==='type'){ el.innerHTML=poolHTML((STATE.all&&STATE.all.funds)||{}); return; }
   el.innerHTML='<h2>基金质量筛选池 <span class="sub">— 按行业板块总榜</span></h2><div class="loading"><span class="spinner"></span>正在按板块聚合（首次较慢，之后走缓存）...</div>';
   try{
     const r=await fetch('/api/funds/board?size=20&limit=200'); const j=await r.json();
+    if(j.status==='warming'){                      // 冷启动不阻塞（同 /api/sectors 模式）
+      const wait=Math.max(5,Math.min(j.retry_in||15,30));
+      el.innerHTML='<h2>基金质量筛选池 <span class="sub">— 按行业板块总榜</span></h2>'
+        +'<div class="loading"><span class="spinner"></span>后台正在计算筛选池（约 1–2 分钟）· 第 '+(attempt+1)+' 次等待，'+wait+' 秒后重试</div>';
+      if(attempt<10){ await sleep(wait*1000); return showPool(mode,attempt+1); }
+      el.innerHTML='<h2>基金质量筛选池</h2><div class="empty">后台仍在计算，可稍后重试'+retryBtn("showPool('board')")+'</div>';
+      return;
+    }
     if(!j.ok)throw new Error(j.error||'fail');
     STATE.boardPool=j.data;
     el.innerHTML=boardPoolHTML(j.data);
@@ -1086,11 +1107,15 @@ async function boot(){
   // 阶段1：轻量总览（约2~3s）先渲染，尽快给用户内容
   await loadOverviewFast(fresh);
   // 阶段2：后台补齐完整数据（筛选池/调仓等），就绪后切到完整布局并保持当前视图
-  try{
-    const r=await fetch('/api/all'+(fresh?'?fresh=1':''));
-    const j=await r.json();
-    if(j.ok){ STATE.all=j.data; ready=true; renderApp(); }
-  }catch(e){ /* 总览仍可用 */ }
+    try{
+      const r=await fetch('/api/all'+(fresh?'?fresh=1':''));
+      const j=await r.json();
+      if(j.status==='warming'){
+        // 冷启动（筛选池 ~110s）：阶段1 的总览已经能用，这里延后自动补齐完整数据
+        const wait=Math.max(5,Math.min(j.retry_in||15,30));
+        setTimeout(()=>{ loadAll(false).catch(()=>{}); }, wait*1000);
+      } else if(j.ok){ STATE.all=j.data; ready=true; renderApp(); }
+    }catch(e){ /* 总览仍可用 */ }
   // 幂等对账：结算到期的待确认买卖（写路径从 GET 剥离后，这是页面级的显式触发点）。
   // 只有真的结算了东西才局部刷新，绝不打断用户当前所在的视图。
   try{

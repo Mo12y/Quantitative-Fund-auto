@@ -55,6 +55,10 @@ _sectors_lock = threading.Lock()
 _sectors_computing = False        # single-flight：预计算与请求兜底只跑一次联网抓取
 _sectors_done = threading.Event()
 SECTORS_WARM_RETRY = 8.0          # 板块后台计算中，告诉前端多久后回来轮询
+# 筛选池/总览的冷算成本（2026-09-22 实测）：全市场快照后 fund_nav 2,290 万行、候选 18,617 只，
+# `screen_funds` 冷算 ≈110 秒。**绝不能同步阻塞请求**（旧行为会让 /api/all、/api/funds/board
+# 在冷启动时 180 秒超时）——改为后台预热 + warming + 前端轮询，与 /api/sectors 同一套模式。
+FUNDS_WARM_RETRY = 15.0
 
 # 聚合仪表盘缓存 —— 首个请求全量计算，之后 TTL 内刷新秒回
 _dash_cache = None
@@ -318,8 +322,68 @@ def _peer_block(cache: dict, code: str, fund_type: str, metrics: dict, span_info
     return block
 
 
+def _slot_ready(key: str) -> bool:
+    """该 key 是否有**可立即返回**的缓存：内存 TTL 命中，或 SQLite 快照存在。
+
+    用于"冷启动不阻塞"判断：没有可用缓存时，端点返回 `status=warming`，
+    由后台线程去算，前端按 retry_in 轮询 —— 而不是让请求挂 110 秒。
+    """
+    with _slot_lock:
+        c = _slot_store.get(key)
+        if c and time.monotonic() - c["at"] < SLOT_TTL:
+            return True
+    return _snap_read(key) is not None
+
+
+_warm_lock = threading.Lock()
+_warm_running = False
+_warm_pending = set()          # 待预热的 board key（必须与前端请求的 size/limit 一致）
+
+
+def _start_funds_warm(board_key: str = None):
+    """后台预热「筛选池 / 板块总榜 / 总览快照」。已在跑则只登记新 key，不重复起线程。
+
+    ⚠️ **board_key 必须由调用方按前端实际的 size/limit 传进来** —— 缓存 key 是
+    `funds_board_{size}_{limit}`，预热错 key 会让前端永远拿到 warming（踩过）。
+    """
+    global _warm_running
+    with _warm_lock:
+        if board_key:
+            _warm_pending.add(board_key)
+        if _warm_running:
+            return                        # 已有线程在跑 → 新 key 交给它排空
+        _warm_running = True
+
+    def _bg():
+        global _warm_running
+        try:
+            _precompute_snapshots()       # overview / funds / rebalance / __dash__
+            while True:
+                # ⚠️ 在锁内一次性取出待办并判断是否退出：否则"线程启动后才登记的 key"
+                #    会被漏掉（前端永远拿 warming）。退出与置位必须原子。
+                with _warm_lock:
+                    jobs = set(_warm_pending)
+                    _warm_pending.clear()
+                    if not jobs:
+                        _warm_running = False
+                        return
+                for k in jobs:
+                    parts = k.split("_")  # funds_board_{size}_{limit}
+                    try:
+                        s, l = int(parts[2]), int(parts[3])
+                    except Exception:
+                        continue
+                    _cached_get(k, (lambda s=s, l=l: lambda: _compute_board_pool(s, l))(),
+                                ttl=600.0)
+        except Exception:
+            with _warm_lock:
+                _warm_running = False
+
+    threading.Thread(target=_bg, daemon=True).start()
+
+
 def _all_funds():
-    """质量筛选池（本地，较慢）"""
+    """质量筛选池（本地，较慢；冷算 ~110s → 见 FUNDS_WARM_RETRY 说明）"""
     try:
         db = get_db()
         s = FundScreener(db)
@@ -470,8 +534,14 @@ def _all_rebalance():
 
 
 def _compute_dashboard():
-    """并行计算本地慢分析 + 快速投资计划。不含任何联网调用。"""
-    workers = {"temp": _all_temp, "funds": _all_funds,
+    """并行计算本地慢分析 + 快速投资计划。不含任何联网调用。
+
+    ⚠️ `funds` 走 `_cached_get` **复用筛选池缓存**（2026-09-22）：原先直接调
+    `_all_funds()`，而筛选池冷算在全市场后要 ~110 秒 —— 导致 `__dash__` 与 `funds`
+    各算一遍，总预热时间翻倍（实测 ~210s）。复用后只算一次。
+    """
+    workers = {"temp": _all_temp,
+               "funds": lambda: _cached_get("funds", _all_funds)[0],
                "portfolio": _all_portfolio, "rebalance": _all_rebalance}
     out = {"plan": _all_plan()}
     with ThreadPoolExecutor(max_workers=4) as ex:
@@ -500,6 +570,12 @@ def api_all():
             with _dash_lock:
                 _dash_cache = {"at": time.monotonic(), "data": snap}
             return jsonify({"ok": True, "data": snap, "source": "snapshot"})
+
+        # 1.6) 冷启动（无缓存也无快照）→ **不阻塞**，返回 warming 并后台预热。
+        # 全市场快照后 __dash__ 冷算含筛选池（~110s），同步算会让请求 180s 超时。
+        _start_funds_warm()
+        return jsonify({"ok": True, "data": None, "status": "warming",
+                        "retry_in": FUNDS_WARM_RETRY, "source": "warming"})
 
     # 2) single-flight：并发 cache miss 时只有第一个真算，其余等它算完复用
     with _dash_lock:
@@ -612,8 +688,17 @@ def api_overview():
 
 @app.route("/api/funds")
 def api_funds():
-    """基金筛选池 —— 重计算(~6s)，仅在用户打开筛选面板时触发并缓存。"""
-    data, source = _cached_get("funds", _all_funds, fresh=request.args.get("fresh") == "1")
+    """基金筛选池 —— 重计算（全市场后冷算 ~110s）。
+
+    冷启动**不阻塞**：无可立即返回的缓存时返回 `status=warming` + retry_in，
+    后台线程预热，前端轮询（与 /api/sectors 同一套模式）。
+    """
+    fresh = request.args.get("fresh") == "1"
+    if not fresh and not _slot_ready("funds"):
+        _start_funds_warm()
+        return jsonify({"ok": True, "data": None, "status": "warming",
+                        "retry_in": FUNDS_WARM_RETRY, "source": "warming"})
+    data, source = _cached_get("funds", _all_funds, fresh=fresh)
     return jsonify({"ok": True, "data": data, "source": source})
 
 
@@ -1262,7 +1347,13 @@ def api_funds_board():
     size = max(1, min(100, int(request.args.get("size", 20))))
     limit = max(50, min(600, int(request.args.get("limit", 300))))
     key = f"funds_board_{size}_{limit}"
-    data, source = _cached_get(key, lambda: _compute_board_pool(size, limit), ttl=600.0)
+    fresh = request.args.get("fresh") == "1"
+    if not fresh and not _slot_ready(key):             # 冷启动不阻塞（同上）
+        _start_funds_warm(board_key=key)               # ← 预热**同一把 key**，否则永远 warming
+        return jsonify({"ok": True, "data": None, "status": "warming",
+                        "retry_in": FUNDS_WARM_RETRY, "source": "warming"})
+    data, source = _cached_get(key, lambda: _compute_board_pool(size, limit),
+                               ttl=600.0, fresh=fresh)
     return jsonify({"ok": True, "data": data, "source": source})
 
 

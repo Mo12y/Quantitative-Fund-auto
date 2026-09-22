@@ -209,7 +209,7 @@ def test_nav_update_writes_and_invalidates_funds_snapshot(client, monkeypatch):
     from src.data.collector import DataCollector
 
     c, dbp = client
-    c.get("/api/funds")                                    # 让 funds 快照落库
+    c.get("/api/funds?fresh=1")     # fresh=1：绕过冷启动 warming，真正计算并落快照
     assert _q(dbp, "SELECT COUNT(*) c FROM analysis_snapshot WHERE key='funds'")[0]["c"] == 1
 
     def fake_collect(self, code):                          # 不联网
