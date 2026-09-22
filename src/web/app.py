@@ -276,7 +276,7 @@ def _peer_block(cache: dict, code: str, fund_type: str, metrics: dict, span_info
     span = (span_info or {}).get("span_years")
     nav_asof = (span_info or {}).get("nav_asof")
     block = {"group": None, "group_n": None, "percentiles": None, "nav_asof": nav_asof,
-             "insufficient_data": True, "reason": None}
+             "insufficient_data": True, "reason": None, "percentiles_scale": None}
 
     group = peer_percentile.group_of(fund_type)
     block["group"] = group
@@ -301,12 +301,18 @@ def _peer_block(cache: dict, code: str, fund_type: str, metrics: dict, span_info
         if d.get("insufficient_data"):
             missing.append(metric)
         elif d.get("percentile") is not None:
-            pcts[metric] = d["percentile"]
+            p = d["percentile"]
+            # 按方向翻转到"**越大越好**"的统一口径（与参照系的 DIRECTION 一致）：
+            #   回撤/波动越小越好 → 100-p；动量 direction=None（中性）→ 保持原始**位置**
+            dirn = peer_percentile.DIRECTION.get(metric)
+            pcts[metric] = round(100.0 - p, 1) if dirn is False else p
     if not pcts:
         block["reason"] = "该基金无可用指标（缺失：%s）" % ("、".join(missing) or "全部")
         return block
     block["percentiles"] = pcts
     block["insufficient_data"] = False
+    # 前端口径提示：momentum 是"位置"不是"优劣"（C2），必须显式说清
+    block["percentiles_scale"] = "0-100，越大越好；momentum_3m 例外=同类位置（越大=涨得越多，不代表更好）"
     if missing:
         block["reason"] = "部分指标缺失，未纳入分位：%s" % "、".join(missing)
     return block
@@ -341,6 +347,7 @@ def _all_funds():
                 "group": _peer["group"], "group_n": _peer["group_n"],
                 "percentiles": _peer["percentiles"], "nav_asof": _peer["nav_asof"],
                 "insufficient_data": _peer["insufficient_data"], "reason": _peer["reason"],
+                "percentiles_scale": _peer["percentiles_scale"],
                 "momentum_3m": m.get("momentum_3m"),
                 "max_dd_1y": m.get("max_drawdown_1y"),
                 "sharpe": m.get("sharpe"),
@@ -1288,6 +1295,7 @@ def _compute_board_pool(size: int, limit: int) -> dict:
                 "group": _peer["group"], "group_n": _peer["group_n"],
                 "percentiles": _peer["percentiles"], "nav_asof": _peer["nav_asof"],
                 "insufficient_data": _peer["insufficient_data"], "reason": _peer["reason"],
+                "percentiles_scale": _peer["percentiles_scale"],
                 "nav_trend": _get_nav_trend(db, row["fund_code"]),
             })
         db.close()

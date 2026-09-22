@@ -737,6 +737,13 @@ function poolHTML(F){
     (summary.limited_n?` · <span style="color:var(--warn)">限大额 ${summary.limited_n}</span>`:'')+
     (summary.status_unknown_n?` · <span class="qtag">申购状态未知 ${summary.status_unknown_n}</span>`:'')+
     `</div>`;
+  // 口径说明（C1/C2 的可读性前提）：不解释清楚，"同类 P" 会被当成预测能力
+  h+=`<div class="qtag" style="margin:6px 0 12px;line-height:1.7">口径：「同类 P__」= 该基金在<b>同组存续基金</b>中的百分位（0–100，越大越好，已按方向归一：回撤/波动越小=分越高）。`+
+     `动量单独以「位置」展示 —— <b>越大只表示近 3 月涨得越多，不代表更好</b>。存续不足 3 年（样本不足）时不给百分位，只说明原因。</div>`;
+  // C4：把此前从未被前端调用的 /api/recommend 接进来（可折叠 + 强口径声明），
+  //     不让它继续当"死接口"，但也不把它渲染成"推荐榜"误导用户。
+  h+=`<details class="recbox" ontoggle="loadRec(this)"><summary>历史回测验证（样本内 · 仅供参考，不是推荐）</summary>`+
+     `<div class="recmain"><span class="qtag">展开后加载…</span></div></details>`;
   const groups={};
   for(const f of funds){const ft=f.type||'其他';(groups[ft]=groups[ft]||[]).push(f);}
   for(const g of Object.values(groups))g.sort((a,b)=>(b.risk||'').includes('稳健')-(a.risk||'').includes('稳健'));
@@ -750,10 +757,34 @@ function poolHTML(F){
   }
   return h;
 }
+// 批次 C：同侪参照系展示
+//   C1 三要素：同类 P__ · 组别 · N 只对照 · 截至 日期
+//   C2 动量只作「位置」，**不用涨跌语义色**（否则被误读成"更好"）
+//   C3 F 组降级措辞（与第三方同类 ρ 仅 0.52，A/B/C/D 为 0.94~0.99）
+function peerLine(f){
+  const g=f.group, n=f.group_n, asof=f.nav_asof;
+  if(f.insufficient_data||!f.percentiles){
+    return `<span class="qtag" title="不显示百分位的原因：${esc(f.reason||'样本不足')}">同类 P— · ${esc(f.reason||'数据不足')}</span>`;
+  }
+  const P=f.percentiles||{};
+  const comp=(P.sharpe!=null&&P.max_drawdown_1y!=null)?Math.round(0.6*P.sharpe+0.4*P.max_drawdown_1y):null;
+  const nm=(g==='F QDII/其他')
+    ?` <span class="qtag" style="color:var(--warn)" title="F 组是 QDII/FOF/货币/商品/REITs 的大杂烩，与厂商同类口径的 ρ 仅 0.52（A/B/C/D 为 0.94~0.99）→ 可比性弱于其他组">同类为大类口径</span>`:'';
+  return `<span class="qtag">同类 P<b>${comp!=null?comp:'—'}</b> · ${esc(g||'—')}${n?(' · '+Number(n).toLocaleString()+' 只对照'):''}${asof?(' · 截至 '+esc(asof)):''}</span>${nm}`;
+}
+function posChip(f){
+  const P=(f.percentiles||{}).momentum_3m;
+  if(P==null)return `<span class="poschip" title="无参照系数据，不显示位置">位置 —</span>`;
+  const w=Math.max(3,Math.min(100,P));
+  return `<span class="poschip" title="同类位置 P${Math.round(P)}：仅表示近3月涨跌幅在同类中的位置，越大=涨得越多，**不代表更好**（追涨警示另见风险标签）"><span class="posbar"><i style="width:${w}%"></i></span>位置 P${Math.round(P)}</span>`;
+}
+function qChips(f){
+  const P=f.percentiles||{};
+  const one=(k,lb)=>(P[k]==null)?'':`<span class="qchip">${lb} P${Math.round(P[k])}</span>`;
+  return one('sharpe','夏普')+one('max_drawdown_1y','回撤')+one('annual_return','年化');
+}
 function poolRow(f){
   const navs=f.nav_trend||[]; const mom=f.momentum_3m||0; const dd=f.max_dd_1y||0;
-  const momC=mom>25?'var(--red)':(mom>10?'var(--yellow)':'var(--muted)');
-  const ddC=dd>30?'var(--red)':(dd>20?'var(--yellow)':'var(--muted)');
   const trendC=mom>=0?'var(--green)':'var(--red)';
   const name=f.name||f.code;
   // 综合评分（类型桶内归一化，同风险等级内的排序依据；缺失显示 --）
@@ -762,12 +793,47 @@ function poolRow(f){
   // 申购状态是独立一轴：限大额不影响质量等级，单独挂标签（不静默、也不误导）
   const ps=f.purchase_status||'';
   const psTag=ps?`<span class="pill" style="background:var(--surface-2);color:var(--warn)" title="${esc(f.purchasable||ps)}">${esc(ps)}</span>`:'';
-  return `<div class="fund-row" style="grid-template-columns:74px 1fr auto">
+  return `<div class="fund-row">
     <span><span class="fund-code">${esc(f.code)}</span>${riskBadge(f.risk)}</span>
     <span class="fund-name" title="${esc(name)}">${esc(name.length>26?name.slice(0,26)+'…':name)}${psTag}</span>
     <span class="fund-meta"><span class="sparkline">${sparkSVG(navs,trendC)}</span>${scoreTag}
-      <span style="color:${momC};min-width:52px;text-align:right;font-weight:600">${mom>=0?'+':''}${fmt(mom,1)}%</span>
-      <span class="qtag">回撤 ${fmt(dd,0)}%</span></span></div>`;
+      <span style="color:var(--ink-muted);min-width:62px;text-align:right">近3月 ${mom>=0?'+':''}${fmt(mom,1)}%</span>
+      <span class="qtag">回撤 ${fmt(dd,0)}%</span></span>
+    <span></span>
+    <span class="peer-line">${peerLine(f)}</span>
+    <span class="fund-meta">${posChip(f)}${qChips(f)}</span></div>`;
+}
+// C4：/api/recommend 的懒加载渲染（可折叠；口径声明必须与内容同屏）
+let REC_LOADED=false;
+async function loadRec(el){
+  if(!el||!el.open||REC_LOADED)return;
+  const box=el.querySelector('.recmain'); if(!box)return;
+  box.innerHTML='<div class="loading"><span class="spinner"></span>正在跑历史回测（首次约 15-20 秒）...</div>';
+  try{
+    const r=await fetch('/api/recommend'); const j=await r.json();
+    if(!j.ok)throw new Error(j.error||'fail');
+    REC_LOADED=true;
+    const d=j.data||{}; const picks=d.current_picks||[];
+    let h=`<div class="qtag" style="color:var(--warn);line-height:1.7;margin:6px 0 8px">`+
+      `口径：这是<b>样本内</b>结果 —— 用已实现的前向收益反筛"赢家"存在同义反复，`+
+      `<b>不构成选基能力证据</b>；本项目 L1 基线（见 docs/recsys_ml_report.md）也未跑赢手工权重。`+
+      `主推荐请回到上方温度驱动的实时筛选池。</div>`;
+    h+=`<div class="stat-line">本期候选 ${picks.length} 只</div>`;
+    for(const p of picks){
+      const P=p.percentiles||{};
+      const ok=!p.insufficient_data&&p.sharpe!==undefined;
+      const comp=(P.sharpe!=null&&P.max_drawdown_1y!=null)?Math.round(0.6*P.sharpe+0.4*P.max_drawdown_1y):null;
+      const tag=ok?`<span class="qtag">同类 P${comp} · ${esc(p.group||'—')}${p.group_n?(' · '+Number(p.group_n).toLocaleString()+' 只对照'):''}${p.nav_asof?(' · 截至 '+esc(p.nav_asof)):''}</span>`
+                   :`<span class="qtag">同类 P— · ${esc(p.reason||'数据不足')}</span>`;
+      h+=`<div class="fund-row" style="grid-template-columns:74px 1fr auto">
+        <span class="fund-code">${esc(p.code||'')}</span>
+        <span class="fund-name">${esc(p.name||p.code||'')}</span>
+        <span class="fund-meta">${tag}</span></div>`;
+    }
+    box.innerHTML=h||'<div class="empty">无可展示的历史验证结果</div>';
+  }catch(e){
+    box.innerHTML='<div class="empty">历史回测加载失败 · '+esc(e.message||'')+'</div>';
+  }
 }
 // 第 8 项：按板块总榜（每板块前 20，不折叠截断）
 async function showPool(mode){
