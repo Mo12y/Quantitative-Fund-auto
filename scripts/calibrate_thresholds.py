@@ -96,6 +96,12 @@ LABEL = {"annual_return": "年化收益%", "ann_vol": "年化波动%",
          "max_drawdown_1y": "近1年最大回撤%", "momentum_3m": "近3月动量%", "sharpe": "夏普"}
 
 MIN_N_FULL, MIN_N_MID, MIN_N_IQR = 150, 50, 30
+
+# 参照系入门门槛的「稀疏分支」（批次 B3）——
+# 定开/低频披露基金：点数少但**日历跨度**够，见 iter_navs 的说明。
+# 实测被误排 387 只，典型 000792（跨度 3,374 天 / 591 点）。
+MIN_DAYS_SPARSE = 250
+MIN_SPAN_YEARS = 3.0
 # ⚠️ 三次修订记录（教训：改口径必须重测，且**自己的改动也要被质疑**）
 #   v1  150/100/30 —— 口算，无实测依据
 #   v2  100/50/30  —— 基于 n=191 的 bootstrap，当时判定 150 过保守
@@ -169,11 +175,40 @@ class NavStream:
                 np.asarray([r[1] for r in rows], dtype=float))
 
 
-def iter_navs(conn, min_days):
+def iter_navs(conn, min_days, sparse_ok=True):
     """流式逐只产出 (fund_code, dates_ndarray, vals_ndarray)。内存 O(单只基金)。
 
     依赖 fund_nav 主键索引 (fund_code, nav_date) 有序扫描，不做额外排序。
+
+    ⚠️ **入门门槛（批次 B3 修正）**：原口径只看**点数** ≥ min_days(756)，
+    把「定开 / 低频披露」基金误排 —— 典型 `000792 招商定期宝六个月期理财债券`：
+    **日历跨度 3,374 天（≈9.2 年）却只有 591 个净值点**（每半年才披露一次），
+    于是被当成"历史不足"踢出参照系。实测被误排 **387 只**。
+
+    新口径（sparse_ok=True，默认）：
+        `点数 ≥ min_days`  **或**  （`日历跨度 ≥ MIN_SPAN_YEARS(3年)` **且** `点数 ≥ MIN_DAYS_SPARSE(250)`）
+
+    为什么对定开基金用稀疏净值是**正确的**：持有人本来也只能在**开放日**申赎，
+    两次开放之间的净值波动他赚不到也躲不开；用披露出来的点算区间收益/回撤，
+    与持有人的真实体验一致。这不是"放宽质量"，是**修正被误排的合法样本**。
     """
+    import bisect as _bisect                      # noqa: F401  (保持与本文件风格一致)
+    from datetime import date as _date
+
+    def _accept(dates, vals):
+        n = len(vals)
+        if n >= min_days:
+            return True
+        if not sparse_ok or n < MIN_DAYS_SPARSE:
+            return False
+        try:
+            span = (_date.fromisoformat(str(dates[-1])) - _date.fromisoformat(str(dates[0]))).days / 365.25
+        except Exception:
+            return False
+        return span >= MIN_SPAN_YEARS
+
+    # SQL 预筛放宽到两分支的下界，真正的判定在 Python（要同时看日期跨度）
+    sql_min = min(min_days, MIN_DAYS_SPARSE) if sparse_ok else min_days
     cur = conn.cursor()
     cur.execute(f"""
         SELECT n.fund_code, n.nav_date, {_VALUATION_SQL} AS v
@@ -182,7 +217,7 @@ def iter_navs(conn, min_days):
           ON d.fund_code = n.fund_code
         WHERE {_VALUATION_SQL} > 0
         ORDER BY n.fund_code, n.nav_date
-    """, (min_days,))
+    """, (sql_min,))
 
     code0, dates, vals = None, [], []
     while True:
@@ -191,12 +226,12 @@ def iter_navs(conn, min_days):
             break
         for code, dt, v in batch:
             if code != code0:
-                if code0 is not None and len(vals) >= min_days:
+                if code0 is not None and _accept(dates, vals):
                     yield code0, np.asarray(dates), np.asarray(vals, dtype=float)
                 code0, dates, vals = code, [], []
             dates.append(str(dt))
             vals.append(float(v))
-    if code0 is not None and len(vals) >= min_days:
+    if code0 is not None and _accept(dates, vals):
         yield code0, np.asarray(dates), np.asarray(vals, dtype=float)
 
 

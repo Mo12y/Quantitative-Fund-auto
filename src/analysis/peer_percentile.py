@@ -41,7 +41,8 @@ for _p in (_SCRIPTS, _ROOT):
 
 # ── SSOT 直引（不重写）──────────────────────────────────────────────
 from calibrate_thresholds import (          # noqa: E402
-    DB_PATH, LABEL, METRICS, MIN_N_FULL, TYPE2GROUP, TYPE_GROUPS, grade, load_navs, metrics,
+    DB_PATH, LABEL, METRICS, MIN_DAYS_SPARSE, MIN_N_FULL, MIN_SPAN_YEARS,
+    TYPE2GROUP, TYPE_GROUPS, grade, load_navs, metrics,
 )
 
 CACHE_PATH = os.path.join(_ROOT, "data", "peer_distributions.json")

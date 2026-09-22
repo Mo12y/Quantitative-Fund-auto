@@ -21,6 +21,7 @@ from src.analysis.sector_analyzer import SectorAnalyzer
 from src.analysis.historical_recommender import HistoricalRecommender
 from src.analysis.investment_plan import get_plan, get_progress, ensure_seed
 from src.analysis import fund_boards
+from src.analysis import peer_percentile
 
 app = Flask(__name__)
 
@@ -231,18 +232,103 @@ def _all_temp():
         return {"error": str(e)}
 
 
+def _nav_spans(codes: list) -> dict:
+    """一次查询拿到一批基金的净值**日历跨度（年）**与最后净值日。
+
+    为什么要跨度：B2 要求"存续不足 3 年"的基金**显式声明**不给百分位，
+    而判断依据是日历跨度（不是点数 —— 定开基金点数少但跨度够，见 B3）。
+    """
+    out = {}
+    if not codes:
+        return out
+    try:
+        db = get_db()
+        try:
+            CH = 400
+            from datetime import date as _d
+            for i in range(0, len(codes), CH):
+                chunk = codes[i:i + CH]
+                q = ("SELECT fund_code, MIN(nav_date), MAX(nav_date) FROM fund_nav "
+                     "WHERE fund_code IN (%s) GROUP BY fund_code" % ",".join("?" * len(chunk)))
+                for code, d0, d1 in db.conn.execute(q, chunk):
+                    try:
+                        span = (_d.fromisoformat(str(d1)[:10]) - _d.fromisoformat(str(d0)[:10])).days / 365.25
+                    except Exception:
+                        span = None
+                    out[code] = {"span_years": span, "nav_asof": str(d1)[:10] if d1 else None}
+        finally:
+            db.close()
+    except Exception:
+        pass
+    return out
+
+
+def _peer_block(cache: dict, code: str, fund_type: str, metrics: dict, span_info: dict) -> dict:
+    """B2/B4 的「同侪参照系」块 —— 三个端点共用，保证口径一致。
+
+    返回（**只增不减**，向后兼容）：
+        group / group_n / percentiles / nav_asof / insufficient_data / reason
+
+    纪律（任务书 B2）：样本不足**必须显式声明**，`percentiles` 为 None 且带 reason。
+    宁可显示"数据不足"，也不要显示一个具体数字 —— 本项目已有"五个维度全缺仍显示
+    市场温度 50.0° 适中"的反面教材。
+    """
+    span = (span_info or {}).get("span_years")
+    nav_asof = (span_info or {}).get("nav_asof")
+    block = {"group": None, "group_n": None, "percentiles": None, "nav_asof": nav_asof,
+             "insufficient_data": True, "reason": None}
+
+    group = peer_percentile.group_of(fund_type)
+    block["group"] = group
+    if cache is None:
+        block["reason"] = "参照系未构建（缺 data/peer_distributions.json）"
+        return block
+    if group is None:
+        block["reason"] = "类型未映射到参照系组"
+        return block
+    e = peer_percentile.group_entry(cache, group)
+    block["group_n"] = (e or {}).get("n")
+    # R3：存续不足 3 年 → 参照系根本不收录它，不给百分位
+    if span is not None and span < peer_percentile.MIN_SPAN_YEARS:
+        block["reason"] = "存续不足3年（%.1f 年）" % span
+        return block
+    pcts, missing = {}, []
+    for metric in ("momentum_3m", "max_drawdown_1y", "sharpe", "annual_return", "ann_vol"):
+        v = (metrics or {}).get(metric)
+        if v is None:
+            continue
+        d = peer_percentile.describe(cache, group, metric, v, nav_asof)
+        if d.get("insufficient_data"):
+            missing.append(metric)
+        elif d.get("percentile") is not None:
+            pcts[metric] = d["percentile"]
+    if not pcts:
+        block["reason"] = "该基金无可用指标（缺失：%s）" % ("、".join(missing) or "全部")
+        return block
+    block["percentiles"] = pcts
+    block["insufficient_data"] = False
+    if missing:
+        block["reason"] = "部分指标缺失，未纳入分位：%s" % "、".join(missing)
+    return block
+
+
 def _all_funds():
     """质量筛选池（本地，较慢）"""
     try:
         db = get_db()
         s = FundScreener(db)
         df = s.screen_funds(max_results=40)
+        # 同侪参照系：一次加载缓存 + 一次批量查跨度（B2/B4），三个端点共用
+        _cache = peer_percentile.load_cache()
+        _spans = _nav_spans([str(r["fund_code"]) for _, r in df.iterrows()])
         funds = []
         for _, row in df.iterrows():
             m = row.get("metrics", {})
             fee = row.get("mgt_fee")
             if fee is None or fee != fee:      # NaN（费率缺失）→ null，不得当 0
                 fee = None
+            _code = str(row["fund_code"])
+            _peer = _peer_block(_cache, _code, row.get("fund_type", ""), m, _spans.get(_code))
             funds.append({
                 "code": row["fund_code"],
                 "name": row.get("fund_name", "") or "",
@@ -252,6 +338,9 @@ def _all_funds():
                 "risk": row["risk_label"],
                 "purchase_status": row.get("purchase_status", "") or "",
                 "purchasable": row.get("quality_checks", {}).get("申购状态", ""),
+                "group": _peer["group"], "group_n": _peer["group_n"],
+                "percentiles": _peer["percentiles"], "nav_asof": _peer["nav_asof"],
+                "insufficient_data": _peer["insufficient_data"], "reason": _peer["reason"],
                 "momentum_3m": m.get("momentum_3m"),
                 "max_dd_1y": m.get("max_drawdown_1y"),
                 "sharpe": m.get("sharpe"),
@@ -742,13 +831,37 @@ def api_recommend():
         db = get_db()
         hr = HistoricalRecommender(db)
         result = hr.recommend(lookback_years=1.5)
+
+        picks = result.get("current_picks", [])[:10]
+        # B4：给 picks 补同侪块（group/group_n/percentiles/nav_asof/样本是否充足）。
+        # 这里只有基金代码，指标需现算 —— 只 10 只，成本可接受。
+        # 任何一只算不出来都不影响整体（try 包住，缺失就按 B2 显式声明）。
+        try:
+            s = FundScreener(db)
+            cache = peer_percentile.load_cache()
+            spans = _nav_spans([str(p.get("code")) for p in picks])
+            for p in picks:
+                code = str(p.get("code"))
+                info = db.get_fund_info(code) or {}
+                if not isinstance(info, dict):
+                    info = dict(info)
+                res = s._screen_single_fund(code, info) or {}
+                pb = _peer_block(cache, code, info.get("fund_type", ""),
+                                 res.get("metrics", {}), spans.get(code))
+                p.update({"group": pb["group"], "group_n": pb["group_n"],
+                          "percentiles": pb["percentiles"], "nav_asof": pb["nav_asof"],
+                          "insufficient_data": pb["insufficient_data"], "reason": pb["reason"]})
+        except Exception as _e:
+            for p in picks:
+                p.setdefault("insufficient_data", True)
+                p.setdefault("reason", "同侪参照系计算失败：%s" % str(_e)[:60])
         db.close()
 
         # 精简输出
         return jsonify({"ok": True, "data": {
             "stats": result.get("stats", {}),
             "proven_winners": result.get("proven_winners", [])[:15],
-            "current_picks": result.get("current_picks", [])[:10],
+            "current_picks": picks,
         }, "purpose": "历史回测验证（样本内）——辅助参考，不是主推荐",
            "methodology_note": ("以下为**样本内**历史表现：用已实现的前向收益筛选"
                                 "“赢家”存在同义反复，不构成样本外的选基能力证据。"
@@ -1152,12 +1265,17 @@ def _compute_board_pool(size: int, limit: int) -> dict:
         db = get_db()
         s = FundScreener(db)
         df = s.screen_funds(max_results=limit)
+        # B2/B4：同侪块（与 /api/funds 共用同一实现与缓存，口径必须一致）
+        _cache = peer_percentile.load_cache()
+        _spans = _nav_spans([str(r["fund_code"]) for _, r in df.iterrows()])
         funds = []
         for _, row in df.iterrows():
             m = row.get("metrics", {}) or {}
             fee = row.get("mgt_fee")
             if fee is None or fee != fee:      # NaN（费率缺失）→ null，不得当 0
                 fee = None
+            _code = str(row["fund_code"])
+            _peer = _peer_block(_cache, _code, row.get("fund_type", ""), m, _spans.get(_code))
             funds.append({
                 "code": row["fund_code"], "name": row.get("fund_name", "") or "",
                 "type": row.get("fund_type", ""), "risk": row["risk_label"],
@@ -1167,6 +1285,9 @@ def _compute_board_pool(size: int, limit: int) -> dict:
                 "purchasable": (row.get("quality_checks") or {}).get("申购状态", ""),
                 "momentum_3m": m.get("momentum_3m"), "max_dd_1y": m.get("max_drawdown_1y"),
                 "sharpe": m.get("sharpe"), "ann_vol": m.get("ann_vol"),
+                "group": _peer["group"], "group_n": _peer["group_n"],
+                "percentiles": _peer["percentiles"], "nav_asof": _peer["nav_asof"],
+                "insufficient_data": _peer["insufficient_data"], "reason": _peer["reason"],
                 "nav_trend": _get_nav_trend(db, row["fund_code"]),
             })
         db.close()
