@@ -566,8 +566,13 @@ def cmd_fees():
         q("SELECT COUNT(*) FROM fund_info WHERE sales_service_fee>0")))
     remaining = q("SELECT COUNT(*) FROM fund_info WHERE mgt_fee IS NULL OR mgt_fee = 0")
     db.close()
-    if remaining > 0:
+    # 触发 finalize 的判据：**没有剩余** 或 **本轮零进展**（ok==0 且 empty==0）。
+    # 后者覆盖"永久采不到的残留"（少数基金源头就没有管理费/接口恒失败）——
+    # 否则这 ~19 只会让 finalize 永远不触发（2026-09-22 实测踩过）。
+    if remaining > 0 and (ok > 0 or empty > 0):
         print("   ⚠️ 还有 %d 只待采（本次用了 --limit 或有失败）。再跑 `python src/main.py fees` 续采；"
               "采完会自动走完剩下两步。" % remaining)
         return
-    _finalize_fees()          # 采集**真正完成**（无剩余）→ 自动重建缓存 + 审计 + 回归哨兵
+    if remaining > 0:
+        print("   ℹ️ 还剩 %d 只**源头拿不到管理费**（接口失败/该基金无此披露），不再阻塞收尾。" % remaining)
+    _finalize_fees()          # 采集完成 → 自动重建缓存 + 审计 + 回归哨兵
