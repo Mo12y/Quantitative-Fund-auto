@@ -1068,9 +1068,9 @@ def api_holdings_action():
             code = str(q.get("code") or "").strip()
             amount = float(q.get("amount") or 0)
             if not code:
-                return jsonify({"ok": False, "error": "缺少基金代码"})
+                return jsonify({"ok": False, "error": "缺少基金代码"}), 400
             if amount <= 0:
-                return jsonify({"ok": False, "error": "买入金额需大于 0"})
+                return jsonify({"ok": False, "error": "买入金额需大于 0"}), 400
             # 代码存在性校验（黑箱验收审计 F-04）：未收录的代码一律拒绝。
             # 旧实现只判"非空 + 金额>0"，导致打错的代码（如 999999）被**静默
             # 写成一笔真持仓**并计入总资产，界面还不给任何提示。
@@ -1078,7 +1078,7 @@ def api_holdings_action():
             if not db.get_fund_info(code):
                 return jsonify({"ok": False,
                                 "error": f"库内没有基金代码 {code} —— 请核对代码；"
-                                         f"若是新基金，先运行 python src/main.py collect 收录后再录入"})
+                                         f"若是新基金，先运行 python src/main.py collect 收录后再录入"}), 400
             date_ = (str(q.get("date") or "").strip()) or _today()
             name = (str(q.get("name") or "").strip()) or (db.get_fund_name(code) or code)
             notes = (str(q.get("notes") or "").strip()) or ""
@@ -1091,9 +1091,9 @@ def api_holdings_action():
             hid = int(q.get("id") or 0)
             amount = float(q.get("amount") or 0)
             if not hid:
-                return jsonify({"ok": False, "error": "缺少持仓ID"})
+                return jsonify({"ok": False, "error": "缺少持仓ID"}), 400
             if amount <= 0:
-                return jsonify({"ok": False, "error": "卖出金额需大于 0"})
+                return jsonify({"ok": False, "error": "卖出金额需大于 0"}), 400
             date_ = (str(q.get("date") or "").strip()) or _today()
             _pf(db).record_sell(hid, date_, amount)
             return jsonify({"ok": True, "message": f"已记录卖出：持仓ID={hid} {date_} ¥{amount:,.0f}"})
@@ -1105,13 +1105,13 @@ def api_holdings_action():
             if raw_amt not in (None, ""):
                 amt = float(raw_amt)
                 if amt <= 0:
-                    return jsonify({"ok": False, "error": "金额需大于 0"})
+                    return jsonify({"ok": False, "error": "金额需大于 0"}), 400
                 fields["buy_amount"] = amt
             raw_date = q.get("date")
             if raw_date:
                 fields["buy_date"] = str(raw_date).strip()
             if not fields:
-                return jsonify({"ok": False, "error": "未提供要修改的字段"})
+                return jsonify({"ok": False, "error": "未提供要修改的字段"}), 400
             if "buy_amount" in fields:
                 row = db.conn.cursor().execute("SELECT buy_nav FROM holdings WHERE id=?", (hid,)).fetchone()
                 if not row:
@@ -1127,11 +1127,11 @@ def api_holdings_action():
             ok = db.delete_holding(hid)
             return jsonify({"ok": ok, "message": f"已删除持仓ID={hid}" if ok else f"未找到持仓ID={hid}"})
 
-        return jsonify({"ok": False, "error": f"未知操作: {action}"})
+        return jsonify({"ok": False, "error": "未知操作: %s" % (action or "(空)")}), 400
     except (ValueError, TypeError):
-        return jsonify({"ok": False, "error": "参数格式错误（金额/ID 需为数字）"})
+        return jsonify({"ok": False, "error": "参数格式错误（金额/ID 需为数字）"}), 400
     except Exception as e:
-        return jsonify({"ok": False, "error": f"操作失败: {e}"})
+        return jsonify({"ok": False, "error": f"操作失败: {e}"}), 500
     finally:
         db.close()
         _invalidate_caches("rebalance")     # 持仓变了 → 聚合缓存/总览/调仓建议都失效
@@ -1286,14 +1286,14 @@ def api_plan():
                 if q.get(k) not in (None, ""):
                     fields[k] = float(q[k]) if k in ("total_capital", "cash_reserve") else str(q[k]).strip()
             if not fields:
-                return jsonify({"ok": False, "error": "未提供要修改的字段"})
+                return jsonify({"ok": False, "error": "未提供要修改的字段"}), 400
             ok = db.update_plan(pid, **fields)
             return jsonify({"ok": ok, "message": "计划已更新" if ok else "更新失败"})
 
         if action == "add_item":
             code = str(q.get("code") or "").strip()
             if not code:
-                return jsonify({"ok": False, "error": "缺少基金代码"})
+                return jsonify({"ok": False, "error": "缺少基金代码"}), 400
             name = (str(q.get("name") or "").strip()) or (db.get_fund_name(code) or code)
             db.add_plan_item({
                 "plan_id": pid, "fund_code": code, "fund_name": name,
@@ -1317,7 +1317,7 @@ def api_plan():
                 if q.get(k) not in (None, ""):
                     fields[k] = str(q[k]).strip()
             if not fields:
-                return jsonify({"ok": False, "error": "未提供要修改的字段"})
+                return jsonify({"ok": False, "error": "未提供要修改的字段"}), 400
             ok = db.update_plan_item(iid, **fields)
             return jsonify({"ok": ok, "message": "计划条目已更新" if ok else "未找到该条目"})
 
@@ -1330,11 +1330,11 @@ def api_plan():
             ok = db.delete_plan(pid)
             return jsonify({"ok": ok, "message": "计划已删除" if ok else "删除失败"})
 
-        return jsonify({"ok": False, "error": f"未知操作: {action}"})
+        return jsonify({"ok": False, "error": "未知操作: %s" % (action or "(空)")}), 400
     except (ValueError, TypeError):
         return jsonify({"ok": False, "error": "参数格式错误（金额需为数字）"})
     except Exception as e:
-        return jsonify({"ok": False, "error": f"操作失败: {e}"})
+        return jsonify({"ok": False, "error": f"操作失败: {e}"}), 500
     finally:
         db.close()
         if request.method == "POST":
@@ -1437,7 +1437,7 @@ def api_dca():
             code = str(q.get("code") or "").strip()
             amount = float(q.get("amount") or 0)
             if not code:
-                return jsonify({"ok": False, "error": "缺少基金代码"})
+                return jsonify({"ok": False, "error": "缺少基金代码"}), 400
             if amount <= 0:
                 return jsonify({"ok": False, "error": "每期金额需大于 0"})
             freq = (str(q.get("frequency") or "").strip() or "weekly").lower()
@@ -1484,12 +1484,12 @@ def api_dca():
         elif action == "delete":
             ok = db.delete_dca_plan(pid)
         else:
-            return jsonify({"ok": False, "error": f"未知操作: {action}"})
+            return jsonify({"ok": False, "error": "未知操作: %s" % (action or "(空)")}), 400
         return jsonify({"ok": ok, "message": f"已完成定投操作 ID={pid}" if ok else f"未找到定投 ID={pid}"})
     except (ValueError, TypeError):
         return jsonify({"ok": False, "error": "参数格式错误"})
     except Exception as e:
-        return jsonify({"ok": False, "error": f"操作失败: {e}"})
+        return jsonify({"ok": False, "error": f"操作失败: {e}"}), 500
     finally:
         db.close()
         if request.method == "POST":
@@ -1515,11 +1515,35 @@ def _precompute_snapshots():
             continue
 
 
+def _resolve_port() -> int:
+    """解析监听端口（E-07：原先硬编码 5020 → 开不了第二个实例）。
+
+    优先级：`--port=N` > 第 2 个位置参数（数字） > 环境变量 `QFA_PORT` > 5020。
+    三种写法都支持，便于同时跑两份（例如把另一份指到 5021 做对照）。
+    """
+    import sys as _sys
+    for a in _sys.argv[1:]:
+        if a.startswith("--port="):
+            try:
+                return int(a.split("=", 1)[1])
+            except ValueError:
+                break
+    if len(_sys.argv) > 2 and str(_sys.argv[2]).isdigit():
+        return int(_sys.argv[2])
+    try:
+        return int(os.environ.get("QFA_PORT") or 5020)
+    except ValueError:
+        return 5020
+
+
 def main():
-    """启动 Flask 仪表盘（http://localhost:5020）"""
+    """启动 Flask 仪表盘（默认 http://localhost:5020）"""
+    port = _resolve_port()
+    if port != 5020:
+        print("（端口来自 QFA_PORT / 命令行参数，已非默认 5020）")
     print("=" * 50)
     print("🚀 量化基金仪表盘")
-    print("   http://localhost:5020")
+    print("   http://localhost:%d" % port)
     print("=" * 50)
 
     # 预计算板块数据（后台线程，不阻塞启动）
@@ -1529,7 +1553,7 @@ def main():
 
     # 只监听回环地址：本系统无鉴权且管的是真实资金记录，绝不能被同网段其它设备读写。
     # threaded=True：允许 /api/all 全量计算时，量化模型/板块/消息面卡片仍并发加载
-    app.run(host="127.0.0.1", port=5020, debug=False, threaded=True)
+    app.run(host="127.0.0.1", port=port, debug=False, threaded=True)
 
 
 if __name__ == "__main__":

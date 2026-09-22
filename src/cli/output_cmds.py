@@ -228,22 +228,30 @@ def cmd_delete():
 
 
 def cmd_web():
-    """启动本地仪表盘 (http://localhost:5020)"""
+    """启动本地仪表盘（默认 http://localhost:5020；端口可用 QFA_PORT / 参数覆盖）"""
     import webbrowser
+    from src.web import app as webapp
+    # 端口解析统一走 app._resolve_port（E-07）：优先 --port=N > 位置参数 > QFA_PORT > 5020。
+    # 这里不再硬编码 5020，否则第二个实例的横幅会指向错误端口（踩过）。
+    port = webapp._resolve_port()
+    url = "http://localhost:%d" % port
     print("🚀 启动仪表盘...")
-    print("   http://localhost:5020")
+    print("   " + url)
     print("   按 Ctrl+C 停止")
     print()
+
     # Open browser after a short delay
     import threading
     def _open():
         import time
         time.sleep(1.5)
-        webbrowser.open("http://localhost:5020")
+        try:
+            webbrowser.open(url)
+        except Exception:
+            pass
     threading.Thread(target=_open, daemon=True).start()
     # 单一启动入口：app.main() 负责预计算板块(后台线程)+ 线程化 Flask(threaded=True)，
     # 避免这里重复启动板块预计算、并用单线程模式阻塞异步卡片
-    from src.web import app as webapp
     webapp.main()
 
 

@@ -38,7 +38,7 @@
     report      周度报告
 
 看板 / 自动化:
-    web         启动 Web 仪表盘(http://localhost:5020)
+    web         启动 Web 仪表盘(http://localhost:5020；端口可用 QFA_PORT=5021 或 `web 5021` 覆盖)
     precompute  预计算快照(温度/筛选池/板块总榜)，让 Web 首屏免冷算
     schedule    定时调度(每周日 20:00 自动生成周报)
 """

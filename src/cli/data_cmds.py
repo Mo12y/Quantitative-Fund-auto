@@ -250,14 +250,21 @@ def cmd_nav():
     print()
 
     success_nav = 0
+    nav_rows = 0
+    empty_nav = 0          # 接口没抛异常、但**一行都没入库**（源头无数据）
     success_detail = 0
     fail_count = 0
     for i, (code, name, ftype, fee) in enumerate(unique_candidates):
         # 采集净值
         try:
             df = collector.collect_fund_nav(code)
-            collector.save_fund_nav_batch(code, df)
-            success_nav += 1
+            n_rows = collector.save_fund_nav_batch(code, df) or 0
+            # F-07：按**实际入库行数**计成功，而不是"接口没抛异常"
+            if n_rows > 0:
+                success_nav += 1
+                nav_rows += n_rows
+            else:
+                empty_nav += 1
         except Exception:
             fail_count += 1
 
@@ -271,13 +278,17 @@ def cmd_nav():
             pass
 
         if (i + 1) % 50 == 0:
-            print(f"   进度: {i+1}/{total} (净值{success_nav} ok, 详情{success_detail} ok, {fail_count} fail)")
+            print(f"   进度: {i+1}/{total} (净值{success_nav} ok/{empty_nav} 空, 详情{success_detail} ok, {fail_count} fail)")
 
     _invalidate_web_cache(db)
     db.close()
     print()
     print("=" * 60)
-    print(f"✅ 采集完成！净值: {success_nav} 只, 基金详情: {success_detail} 只, 失败: {fail_count} 只")
+    print(f"✅ 采集完成！净值: {success_nav} 只（入库 {nav_rows} 行）, 基金详情: {success_detail} 只, 失败: {fail_count} 只")
+    if empty_nav:
+        # 必须显式声明：旧版把这些也算成"ok"，造成"600 只 ok / 库里只 305 只"的假成功
+        print(f"   ⚠️ 另有 {empty_nav} 只**接口返回空、未入库任何行**（源头无净值数据）"
+              f" —— 它们不计入「净值成功」")
     print(f"   质量筛选现在可以使用真实的规模/经理/成立日数据了")
     print()
     print("💡 下一步:")

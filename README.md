@@ -83,6 +83,8 @@ python src/main.py portfolio # 持仓概览
 ```bash
 python src/main.py precompute  # 可选：预计算快照（温度/筛选池/板块总榜），首屏免冷算
 python src/main.py web         # http://localhost:5020（仅监听本机）
+# 同时跑第二份（对照/调试）：QFA_PORT=5021 python src/main.py web
+# 想同时跑第二份（如对照环境）：QFA_PORT=5021 python src/main.py web
 ```
 
 ## 日常命令

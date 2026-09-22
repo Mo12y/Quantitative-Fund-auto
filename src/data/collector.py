@@ -457,6 +457,10 @@ class DataCollector:
 
         if records:
             self.db.insert_nav_batch(records)
+        # ⚠️ 返回**实际入库行数**（F-07）：调用方原先只看"接口没抛异常"就计成功，
+        # 于是出现"报净值 600 只 ok、库里只有 305 只有净值"的假成功。
+        # 空返回（源头没数据）与真失败必须能被区分开。
+        return len(records)
 
     def save_index_val_to_db(self, index_code: str, pe_df: pd.DataFrame, pb_df: pd.DataFrame,
                              daily_df: pd.DataFrame = None):
