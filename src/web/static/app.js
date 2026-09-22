@@ -246,9 +246,9 @@ function dcaItemHTML(p){
       pend?`<span class="pill u-pillwarn">待补录 ${pend}</span>`:''}${
       un?`<span class="pill u-pillwarn" title="这些期次标着已执行，但没有对应的买入凭证（旧口径遗留）。先跑 scripts/link_dca_periods.py 看补链方案，确认后再 --apply。">缺凭证 ${un}</span>`:''}`:'';
   return `<div class="dca-item"><div class="bar-row">
-      <span style="color:var(--text)"><b>${esc(p.fund_name)}</b> <span class="fund-code">${esc(p.fund_code)}</span> <span class="chip ${st}">${lbl}</span></span>
+      <span class="u-ttext"><b>${esc(p.fund_name)}</b> <span class="fund-code">${esc(p.fund_code)}</span> <span class="chip ${st}">${lbl}</span></span>
       <span class="b2">每期 ${fmtMoney(p.amount_per_period)} / ${esc(p.frequency)}</span></div>
-    <div class="bar-row" style="margin-top:4px"><span>${cnt}</span>
+    <div class="bar-row u-mt4"><span>${cnt}</span>
       <span class="qtag">已投 ${p.total_periods} 期 · 累计 ${fmtMoney(p.total_amount)} · 下期 ${esc(p.next_run_date||'-')} ${p.due?'· 到期':''}${p.last_synced_at?` · 同步于 ${esc(p.last_synced_at)}`:''}</span></div>
     <div class="act-row u-mt6">
       <button class="btn mini ok"${p.due?'':' disabled'} title="${p.due?'可执行一期':'尚未到期'}" data-action="dcaRun" data-id="${p.id}">执行${p.due?'到期':'一期'}</button>
@@ -276,7 +276,7 @@ async function loadDca(){
       <button class="btn ok" data-action="dcaAdd">添加定投</button>
     </div>
     <div class="act-row"><span class="qtag">频率：daily=日 / weekly=周 / biweekly=双周 / monthly=月（非交易日不顺延扣款）</span>
-      <button class="btn mini primary" style="margin-left:auto" data-action="dcaSync">同步定投期次</button>
+      <button class="btn mini primary u-mlauto" data-action="dcaSync">同步定投期次</button>
       <button class="btn mini" data-action="dcaRun" data-id="all" ${plans.some(p=>p.due&&p.status==='active')?'':'disabled'}>执行全部到期</button></div>`;
     if(!plans.length){ h+='<div class="empty">暂无定投计划 · 上方添加</div>'; }
     else{ for(const p of plans)h+=dcaItemHTML(p); }
@@ -345,7 +345,7 @@ async function loadAll(fresh,_attempt){
       app.innerHTML='<div class="card"><h2>计算时间偏长</h2><div class="empty">后台仍在计算，可稍后手动刷新。'+retryBtn('boot()')+'</div></div>';
       return;
     }
-    if(!j.ok){app.innerHTML='<div class="card"><h2>加载失败</h2><div class="empty" style="color:var(--down)">'+esc(j.error||j.data?.error||'未知错误')+retryBtn('boot()')+'</div></div>';return;}
+    if(!j.ok){app.innerHTML='<div class="card"><h2>加载失败</h2><div class="empty u-tdown">'+esc(j.error||j.data?.error||'未知错误')+retryBtn('boot()')+'</div></div>';return;}
     STATE.all=j.data; ready=true;
     renderApp();
     const tu=document.getElementById('updateTime'); if(tu)tu.textContent='更新于 '+new Date().toLocaleTimeString('zh-CN');
@@ -492,8 +492,8 @@ function curveCard(C){
   return `<div class="card full" id="curve-card"><h2>组合累计走势 <span class="sub">— 起点 ${esc(String(C.dates[0]))} · ${C.funds_used||0} 只持仓</span></h2>
     <div class="stat-line">当前市值 <b>${fmtMoney(lastVal)}</b> · 累计收益 <b style="color:${tone}">${fmtMoney(lastPnl)}</b> · 收益率 <b style="color:${tone}">${fmtPct(lastRet)}</b></div>
     <div class="pcurve">${portfolioChartSVG(C)}</div>
-    <div class="qlegend"><span class="k"><span class="sw" style="background:var(--up)"></span>零轴上方（盈利区间）</span>
-      <span class="k"><span class="sw" style="background:var(--down)"></span>零轴下方（亏损区间）</span>
+    <div class="qlegend"><span class="k"><span class="sw u-bgup"></span>零轴上方（盈利区间）</span>
+      <span class="k"><span class="sw u-bgdown"></span>零轴下方（亏损区间）</span>
       ${nIn?`<span class="qtag">另有 ${nIn} 笔未入仓${amtIn?`（约 ${fmtMoney(amtIn)}）`:''}未计入</span>`:''}</div>
     <div class="qtag u-mt6">口径：本图只画「已起算」的持仓，起点为最早起算日、末点为净值末日；「未入仓」= 待确认买入 + 起算日晚于末点的持仓，它们尚未计入市值与成本，等确认/起算后会自动进来。图中收益率 = pnl / 累计成本，为资金加权持仓收益率（非时间加权）；与「已实现收益（含赎回费）」是两个不同口径，勿混用。</div></div>`;
 }
@@ -564,14 +564,14 @@ function ovAllocCard(T,P,PL){
   if(P.has_holdings){
     inner+=allocChips(P.alloc);   // 投入/市值/盈亏已在总览 KPI 显示，此处不再重复
   }else{
-    inner+=`<div class="stat-line" style="margin-top:12px">暂无持仓 · 金额按投资计划总本金测算</div>`;
+    inner+=`<div class="stat-line u-mt12">暂无持仓 · 金额按投资计划总本金测算</div>`;
   }
   return card('仓位建议','',inner);
 }
 function allocChips(alloc){
   if(!alloc)return'';
   let h='<div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:10px">';
-  for(const[k,v]of Object.entries(alloc)){h+=`<span class="pill" style="background:var(--card2);color:var(--dim)">${esc(k)} ${pv(v,0)}%</span>`;}
+  for(const[k,v]of Object.entries(alloc)){h+=`<span class="pill u-bgdim">${esc(k)} ${pv(v,0)}%</span>`;}
   return h+'</div>';
 }
 
@@ -602,7 +602,7 @@ function planHTML(PL){
 
 function navHintHTML(){
   const txt=NAVINFO.latest?('净值截至 '+esc(NAVINFO.latest)):'本地无净值';
-  const warn=NAVINFO.stale?`<span style="color:var(--yellow)">· 落后于今日，金额可能偏旧</span>
+  const warn=NAVINFO.stale?`<span class="u-tyellow">· 落后于今日，金额可能偏旧</span>
      <button class="btn mini" data-action="updateNavThenReload">更新净值</button>`:'';
   return `<div class="hint" id="nav-hint">${txt} ${warn}</div>`;
 }
@@ -648,7 +648,7 @@ function holdingsHTML(P,PL){
     ${navHintHTML()}`;
   // 加仓 / 买入新基金 表单
   h+=`<div style="margin:10px 0;padding:10px 12px;background:var(--surface-2);border:1px solid var(--hairline);border-radius:var(--radius-md)">
-    <div style="font-weight:600;margin-bottom:6px">加仓 / 买入新基金</div>
+    <div class="u-w600-mb6">加仓 / 买入新基金</div>
     <div class="frow">
       <input id="buy-code" placeholder="基金代码 如 000011" size="9">
       <input id="buy-name" placeholder="名称(留空自动补全)" size="13">
@@ -703,7 +703,7 @@ function holdingsHTML(P,PL){
         <td>${esc(l.confirm_date||'—')}${l.legacy_rule_deviation?`<span class="pill u-pillwarn" title="该笔按旧规则记账：确认日 ${esc(l.legacy_rule_deviation.stored)}。按现行规则（QDII T+2 确认 / 非交易日不再叠加 15:00 顺延）应为 ${esc(l.legacy_rule_deviation.current_rule)}。历史记录不回填，仅标注。">旧口径</span>`:''}</td>
         <td>${esc(l.accrual_start||'—')}</td>
         <td>${esc(st)}</td>
-        <td style="white-space:nowrap">
+        <td class="u-nowrap">
           <button class="btn mini ok" ${l.status==='pending_confirm'?'disabled':''} data-action="actHolding" data-op="sell" data-id="${l.id}">减仓</button>
           <button class="btn mini" data-action="actHolding" data-op="update" data-id="${l.id}">改</button>
           <button class="btn mini danger" data-action="actHolding" data-op="delete" data-id="${l.id}">删</button>
@@ -913,7 +913,7 @@ function boardPoolHTML(d){
     <div class="stat-line">共 ${d.total_funds||0} 只候选 · ${boards.length} 个板块 · 组内“稳健优先 → 夏普 → 动量”排序</div>`;
   if(!boards.length)return h+'<div class="empty">暂无可展示的板块分组</div>';
   boards.forEach((b,i)=>{
-    h+=`<details class="groupbox" ${i<3?'open':''}><summary class="gh" style="cursor:pointer">
+    h+=`<details class="groupbox" ${i<3?'open':''}><summary class="gh u-pointer">
         ${esc(b.board)} <span class="sub">共 ${b.total} 只${b.total>(d.size||20)?` · 展示前 ${d.size||20}`:' · 全部展示'}</span></summary>`;
     for(const f of b.funds)h+=poolRow(f);
     h+='</details>';
@@ -926,7 +926,7 @@ function signalsInner(S){
   let h='';
   if(S.scanning){
     h='<div class="loading"><span class="spinner"></span>后台联网扫描宏观/基金信号中…</div>';
-    if(S.slow)h+='<div class="qtag" style="text-align:center">耗时较长，可稍后点 刷新</div>';
+    if(S.slow)h+='<div class="qtag u-center">耗时较长，可稍后点 刷新</div>';
     return h;
   }
   if(S.error)return'<div class="empty">信号加载失败：'+esc(S.error)+retryBtn('loadSentiment()')+'</div>';
@@ -988,7 +988,7 @@ async function loadSectors(retries=5){
           <span class="qtag">波${pv(s.volatility,0)}%</span></span></div>`;
       }
       if(momentum.length){h+=`<div class="u-subhead">动量领涨</div>`;for(const s of momentum.slice(0,3)){h+=`<div class="fund-row" style="grid-template-columns:1fr auto"><span class="fund-name">${esc(s.name)}</span><span class="fund-meta"><span class="u-tgreen">近1月${(s.ret_1m||0)>=0?'+':''}${pv(s.ret_1m,1)}%</span><span class="qtag">3月${(s.ret_3m||0)>=0?'+':''}${pv(s.ret_3m,0)}%</span></span></div>`;}}
-      if(value.length){h+=`<div class="u-subhead">超跌候选（逆向）</div>`;for(const s of value.slice(0,3)){h+=`<div class="fund-row" style="grid-template-columns:1fr auto"><span class="fund-name">${esc(s.name)}</span><span class="fund-meta"><span style="color:var(--red)">近1月${(s.ret_1m||0)>=0?'+':''}${pv(s.ret_1m,1)}%</span><span class="qtag">回撤${pv(s.max_dd,0)}%</span></span></div>`;}}
+      if(value.length){h+=`<div class="u-subhead">超跌候选（逆向）</div>`;for(const s of value.slice(0,3)){h+=`<div class="fund-row" style="grid-template-columns:1fr auto"><span class="fund-name">${esc(s.name)}</span><span class="fund-meta"><span class="u-tred">近1月${(s.ret_1m||0)>=0?'+':''}${pv(s.ret_1m,1)}%</span><span class="qtag">回撤${pv(s.max_dd,0)}%</span></span></div>`;}}
       h+=`</div></div><div class="qtag u-mt10">评分 = 动量40% + 趋势30% + 风险调整30%${age?' · 缓存于 '+esc(age):''}</div>`;
       card.innerHTML=h; card.dataset.done='1'; return;
     }catch(e){
@@ -1094,11 +1094,11 @@ async function loadQuantModels(retries=2){
               <div class="note">建议以 ≥5% 阈值模型实盘。</div></details>
             <details class="qsec" open><summary><h3 class="u-inline">组合模拟</h3></summary>
               <div class="cap">Vol-Targeting 目标年化波动 15% · 月再平衡</div>${portV}
-              <div class="note">回撤叠加未降回撤反损收益——组合层面以 <b style="color:var(--blue)">Vol-Targeting</b> 为准。</div></details>
+              <div class="note">回撤叠加未降回撤反损收益——组合层面以 <b class="u-tblue">Vol-Targeting</b> 为准。</div></details>
           </div></div>
-          <details class="qsec" style="margin-top:18px"><summary><h3 class="u-inline">月度仓位信号 · 回撤预警叠加前后对比</h3></summary>${chartV}
-            <div class="qlegend"><span class="k"><span class="sw" style="background:var(--primary)"></span>Vol-Targeting</span>
-              <span class="k"><span class="sw" style="background:var(--ink-subtle)"></span>回撤叠加后</span>
+          <details class="qsec u-mt18"><summary><h3 class="u-inline">月度仓位信号 · 回撤预警叠加前后对比</h3></summary>${chartV}
+            <div class="qlegend"><span class="k"><span class="sw u-bgprimary"></span>Vol-Targeting</span>
+              <span class="k"><span class="sw u-bgsub"></span>回撤叠加后</span>
               <span class="k"><span style="display:inline-block;width:9px;height:9px;border-radius:50%;border:1.5px solid var(--down)"></span>触发预警月</span></div></details>`;
       }
       html+=`<div class="qtag" style="margin-top:14px"><span class="pill ml">OOS 2023-2026</span> ${foot}</div>`;

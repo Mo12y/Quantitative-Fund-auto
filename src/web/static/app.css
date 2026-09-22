@@ -251,3 +251,22 @@
   .u-sub{font-size:13px;margin-bottom:4px}
   .u-subhead{font-size:13px;font-weight:700;color:var(--ink);margin:14px 0 6px}
   .u-flexbase{display:flex;align-items:baseline;gap:14px}
+
+  .u-ttext{color:var(--text)}
+  .u-tdown{color:var(--down)}
+  .u-tred{color:var(--red)}
+  .u-tblue{color:var(--blue)}
+  .u-tyellow{color:var(--yellow)}
+  .u-bgup{background:var(--up)}
+  .u-bgdown{background:var(--down)}
+  .u-bgprimary{background:var(--primary)}
+  .u-bgsub{background:var(--ink-subtle)}
+  .u-bgdim{background:var(--card2);color:var(--dim)}
+  .u-mt4{margin-top:4px}
+  .u-mt12{margin-top:12px}
+  .u-mt18{margin-top:18px}
+  .u-mlauto{margin-left:auto}
+  .u-pointer{cursor:pointer}
+  .u-nowrap{white-space:nowrap}
+  .u-center{text-align:center}
+  .u-w600-mb6{font-weight:600;margin-bottom:6px}
