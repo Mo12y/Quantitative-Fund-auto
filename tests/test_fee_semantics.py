@@ -87,6 +87,10 @@ class TestFeeCheckDoesNotUsePurchaseFee:
         src = open(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
                                 "src/analysis/fund_scorer.py"), encoding="utf-8").read()
         i = src.find("def _check_fee")
-        seg = src[i:i + 1400]
-        assert "mgt_fee" in seg
-        assert "purchase_fee" not in seg, "申购费不得进入质量费率检查（受平台折扣影响，且非基金属性）"
+        seg = src[i:i + 2600]
+        # 走 TER 单一实现（管理费+托管费+销售服务费）
+        assert "fund_fee.compute_ter" in seg, "费率检查必须走 TER 单一实现"
+        # 且**不得读取** purchase_fee（申购费受平台折扣影响、是交易费用，不属运作费用）
+        # 注意：docstring 里提到 purchase_fee 是**说明历史坑**，不算违规；这里查的是实际取值
+        for bad in ('get("purchase_fee")', "get('purchase_fee')", '["purchase_fee"]'):
+            assert bad not in seg, "申购费不得参与 TER 计算：%s" % bad

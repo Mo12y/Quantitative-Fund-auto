@@ -139,6 +139,7 @@ class Database:
                 mgt_fee REAL,
                 custodian_fee REAL,
                 purchase_fee REAL,
+                sales_service_fee REAL,   -- 销售服务费（C 类收，A 类常为 ---）
                 redeem_fee TEXT,
                 manager_name TEXT,
                 manager_tenure REAL,
@@ -327,6 +328,18 @@ class Database:
         except Exception:
             pass
 
+        # 兼容迁移：fund_info 增列 sales_service_fee（销售服务费，2026-09-22）
+        # 为什么需要它：TER（总运作费率）= 管理费 + 托管费 + 销售服务费 —— 晨星口径，
+        # 也是"费率预测未来业绩"研究里用的那个指标（见 docs/参照系接入执行报告 §8）。
+        # 缺这一项就只能算"管理费+托管费"，正是晨星中国批评的那种不完整披露。
+        try:
+            have_fi = {r[1] for r in self.conn.execute("PRAGMA table_info(fund_info)")}
+            if "sales_service_fee" not in have_fi:
+                self.conn.execute("ALTER TABLE fund_info ADD COLUMN sales_service_fee REAL")
+            self.conn.commit()
+        except Exception:
+            pass
+
         # 投资计划（可维护：目标/金额/周期/风险偏好 + 基金条目）
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS investment_plans (
@@ -404,14 +417,15 @@ class Database:
     # upsert 允许写入的字段清单（局部更新语义，见 upsert_fund_info）
     _FUND_INFO_FIELDS = (
         "fund_name", "fund_type", "establish_date", "fund_size",
-        "mgt_fee", "custodian_fee", "purchase_fee", "redeem_fee",
+        "mgt_fee", "custodian_fee", "purchase_fee", "sales_service_fee", "redeem_fee",
         "manager_name", "manager_tenure", "company_name",
         "purchase_status", "risk_level", "investment_style", "benchmark",
     )
     # 数字字段里 0 视为「未采到」：费率/规模/年限为 0 没有业务意义，
     # 且批量路径缺列时会把默认 "0%" 解析成 0 —— COALESCE 拦得住 NULL 拦不住 0
     _FUND_INFO_NUMERIC = frozenset(
-        {"fund_size", "mgt_fee", "custodian_fee", "purchase_fee", "manager_tenure"})
+        {"fund_size", "mgt_fee", "custodian_fee", "purchase_fee", "sales_service_fee",
+         "manager_tenure"})
 
     def _has_new_value(self, field: str, v) -> bool:
         """该字段的新值是否足以覆盖旧值：非空；数字字段还要求非 0。"""

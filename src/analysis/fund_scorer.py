@@ -21,6 +21,7 @@ from ..data.database import Database
 from .nav_series import valuation_nav_series
 from .risk_free import RISK_FREE_ANNUAL
 from . import peer_percentile
+from . import fund_fee
 
 # 申购状态分类（D2）——
 #   `暂停申购` / `封闭期`：**买不进去**，直接排除出推荐池；
@@ -281,24 +282,43 @@ class FundScreener:
         return "pass", f"✅ {size:.1f}亿", None, size
 
     def _check_fee(self, fund_info: dict) -> tuple:
-        """费率检查 → (level, check_text, warning, total_fee)
+        """运作费率检查（**TER**）→ (level, check_text, warning, ter)
 
-        批次 4.10：`custodian_fee` 大量以 0 填充（0 ≠ 真实托管费为 0）。
-        只有管理费而无托管费时**只按已知部分判定并显式标注**，
-        不把 0 当真值加总（否则总费率被系统性低估）。
+        口径（2026-09-22 改，批次 A2）：
+        · 指标 = **TER = 管理费 + 托管费 + 销售服务费**（晨星 Total Expense Ratio）。
+          文献依据：Morningstar 2016（Russel Kinnel）在测过的**所有变量里，费率对后续
+          业绩的预测力最强**；2025 复现（20 年）呈"最便宜→最贵"近乎完美阶梯。**晨星中国
+          明确批评**"只看管理费+托管费"的披露方式 → 所以方向是**更全**，不是"仅管理费"。
+        · 判定 = **组内分位**（同类比较）。管理费本身按类型分层（权益 1.2% / 指数 0.15% /
+          货币 0.30%），单一绝对阈值必然"要么杀光权益、要么形同虚设"（执行报告 §0.2 实测）。
+
+        ⚠️ 历史坑（已修，别再踩）：
+        · 旧 `max_total_fee=2.0`（管理费+托管费）实测**近似失效**（>2.0 仅 10 只）；
+        · 更要命的是：当时 `mgt_fee` 里装的其实是**申购手续费（打折后）**，不是管理费
+          （四重证据确证，见 scripts/migrate_mgt_fee_to_purchase_fee.py）。申购费是**交易费用**、
+          受平台折扣影响，**不得混进 TER**。
+
+        数据缺失**显式声明**（铁律 5）：TER 不可算 → unknown + 说明缺哪项，**绝不写 0 顶替**
+        （0 会把 TER 系统性算低 —— 正是"托管费恒为 0"踩过的坑）。
         """
-        mgt_v = float(fund_info.get("mgt_fee") or 0)
-        cust_v = float(fund_info.get("custodian_fee") or 0)
-        if mgt_v == 0 and cust_v == 0:
-            return "unknown", "⊘ 无数据", None, 0.0
-        total = mgt_v + cust_v
-        partial = (mgt_v == 0 or cust_v == 0)          # 一边有一边缺
-        note = "(部分费率未知)" if partial else ""
-        if total > self.THRESHOLDS["max_total_fee"]:
-            return "fail", f"❌ {total:.2f}%{note}(过高)", f"总费率{total:.2f}%过高，严重侵蚀长期收益", total
-        if total > self.THRESHOLDS["warn_total_fee"]:
-            return "warn", f"⚠️ {total:.2f}%{note}(偏高)", None, total
-        return "pass", f"✅ {total:.2f}%{note}", None, total
+        ter, missing = fund_fee.compute_ter(fund_info)
+        if ter is None:
+            return ("unknown",
+                    "⊘ TER 不可算（缺 %s）" % fund_fee.missing_text(missing),
+                    None, None)
+        g = peer_percentile.group_of(fund_info.get("fund_type"))
+        pct = peer_percentile.percentile(self._peer_dist(), g, "ter", ter) if g else None
+        if pct is None:
+            # 参照系还没建到 TER（或该组样本不足）→ 如实声明，不硬判
+            return "unknown", "⊘ TER %.2f%%（同类参照系未就绪，暂不判定）" % ter, None, ter
+        cheap = 100.0 - pct
+        if pct >= 90:
+            return ("warn",
+                    "⚠️ TER %.2f%%（同类最贵 10%%）" % ter,
+                    ("TER %.2f%% 处于同组最贵的 10%%。费率是预测后续净回报最有效的单变量之一"
+                     "（晨星 2016/2025 研究），长期复利下差距会被放大。") % ter,
+                    ter)
+        return "pass", "✅ TER %.2f%%（同类最便宜 %.0f%%）" % (ter, cheap), None, ter
 
     def _check_purchasable(self, fund_info: dict) -> tuple:
         """可申购性检查 → (level, check_text, warning, status_raw)

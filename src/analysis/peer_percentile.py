@@ -45,6 +45,8 @@ from calibrate_thresholds import (          # noqa: E402
     TYPE2GROUP, TYPE_GROUPS, grade, load_navs, metrics,
 )
 
+from . import fund_fee                          # noqa: E402  (TER 的单一实现)
+
 CACHE_PATH = os.path.join(_ROOT, "data", "peer_distributions.json")
 CACHE_VERSION = 1
 DEFAULT_MIN_DAYS = 756                       # ≈3 年，与 fund_percentile 默认一致
@@ -57,6 +59,9 @@ DIRECTION = {
     "max_drawdown_1y": False,
     "momentum_3m": None,
     "sharpe": True,
+    # TER（总运作费率）：**越小越好** —— 晨星口径，且文献一致显示"低费率→更好的后续表现"
+    # （Morningstar 2016/2025；见 docs/参照系接入执行报告 §8.5）
+    "ter": False,
 }
 
 # 综合分只用**相互独立**的两维（实测 夏普↔回撤 r=-0.04；收益↔夏普 r=0.97 冗余）
@@ -98,6 +103,18 @@ def build_group_arrays(min_days: int = DEFAULT_MIN_DAYS, db_path: str = None,
         conn = sqlite3.connect("file:%s?mode=ro" % (db_path or DB_PATH), uri=True)
     fi = {r[0]: (r[1] or "") for r in conn.execute("select fund_code, fund_type from fund_info")}
     nm = {r[0]: (r[1] or "") for r in conn.execute("select fund_code, fund_name from fund_info")}
+    # TER（总运作费率）是**静态字段**，不依赖净值 —— 顺手一起捞，避免为它再扫一遍库。
+    # 缺 管理费/托管费 的基金不参与 TER 分布（铁律 5：不拿 0 顶替）。
+    try:
+        ter_map = {}
+        for code, mgt, cus, sale in conn.execute(
+                "select fund_code, mgt_fee, custodian_fee, sales_service_fee from fund_info"):
+            t, _missing = fund_fee.compute_ter(
+                {"mgt_fee": mgt, "custodian_fee": cus, "sales_service_fee": sale})
+            if t is not None:
+                ter_map[code] = t
+    except Exception:
+        ter_map = {}
     navs = load_navs(conn, min_days)
     # 注意：navs 是惰性流，迭代期间不能 conn.close()
 
@@ -113,6 +130,8 @@ def build_group_arrays(min_days: int = DEFAULT_MIN_DAYS, db_path: str = None,
             m["_code"] = code
             m["_name"] = nm.get(code, "")
             m["_type"] = fi.get(code, "")
+            if code in ter_map:
+                m["ter"] = ter_map[code]
             groups.setdefault(g, []).append(m)
     return groups, unmapped, (conn if owned else None)
 

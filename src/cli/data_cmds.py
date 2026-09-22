@@ -3,6 +3,7 @@
 """
 
 import os
+import sys
 import time
 
 import akshare as ak
@@ -444,3 +445,74 @@ def cmd_hithink():
         return
     hithink_quick_test(HITHINK_KEY)
 
+
+
+def cmd_fees():
+    """补采真·运作费率（管理费 / 托管费 / 销售服务费）—— **可断点续采**。
+
+    为什么需要（见 docs/参照系接入执行报告 §8）：
+    `fund_info.mgt_fee` 历史上装的是**手续费（申购费，打折后）**，四重证据确证
+    （akshare 官方文档×3 / A类0.15%·C类0.00% / 我们库 A 类 94.1% 有值·C 类 99.6% 为空 /
+    反证：若为管理费则 1.2、1.5 应占多数，实测仅 233 只）。已由
+    scripts/migrate_mgt_fee_to_purchase_fee.py 正名到 purchase_fee。
+
+    真费率只能逐只取：akshare `fund_fee_em(symbol,'运作费用')`（源=天天基金），
+    实测 0.60 秒/只、8/8 成功、类型一致性正确。产出用于
+    **TER = 管理费 + 托管费 + 销售服务费**（晨星口径，也是"费率预测业绩"研究所用指标）。
+
+    用法:
+        python src/main.py fees            # 续采（已有 mgt_fee 的自动跳过）
+        python src/main.py fees 500        # 只采 500 只（试跑 / 分批）
+        python src/main.py fees 500 --all  # 强制重采（含已有值的）
+    """
+    args = [a for a in sys.argv[2:]]
+    force = "--all" in args
+    nums = [a for a in args if a.isdigit()]
+    limit = int(nums[0]) if nums else None
+
+    db = Database("data/fund_quant.db")
+    if not force:
+        todo = [r[0] for r in db.conn.execute(
+            "SELECT fund_code FROM fund_info WHERE mgt_fee IS NULL OR mgt_fee = 0")]
+    else:
+        todo = [r[0] for r in db.conn.execute("SELECT fund_code FROM fund_info")]
+    # 优先采"筛选器真正会用到的"（有净值的），让最有价值的数据先落地
+    with_nav = {r[0] for r in db.conn.execute("SELECT DISTINCT fund_code FROM fund_nav")}
+    todo.sort(key=lambda c: (0 if c in with_nav else 1, c))
+    if limit:
+        todo = todo[:limit]
+
+    total = len(todo)
+    if not total:
+        print("✅ 所有基金都已有管理费数据（如需重采加 --all）")
+        db.close()
+        return
+    print(f"待采 {total} 只（有净值的优先）；预计 {total * 0.6 / 60:.0f} 分钟，可随时 Ctrl+C 中断后续采")
+
+    collector = DataCollector(db)
+    ok = empty = fail = 0
+    t0 = time.time()
+    for i, code in enumerate(todo):
+        r = collector.collect_fund_fee(code)
+        if r is None:
+            fail += 1
+        elif r.get("mgt_fee") is None and r.get("custodian_fee") is None:
+            empty += 1
+        else:
+            db.upsert_fund_info({"fund_code": code, **r})
+            ok += 1
+        if (i + 1) % 50 == 0:
+            el = time.time() - t0
+            eta = (total - i - 1) * el / (i + 1) / 60
+            print(f"   进度: {i+1}/{total} (成功{ok} 空{empty} 失败{fail}) 已用 {el/60:.1f} 分，预计还需 {eta:.0f} 分")
+    _invalidate_web_cache(db)
+    print()
+    print("=" * 60)
+    print(f"✅ 费率补采完成！成功 {ok} 只, 空 {empty} 只, 失败 {fail} 只, 耗时 {(time.time()-t0)/60:.1f} 分")
+    q = lambda s: db.conn.execute(s).fetchone()[0]
+    print("   当前覆盖: 管理费 %d | 托管费 %d | 销售服务费 %d" % (
+        q("SELECT COUNT(*) FROM fund_info WHERE mgt_fee>0"),
+        q("SELECT COUNT(*) FROM fund_info WHERE custodian_fee>0"),
+        q("SELECT COUNT(*) FROM fund_info WHERE sales_service_fee>0")))
+    print("   下一步: python scripts/audit_fee_ter.py  → 看 TER 分布（按类型）")
+    db.close()

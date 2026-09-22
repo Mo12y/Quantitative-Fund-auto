@@ -11,6 +11,7 @@ from src.cli.data_cmds import (
     cmd_enrich,
     cmd_hithink,
     cmd_calendar,
+    cmd_fees,
 )
 from src.cli.analysis_cmds import (
     cmd_score,
@@ -51,6 +52,7 @@ COMMANDS = {
     "enrich": cmd_enrich,
     "hithink": cmd_hithink,
     "calendar": cmd_calendar,
+    "fees": cmd_fees,
     "score": cmd_score,
     "temp": cmd_temp,
     "sentiment": cmd_sentiment,

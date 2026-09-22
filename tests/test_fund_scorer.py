@@ -111,13 +111,21 @@ class TestRiskLabeling(unittest.TestCase):
             db.close()
             os.unlink(path)
 
-    def test_high_fee_is_high_risk(self):
-        """总费率 2.7% > 2.0% → 费率检查失败 → 🔴 高风险"""
-        db, path = make_db_with_nav(fee=2.5)  # 2.5 + 0.2 = 2.7%
+    def test_fee_no_longer_uses_absolute_threshold(self):
+        """A2 改口径（2026-09-22）：费率**不再**用绝对阈值判失败。
+
+        原因：旧 `max_total_fee=2.0`（管理费+托管费）实测近似失效（全库 >2.0 仅 10 只），
+        且当时 `mgt_fee` 里装的其实是**申购手续费**（已正名）。新口径 = **TER 的组内分位**
+        （文献：晨星 2016/2025 显示费率预测力最强，但必须**同类内比较**）。
+        无参照系时如实声明，而不是凭绝对值把基金打成 🔴。
+        """
+        db, path = make_db_with_nav(fee=2.5)  # 管理费 2.5 + 托管 0.2 = TER 2.7%（属极贵）
         try:
-            r = self._screen(db, fee=2.5)  # info dict 需显式传 fee
-            self.assertEqual(r["risk_label"], "🔴 高风险")
-            self.assertTrue(any("费率" in w for w in r["risk_reasons"]))
+            r = self._screen(db, fee=2.5)
+            self.assertIsNotNone(r)
+            # 不得仅因"TER 数值大"就给费率警告 —— 必须有同类参照系才判
+            self.assertFalse(any("费率" in w for w in r["risk_reasons"]),
+                             "不应基于绝对阈值给费率警告（A2 已改为组内分位）")
         finally:
             db.close()
             os.unlink(path)

@@ -137,12 +137,16 @@ class TestStructuredChecks:
         assert r["check_levels"]["成立时间"] == "unknown"
         assert r["check_levels"]["费率"] == "unknown"
 
-    def test_fee_check_flags_missing_custodian(self, db):
-        """4.10：只有管理费、托管费缺失 → 标注"部分费率未知"，不把 0 当真值。"""
+    def test_fee_check_requires_both_mgt_and_custodian(self, db):
+        """A2 改口径（2026-09-22）：指标改为 **TER = 管理费 + 托管费 + 销售服务费**。
+
+        旧版只给管理费也算 pass（会把 TER 系统性算低）。新契约：缺必收项 → **不可算**，
+        显式声明缺哪项（铁律 5），绝不写 0 顶替。
+        """
         s = FundScreener(db)
-        lv, text, warn, total = s._check_fee({"mgt_fee": 0.6, "custodian_fee": 0})
-        assert lv == "pass" and total == 0.6
-        assert "未知" in text
+        lv, text, warn, ter = s._check_fee({"mgt_fee": 0.6, "custodian_fee": 0})
+        assert lv == "unknown" and ter is None
+        assert "托管费" in text, "必须显式说明缺的是托管费（而不是只写字段名或写 0）"
 
     def test_drawdown_check_level(self, db):
         s = FundScreener(db)
