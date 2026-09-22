@@ -447,6 +447,52 @@ def cmd_hithink():
 
 
 
+def _finalize_fees():
+    """采集完成后**自动走完剩下两步**（用户 2026-09-22 要求）：
+
+    ① 重建参照系缓存（peer_distributions.json，含 TER 分位网格）
+    ② 审计 + 回归哨兵（audit_fee_ter.py 看 TER 分布；validate_vs_source.py 确认
+       momentum 口径没被 TER 改动带坏，ρ 应 ≥0.85）
+
+    幂等：可单独重跑（`python src/main.py fees --finalize-only`）。
+    """
+    import subprocess
+    print()
+    print("=" * 60)
+    print("🎉 采集完成 → 自动走完剩下两步")
+    print("=" * 60)
+
+    # ① 重建参照系缓存
+    print("\n[1/2] 重建参照系缓存（含 TER 分位）...")
+    try:
+        from src.analysis import peer_percentile as pp
+        dist = pp.build_distributions()
+        p = pp.save_cache(dist)
+        print("   ✓ 已写入", p)
+    except Exception as e:
+        print("   ✗ 重建失败:", e)
+
+    # ② 审计 + 回归哨兵
+    print("\n[2/2] 审计 + 回归哨兵 ...")
+    for script, desc in (("audit_fee_ter.py", "TER 分布审计"),
+                         ("validate_vs_source.py", "momentum 回归哨兵（ρ ≥ 0.85）")):
+        print("   ── %s ──" % desc)
+        try:
+            r = subprocess.run(
+                [sys.executable, os.path.join("scripts", script)],
+                capture_output=True, text=True, encoding="utf-8", errors="replace")
+            out = (r.stdout or "").strip()
+            print("   " + "\n   ".join(out.splitlines()[-22:]))
+            if r.returncode != 0:
+                print("   ⚠️ 返回码 %d" % r.returncode)
+        except Exception as e:
+            print("   ✗ %s 失败: %s" % (desc, e))
+    print()
+    print("=" * 60)
+    print("✅ 全部完成。可打开 Web 查看：基金池的费率检查已按 TER 组内分位生效。")
+    print("=" * 60)
+
+
 def cmd_fees():
     """补采真·运作费率（管理费 / 托管费 / 销售服务费）—— **可断点续采**。
 
@@ -466,6 +512,9 @@ def cmd_fees():
         python src/main.py fees 500 --all  # 强制重采（含已有值的）
     """
     args = [a for a in sys.argv[2:]]
+    if "--finalize-only" in args:
+        _finalize_fees()
+        return
     force = "--all" in args
     nums = [a for a in args if a.isdigit()]
     limit = int(nums[0]) if nums else None
@@ -486,6 +535,7 @@ def cmd_fees():
     if not total:
         print("✅ 所有基金都已有管理费数据（如需重采加 --all）")
         db.close()
+        _finalize_fees()          # 续采到"没有剩余"=采集完成 → 自动走完剩下两步
         return
     print(f"待采 {total} 只（有净值的优先）；预计 {total * 0.6 / 60:.0f} 分钟，可随时 Ctrl+C 中断后续采")
 
@@ -514,5 +564,10 @@ def cmd_fees():
         q("SELECT COUNT(*) FROM fund_info WHERE mgt_fee>0"),
         q("SELECT COUNT(*) FROM fund_info WHERE custodian_fee>0"),
         q("SELECT COUNT(*) FROM fund_info WHERE sales_service_fee>0")))
-    print("   下一步: python scripts/audit_fee_ter.py  → 看 TER 分布（按类型）")
+    remaining = q("SELECT COUNT(*) FROM fund_info WHERE mgt_fee IS NULL OR mgt_fee = 0")
     db.close()
+    if remaining > 0:
+        print("   ⚠️ 还有 %d 只待采（本次用了 --limit 或有失败）。再跑 `python src/main.py fees` 续采；"
+              "采完会自动走完剩下两步。" % remaining)
+        return
+    _finalize_fees()          # 采集**真正完成**（无剩余）→ 自动重建缓存 + 审计 + 回归哨兵
