@@ -104,9 +104,15 @@ python src/main.py          # 生成完整周报
 
 ⚠️ **本仓库是公开的**（`github.com/Mo12y/Quantitative-Fund-auto`），请先读完本节。
 
-**已经在公开历史里的个人数据**：`src/analysis/investment_plan.py` 把投资计划**硬编码**在源码里，
+**已经在公开历史里的个人数据**：`src/analysis/investment_plan.py` **曾经**把投资计划**硬编码**在源码里，
 包含真实基金代码、金额、日期（例如计划总额 1000 元、现金弹药 280 元、各笔买入的日期与金额）。
-无账号、无身份信息，但足以还原你的持仓结构 —— 这些内容**已经推送到公开仓库且存在于历史提交中**。
+无账号、无身份信息，但足以还原你的持仓结构 —— 这些内容**已经推送到公开仓库且存在于历史提交中**
+（即便现在已外置，历史提交里仍有，见下表第二行）。
+
+**2026-09-25 起：计划已外置**（F-01）。源码里只保留一份**示例**计划，真实计划在
+`config/investment_plan.local.yaml`（**已 .gitignore**）。读取优先级：
+数据库 `investment_plans` 表 → 本地配置 → 内置示例。新用户复制
+`config/investment_plan.local.example.yaml` 即可起步。
 
 **不受影响的**：数据库与运行时产物**不会**入库（`.gitignore` 覆盖 `*.db` / `*-wal` / `*-shm`、
 `data/backups/`、`data/cache/`、`data/*_results/`）；`docs/screenshots/` 也已忽略
@@ -114,10 +120,10 @@ python src/main.py          # 生成完整周报
 
 **如果你想脱敏**，两个层次：
 
-| 做法 | 效果 | 代价 |
+| 做法 | 效果 | 状态 |
 |---|---|---|
-| 把 `FUNDS` / `TOTAL_CAPITAL` 抽到本地配置文件（如 `config/investment_plan.local.yaml`）并加进 `.gitignore` | 之后的提交不含真实数据 | 需要一小段改造（当前**没有**实现这个读取逻辑，只是建议） |
-| 用 `git filter-repo` / BFG 重写历史后强推 | 连历史里的数据也清掉 | 会**改写公开历史**（其他人的 clone / fork 会不一致），需谨慎 |
+| 把 `FUNDS` / `TOTAL_CAPITAL` 抽到本地配置文件（`config/investment_plan.local.yaml`）并加进 `.gitignore` | 之后的提交不含真实数据 | ✅ **已实现**（2026-09-25，F-01）。源码只留示例计划；真实计划在本地文件里 |
+| 用 `git filter-repo` / BFG 重写历史后强推 | 连历史里的数据也清掉 | ⏳ 未做（会**改写公开历史**，其他人的 clone / fork 会不一致，需谨慎） |
 
 其余数据说明：
 - 系统只读公开市场数据（基金净值、指数估值、行业行情），不涉及任何账户/交易凭证；

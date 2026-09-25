@@ -1,5 +1,8 @@
 """
-投资计划跟踪模块: 1000元半年分批建仓计划（2026-08-24 起）。
+投资计划跟踪模块。
+
+计划来源（F-01 外置后）：数据库 investment_plans 表 → 本地配置
+`config/investment_plan.local.yaml` → 内置示例（见文件下方 PLAN_NAME 区块）。
 
 说明:
 - 2026-09-01 剔除纳斯达克（QDII 限购且分散效果不佳）：
@@ -11,6 +14,7 @@
 """
 
 import json
+import os
 from typing import Optional
 
 from ..data.database import Database
@@ -19,48 +23,60 @@ from ..data.database import Database
 # 计划定义
 # =================================================================
 
-PLAN_NAME = "1000元半年建仓计划（剔除纳斯达克）"
-START_DATE = "2026-08-24"  # 下周一
-TOTAL_CAPITAL = 1000.0
-CASH_RESERVE = 280.0  # 现金底仓（弹药，含原纳斯达克额度 130）
+# =================================================================
+# 计划定义 —— **已外置到本地配置**（F-01，2026-09-25）
+# -----------------------------------------------------------------
+# 读取优先级：① 数据库 investment_plans 表（Web 上维护，见 get_plan）
+#             ② 本地配置 config/investment_plan.local.yaml（**不入版本库**）
+#             ③ 内置示例计划（SAMPLE_*）—— 仅前两者都没有时使用
+#
+# 为什么要外置：原先把计划（真实基金代码 / 金额 / 日期）硬编码在本文件里，
+# 属于个人数据、不该进版本库（README §数据与隐私 有同样建议）。
+# 新用户请复制 config/investment_plan.local.example.yaml →
+# config/investment_plan.local.yaml 后填自己的计划（该文件已 gitignore）。
+# =================================================================
 
-FUNDS = [
+ROOT_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+LOCAL_PLAN_PATH = os.path.join(ROOT_DIR, "config", "investment_plan.local.yaml")
+EXAMPLE_PLAN_PATH = os.path.join(ROOT_DIR, "config", "investment_plan.local.example.yaml")
+
+
+def _load_local_plan() -> Optional[dict]:
+    """读本地个人计划；文件不存在或解析失败一律返回 None（不抛，退到示例计划）。"""
+    if not os.path.exists(LOCAL_PLAN_PATH):
+        return None
+    try:
+        import yaml
+        with open(LOCAL_PLAN_PATH, encoding="utf-8") as f:
+            d = yaml.safe_load(f)
+        return d if isinstance(d, dict) else None
+    except Exception:
+        return None
+
+
+# 内置**示例**计划：只在"无数据库计划、且无本地配置"时使用。
+# ⚠️ 这是占位示例，不是任何人的真实计划；别把它当成默认投资建议。
+SAMPLE_PLAN_NAME = "示例计划（未配置）"
+SAMPLE_START_DATE = "2026-01-01"
+SAMPLE_TOTAL_CAPITAL = 1000.0
+SAMPLE_CASH_RESERVE = 0.0
+SAMPLE_FUNDS = [
     {
-        "code": "018392",
-        "name": "南方上海金ETF联接C",
-        "role": "🛡️ 黄金对冲",
-        "target_amount": 300.0,  # 已买300（原计划150，用户加仓150）
-        "target_pct": 30,
-        "tranches": [
-            {"date": "2026-08-24", "amount": 300.0},
-        ],
-    },
-    {
-        "code": "007029",
-        "name": "易方达中证500ETF联接C",
-        "role": "📊 宽基底仓",
-        "target_amount": 175.0,
-        "target_pct": 17.5,
-        "tranches": [
-            {"date": "2026-08-24", "amount": 100.0},
-            {"date": "2026-09-20", "amount": 38.0},
-            {"date": "2026-10-20", "amount": 37.0},
-        ],
-    },
-    {
-        "code": "014143",
-        "name": "银河创新成长混合C",
-        "role": "🚀 科技卫星",
-        "target_amount": 175.0,
-        "target_pct": 17.5,
-        "tranches": [
-            {"date": "2026-08-24", "amount": 40.0},
-            {"date": "2026-09-20", "amount": 45.0},
-            {"date": "2026-10-20", "amount": 45.0},
-            {"date": "2026-11-20", "amount": 45.0},
-        ],
+        "code": "000001", "name": "示例基金（请替换）", "role": "示例角色",
+        "target_amount": 1000.0, "target_pct": 100.0,
+        "tranches": [{"date": "2026-01-01", "amount": 1000.0}],
     },
 ]
+
+_local_plan = _load_local_plan()
+#: True = 当前用的是**内置示例**（既没配本地文件、DB 里也没计划）→ 调用方应显式声明
+IS_SAMPLE_PLAN = _local_plan is None
+
+PLAN_NAME = (_local_plan or {}).get("plan_name") or SAMPLE_PLAN_NAME
+START_DATE = (_local_plan or {}).get("start_date") or SAMPLE_START_DATE
+TOTAL_CAPITAL = (_local_plan or {}).get("total_capital") or SAMPLE_TOTAL_CAPITAL
+CASH_RESERVE = (_local_plan or {}).get("cash_reserve") or SAMPLE_CASH_RESERVE
+FUNDS = (_local_plan or {}).get("funds") or SAMPLE_FUNDS
 
 # 温度联动规则
 TEMP_RULES = {

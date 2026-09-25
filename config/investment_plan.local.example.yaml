@@ -1,0 +1,21 @@
+# 投资计划本地配置 —— **模板**（可入库）
+# 用法：复制本文件为 config/investment_plan.local.yaml，填入自己的计划。
+# 该 local 文件已加入 .gitignore，不会进版本库。
+# 字段：plan_name / start_date / total_capital / cash_reserve / funds[]
+#   funds[]: code, name, role, target_amount, target_pct, tranches[{date, amount}]
+#   限购基金可选 dca_daily（每日可买金额）
+plan_name: 我的基金建仓计划
+start_date: '2026-01-01'
+total_capital: 1000.0
+cash_reserve: 200.0
+funds:
+- code: '000001'
+  name: 示例基金（请替换）
+  role: 角色说明
+  target_amount: 500.0
+  target_pct: 50
+  tranches:
+  - date: '2026-01-01'
+    amount: 250.0
+  - date: '2026-02-01'
+    amount: 250.0
