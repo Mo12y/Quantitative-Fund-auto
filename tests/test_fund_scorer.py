@@ -210,3 +210,42 @@ class TestPoolSummary(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+# =====================================================================
+# 2026-09-25：筛选池排序必须**确定性**（可复现）
+# =====================================================================
+
+class TestPoolOrderIsDeterministic:
+    """`screen_funds` 的输出顺序不能随进程/输入顺序变。
+
+    实测（修复前）：同一份数据、不同 `PYTHONHASHSEED` 给出的前 10 名**尾部完全不同**
+      seed=1     → …020215, 006961, 006962
+      seed=12345 → …006961, 020215, 009324
+    根因两层：① 上游 `_get_funds_with_nav()` 是 **set**（迭代顺序随 hash 变）；
+              ② `sort_values` 默认 quicksort **不稳定**，平局顺序无保证。
+    后果：调仓顾问"建议买哪只"随运行变 —— 违反本项目「结论可复现」。
+    """
+
+    def _src(self):
+        import os
+        root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        return open(os.path.join(root, "src", "analysis", "fund_scorer.py"), encoding="utf-8").read()
+
+    def test_sort_has_deterministic_tiebreak(self):
+        s = self._src()
+        i = s.find('df["_risk_order"] = df["risk_label"].map(risk_order)')
+        assert i > 0, "排序段未找到（代码结构变了？）"
+        seg = s[i:i + 1200]
+        assert '"fund_code"' in seg, \
+            "排序键末尾必须带 fund_code 作为确定性 tiebreak（否则平局顺序随 hash 变）"
+        assert 'kind="mergesort"' in seg, \
+            "必须用稳定排序 mergesort（默认 quicksort 不稳定）"
+
+    def test_no_unstable_sort_without_tiebreak(self):
+        """回归哨兵：排序键里一旦去掉 fund_code，本测试就失败。"""
+        s = self._src()
+        i = s.find('df.sort_values(["_risk_order", "quality_score", "mgt_fee"')
+        # 允许出现，但必须是「…mgt_fee", "fund_code"]」这种带 tiebreak 的写法
+        assert i < 0 or '"fund_code"]' in s[i:i + 160], \
+            "发现不带 tiebreak 的排序键（会把不确定性带回来）"

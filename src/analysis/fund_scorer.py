@@ -215,8 +215,16 @@ class FundScreener:
         #       3) 管理费升序，缺失（NaN）排最后，不得当 0
         risk_order = {"🟢 稳健": 0, "🟡 注意": 1, "🔴 高风险": 2}
         df["_risk_order"] = df["risk_label"].map(risk_order).fillna(3)
-        df = df.sort_values(["_risk_order", "quality_score", "mgt_fee"],
-                            ascending=[True, False, True], na_position="last")
+        # ⚠️ 末尾必须带 **deterministic tiebreak `fund_code`**（2026-09-25 实测发现）：
+        # ① 上游 `_get_funds_with_nav()` 返回的是 **set**（`get_all_fund_codes` 用集合推导），
+        #    迭代顺序随 `PYTHONHASHSEED` 变化 —— 实测同一份数据、不同进程给出的前 10 名尾部完全不同
+        #    （seed=1: …020215,006961,006962 ／ seed=12345: …006961,020215,009324）；
+        # ② `sort_values` 默认 quicksort **不稳定**，平局的相对顺序本就不保证。
+        # 后果是"调仓顾问建议买哪只"会随运行变 —— 违反本项目「结论可复现」。加上 fund_code 后
+        # 排序成为**全序**，与输入顺序无关，结果稳定。
+        df = df.sort_values(["_risk_order", "quality_score", "mgt_fee", "fund_code"],
+                            ascending=[True, False, True, True], na_position="last",
+                            kind="mergesort")
         df = df.drop(columns=["_risk_order"]).reset_index(drop=True)
 
         return df.head(max_results)
