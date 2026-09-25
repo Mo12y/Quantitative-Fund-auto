@@ -83,8 +83,7 @@ python src/main.py portfolio # 持仓概览
 ```bash
 python src/main.py precompute  # 可选：预计算快照（温度/筛选池/板块总榜），首屏免冷算
 python src/main.py web         # http://localhost:5020（仅监听本机）
-# 同时跑第二份（对照/调试）：QFA_PORT=5021 python src/main.py web
-# 想同时跑第二份（如对照环境）：QFA_PORT=5021 python src/main.py web
+# 想同时跑第二份（对照/调试）：QFA_PORT=5021 python src/main.py web
 ```
 
 ## 日常命令
@@ -185,7 +184,7 @@ Quantitative-Fund-auto/
 │   ├── link_dca_periods.py      #   定投期次补凭证（--apply 才写库）
 │   ├── backfill_sell_fees.py    #   历史卖出赎回费回填（--apply 才写库）
 │   └── backfill_index_volume.py #   指数成交量回填（curl + 新浪；--apply 才写库）
-├── tests/                       # ✅ 单元测试（177 个用例，pytest）
+├── tests/                       # ✅ 单元测试（390 个用例，pytest）
 ├── data/                        # 数据库文件（gitignore）
 ├── requirements.txt
 └── README.md
@@ -236,7 +235,7 @@ flowchart TD
 | 组件 | 选型 | 理由 |
 |------|------|------|
 | 数据源 | efinance（净值主）+ akshare（备）+ curl + 东方财富（交易日历） | 净值历史优先 efinance（更稳、含累计净值），失败回退 akshare；Python 直连外网不稳时交易日历用 curl 子进程；同花顺 HiThink 仅保留连通性自检 |
-| 存储 | SQLite（WAL） | 单机个人使用，零配置零运维；587 只基金 × 约 122 万条净值的量级完全够用；已开 WAL + busy_timeout，配合 Flask 多线程降低锁冲突 |
+| 存储 | SQLite（WAL） | 单机个人使用，零配置零运维；当前 **2.79 万只基金基本信息 + 2,290 万条净值记录**的量级完全够用；已开 WAL + busy_timeout，配合 Flask 多线程降低锁冲突 |
 | 语言 | Python 3.10+ | 金融数据生态成熟（pandas / numpy） |
 | CLI | rich | 终端彩色输出、表格、进度条，报告可读性好 |
 | Web | Flask | 轻量，单文件即可起服务，适合个人工具 |
@@ -336,9 +335,10 @@ flowchart TD
 python -m pytest tests/ -q
 ```
 
-共 **177** 个用例，覆盖市场温度计（分级/边界/估值分歧/缺失维度降级）、T+1/T+2 交易规则与持仓落账、
+共 **390** 个用例，覆盖市场温度计（分级/边界/估值分歧/缺失维度降级）、T+1/T+2 交易规则与持仓落账、
 定投期次推算与期次对账、组合累计曲线、投资计划 CRUD、基金筛选与板块归类、Web 写入 API、
-回测成本与日期对齐、组合模拟的信号滞后、回撤标签的复权口径、因子检验口径等；
+回测成本与日期对齐、组合模拟的信号滞后、回撤标签的复权口径、因子检验口径、
+同侪百分位参照系（样本不足显式声明 / 门槛修正 / 回归哨兵）、TER 费率口径与组内分位等；
 纯逻辑用例无需数据库与网络（净值只读本地库，读路径不联网）。
 
 ## 回测与研究（v3.0）
