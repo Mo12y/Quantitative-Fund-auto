@@ -421,6 +421,30 @@ python -m pytest tests/ -q
 - 回撤标签的阈值/模型组合在**验证段**选出、在**测试段**报告，并做多重比较校正；
 - 每份报告末尾都有「已知局限与口径说明」。
 
+### 方法论的文献依据
+
+上面这些口径不是拍脑袋定的，多数有明确文献来源。列在这里，一是让选型可追溯，
+二是**方便后人核验**（本项目吃过"抄了没核实的数字"的亏）。
+
+| 本项目的方法 | 文献依据 | 核验状态 |
+|---|---|---|
+| QLIKE 损失函数（**方差**形式，非波动率形式） | Patton A J. *Data-based ranking of realised volatility estimators*. Journal of Econometrics, 2011, 161(2): 284-303 | ✅ 领域标准，DOI 可查 |
+| HAR-RV 波动率预测框架 | Corsi F. *A simple approximate long-memory model of realized volatility*. Journal of Financial Econometrics, 2009, 7(2): 174-196 | ✅ 奠基文献 |
+| XGBoost 模型 | Chen T, Guestrin C. *XGBoost: a scalable tree boosting system*. KDD 2016: 785-794 | ✅ 奠基文献 |
+| 随机森林（对照模型） | Breiman L. *Random forests*. Machine Learning, 2001, 45(1): 5-32 | ✅ 奠基文献 |
+| 多因子模型（因子维度设计的思想来源） | Fama E F, French K R. *Common risk factors in the returns on stocks and bonds*. Journal of Financial Economics, 1993, 33(1): 3-56 | ✅ 奠基文献 |
+| 基金绩效持续性 / 四因子归因 | Carhart M M. *On persistence in mutual fund performance*. The Journal of Finance, 1997, 52(1): 57-82 | ✅ 奠基文献 |
+| 多重检验校正（因子检验的 Bonferroni 等） | White H. *A reality check for data snooping*. Econometrica, 2000, 68(5): 1097-1126 | ✅ 奠基文献 |
+| 回测过拟合风险 | Bailey D H, Borwein J M, López de Prado M, et al. *The probability of backtest overfitting*. Journal of Portfolio Management, 2022, 48(5): 120-131 | ⚠️ 主题确凿（López de Prado 系列），**具体卷期待核** |
+| ML 做资产定价的经济价值与显著性分离 | Gu S, Kelly B, Xiu D. *Empirical asset pricing via machine learning*. The Review of Financial Studies, 2020, 33(5): 2223-2273 | ✅ 高被引，DOI 可查 |
+| **费率（TER）是预测后续净回报最有效的单变量之一** | Morningstar：Kinnel R. (2016) 标杆研究 + 2025 年 20 年复现（Russel Kinnel / Jeffrey Ptak）；晨星中国 TER 口径 | ✅ **本项目独立核验过**（见 `docs/参照系接入执行报告.md` §8.5） |
+| 同侪百分位 / 组内分位（不做单一绝对阈值） | 同上（晨星"同类内比较"方法），外加本项目实测：TER 中位权益 1.40% vs 债券 0.50%（差 2.8 倍） | ✅ 实测支撑 |
+
+> ⚠️ **关于课程作业那份 25 篇文献清单**（`D:\DSH\courses\wenxianjiansuo\...\参考文献清单.md`）：
+> 它的外文经典部分（上表带 ✅ 的）与本项目一致且可查；但**其中的中文文献（如"陈锐 2024 五维评价框架"
+> "刘志东 2023 XGBoost-HAR"）题录存疑**，原清单自己也标注"需在知网最终核实"。
+> **本项目不引用未核实的中文条目** —— 需要时请先到知网确认作者与卷期。
+
 ## 你的使用场景
 
 既然你通过支付宝买场外基金:
