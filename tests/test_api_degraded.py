@@ -14,10 +14,14 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import src.web.app as app_module
 
+#: 记录 `_all_rebalance` 实际传给 RebalanceAdvisor 的 pool（2026-09-25 新增）
+_SEEN_POOL = []
+
 
 @pytest.fixture()
 def rebalance_env(monkeypatch):
     """把 _all_rebalance 的外部依赖全部替换掉，只留被测的那段逻辑。"""
+    _SEEN_POOL.clear()
 
     class _FakeDB:
         def close(self):
@@ -27,8 +31,10 @@ def rebalance_env(monkeypatch):
             return [{"fund_code": "X", "fund_name": "X", "shares": 1.0}]
 
     class _FakeAdvisor:
-        def __init__(self, db):
-            pass
+        # ⚠️ 真类现在多了 `pool` 参数（复用筛选池缓存，2026-09-25）—— 桩必须同步，
+        #    否则 `RebalanceAdvisor(db, pool=...)` 会 TypeError 并被外层 except 吞掉。
+        def __init__(self, db, pool=None):
+            _SEEN_POOL.append(pool)
 
         def analyze(self, cash_reserve=0.0):
             return {"need_rebalance": False, "current_equity_pct": 50.0,
@@ -45,6 +51,37 @@ def rebalance_env(monkeypatch):
 def _run(rebalance_env, plan):
     rebalance_env.setattr(app_module, "get_plan", lambda db: plan)
     return app_module._all_rebalance()
+
+
+class TestPoolIsReused:
+    """2026-09-25：`_all_rebalance` 必须**复用筛选池缓存**。
+
+    此前调仓顾问为了挑一只基金独立跑了一遍 `screen_funds()` —— 等于把全市场 1.8 万只
+    重算一次（约 85 秒），而同一 dashboard 的 funds worker 已经算过。
+    """
+
+    def test_pool_is_passed_from_funds_cache(self, rebalance_env):
+        seen = {}
+
+        def _fake_cached_get(key, fn, **kw):
+            seen["key"] = key
+            return ({"funds": [{"code": "016371", "name": "甲", "risk": "🟢 稳健"}]}, "cache")
+
+        rebalance_env.setattr(app_module, "_cached_get", _fake_cached_get)
+        _run(rebalance_env, {"cash_reserve": 10.0})
+        assert seen.get("key") == "funds", "应复用 funds 缓存而不是另算"
+        assert _SEEN_POOL and _SEEN_POOL[0] == [{"code": "016371", "name": "甲", "risk": "🟢 稳健"}], \
+            "筛选池必须传给 RebalanceAdvisor"
+
+    def test_pool_missing_falls_back_to_none_not_crash(self, rebalance_env):
+        """取不到池时传 None（回退旧路径），**不得**让整个调仓挂掉。"""
+        def _boom(key, fn, **kw):
+            raise RuntimeError("cache down")
+
+        rebalance_env.setattr(app_module, "_cached_get", _boom)
+        out = _run(rebalance_env, {"cash_reserve": 10.0})
+        assert _SEEN_POOL and _SEEN_POOL[0] is None
+        assert out["cash_reserve"] == 10.0
 
 
 class TestCashReserveIsDeclaredNotFaked:

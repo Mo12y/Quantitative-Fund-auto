@@ -501,7 +501,17 @@ def _all_rebalance():
         if not holdings:
             db.close()
             return {"need_rebalance": False, "instructions": [], "summary": {"verdict": "暂无持仓"}}
-        advisor = RebalanceAdvisor(db)
+        # ⚠️ 2026-09-25：**复用筛选池缓存**，不要自己再跑一次全市场筛选。
+        # 调仓顾问只是为了在"权益不足"时**挑一只**🟢稳健基金，而它原先会独立调
+        # `screen_funds()` —— 等于把全市场 1.8 万只重算一遍（当前规模约 85 秒），
+        # 而同一 dashboard 的 `funds` worker 已经算过。`_cached_get` 是单飞的：
+        # 两条 worker 谁先到谁算，另一个等它并复用，**全流程只算一次**。
+        try:
+            _funds_payload, _ = _cached_get("funds", _all_funds)
+            _pool = (_funds_payload or {}).get("funds")
+        except Exception:
+            _pool = None                       # 拿不到就回退旧路径（自己算），不静默出错
+        advisor = RebalanceAdvisor(db, pool=_pool)
         # 总资金口径 = 持仓市值 + 计划现金弹药（cash_reserve）。
         # 旧版用 total_invested * 1.1 拍脑袋估算，与计划卡数字互相打架。
         # 读不到就退回 0（总资金被低估、仓位被高估），但**必须声明** ——
@@ -537,14 +547,18 @@ def _compute_dashboard():
     """并行计算本地慢分析 + 快速投资计划。不含任何联网调用。
 
     ⚠️ `funds` 走 `_cached_get` **复用筛选池缓存**（2026-09-22）：原先直接调
-    `_all_funds()`，而筛选池冷算在全市场后要 ~110 秒 —— 导致 `__dash__` 与 `funds`
+    `_all_funds()`，而筛选池冷算在全市场后要 ~85 秒 —— 导致 `__dash__` 与 `funds`
     各算一遍，总预热时间翻倍（实测 ~210s）。复用后只算一次。
     """
-    workers = {"temp": _all_temp,
-               "funds": lambda: _cached_get("funds", _all_funds)[0],
-               "portfolio": _all_portfolio, "rebalance": _all_rebalance}
+    # ⚠️ 先把**最贵的 funds** 串行算出来，再并行跑其余（2026-09-25）。
+    # 为什么不能一起并行：`_all_rebalance` 也要筛选池，若与 funds 同时起跑，
+    # 两者都在 cache miss 上，而 `_cached_get` 的单飞等待上限 SLOT_WAIT=30s
+    # **小于**筛选池冷算的 ~85s → 等待方超时后自己又算一遍，等于跑两次全市场筛选
+    # （实测冷启 141s/2 次）。串行预热后调仓直接命中槽位，**只算一次**。
     out = {"plan": _all_plan()}
-    with ThreadPoolExecutor(max_workers=4) as ex:
+    out["funds"], _ = _cached_get("funds", _all_funds)
+    workers = {"temp": _all_temp, "portfolio": _all_portfolio, "rebalance": _all_rebalance}
+    with ThreadPoolExecutor(max_workers=3) as ex:
         fut = {ex.submit(fn): key for key, fn in workers.items()}
         for f in fut:
             out[fut[f]] = f.result()

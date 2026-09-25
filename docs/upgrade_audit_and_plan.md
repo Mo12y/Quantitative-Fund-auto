@@ -4,8 +4,13 @@
 > A–D 四批审计修复（含"修复任务书"里的条目）已在 2026-09-11 全部执行完毕，但**下面的勾选状态没有逐条回填**：
 > - ✅ 已确认完成：`simulation 前视`（组合模拟仓位信号改为严格滞后）、`rebalance 单位`（总资金改为市值+现金弹药）、
 >   `索引`（`fund_nav`/`holdings`/`fund_info`/`transactions` 四张表已有索引）、`upsert 批量`、离线温度路径。
-> - ⬜ 仍**未做**：`sector_analyzer` / `sentiment_monitor` 的模块级 `import akshare`（仍是 try 包裹的急切导入，
->   尚未改成函数内 lazy）；`RebalanceAdvisor` 内部重复跑 `screen_funds`；`/api/all` 拆分为分面板懒加载。
+> - ✅ **2026-09-25 复核**：下面三项**均已解决** ——
+>   ① `sector_analyzer` / `sentiment_monitor` 已无模块级急切 `import akshare`；
+>   ② `/api/all` 已是两阶段（`/api/overview` 轻量总览先出 + `loadOverviewFast`）；
+>   ③ `RebalanceAdvisor` 重复跑 `screen_funds` **已修**：改为注入预计算的筛选池，
+>      并在 `_compute_dashboard` 里**先串行预热 funds 再并行其余**
+>      （单飞等待上限 30s < 筛选池冷算 85s，一起并行会各算一遍）。
+>      实测冷启动 **141s/2 次 → 82s/1 次**。
 > - 勾选状态以外的细节，以各批汇报与重新生成的 `docs/*_report.md` 为准。
 > - 测试基线：83 → **177** 个用例，`python -m pytest tests/ -q` 全绿。
 >

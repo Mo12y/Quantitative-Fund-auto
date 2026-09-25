@@ -38,10 +38,23 @@ REBALANCE_PP = 5.0
 class RebalanceAdvisor:
     """辅助调仓顾问"""
 
-    def __init__(self, db: Database):
+    def __init__(self, db: Database, pool=None):
+        """
+        Args:
+            pool: **可选**的预计算筛选池，用于避免重复跑全市场筛选。
+                  允许两种形态：
+                    · `screen_funds()` 原样输出的 DataFrame；
+                    · 缓存载荷的 `funds` 列表（dict，键为 `code`/`name`/`risk`）。
+                  不传则回退到 `self.screener.screen_funds()`（旧行为，向后兼容）。
+
+        为什么要这个参数（2026-09-25）：`/api/all` 的 `funds` worker 已经算过一遍筛选池，
+        而调仓顾问为了**挑一只基金**又独立跑了一次 `screen_funds` —— 那是把**全市场 1.8 万只**
+        重算一遍（当前数据规模下约 85 秒）。同一个 dashboard 冷启动因此把最贵的计算做了两次。
+        """
         self.db = db
         self.thermometer = MarketThermometer(db)
         self.screener = FundScreener(db)
+        self._pool = pool                     # None = 自己算（旧路径，保留给 CLI / 测试）
 
     # =================================================================
     # 主接口
@@ -238,15 +251,14 @@ class RebalanceAdvisor:
         """加仓指令：权益不足时从🟢稳健筛选池挑一只买入"""
         instructions = []
         buy_amount = gap_amount
-        pool = self.screener.screen_funds(max_results=10)
-        candidates = pool[pool["risk_label"] == "🟢 稳健"] if not pool.empty else pd.DataFrame()
+        cands = self._pick_steady_candidates(10)      # 优先复用外部池，避免重复全市场筛选
 
-        if not candidates.empty:
-            best = candidates.iloc[0]
+        if cands:
+            best = cands[0]
             instructions.append(RebalanceInstruction(
                 action="买入",
                 fund_code=best["fund_code"],
-                fund_name=best.get("fund_name", best["fund_code"]),
+                fund_name=best.get("fund_name") or best["fund_code"],
                 amount=round(min(buy_amount, total_cap * 0.3), 0),
                 current_pct=round(current_eq, 1),
                 target_pct=target_eq,
@@ -254,6 +266,36 @@ class RebalanceAdvisor:
                 priority=1,
             ))
         return instructions
+
+    def _pick_steady_candidates(self, n: int = 10) -> list:
+        """从筛选池里取前 n 个"🟢稳健"候选（保持筛选器原序）→ [{'fund_code','fund_name'}]。
+
+        · 有外部池（`pool=None` 之外）→ 直接用，**不再跑 `screen_funds`**；
+          取前 `n` 条再过滤，与旧代码 `screen_funds(max_results=n)` 后过滤**等价**
+          （缓存载荷正是 `screen_funds` 的原序输出）。
+        · 无外部池 → 回退旧路径（CLI / 单测不受影响）。
+        """
+        if self._pool is None:
+            df = self.screener.screen_funds(max_results=n)
+            if df is None or df.empty:
+                return []
+            rows = df.to_dict("records")
+        else:
+            rows = self._pool
+            if hasattr(rows, "to_dict"):            # DataFrame 也接受
+                rows = rows.to_dict("records")
+            rows = list(rows)[:n]                   # 与旧路径同一切口
+        out = []
+        for r in rows:
+            label = r.get("risk_label") or r.get("risk") or ""
+            if "稳健" not in str(label):            # 只挑 🟢 稳健（"稳健"二字足够稳）
+                continue
+            code = r.get("fund_code") or r.get("code")
+            if not code:
+                continue
+            out.append({"fund_code": code,
+                        "fund_name": r.get("fund_name") or r.get("name") or ""})
+        return out
 
     def _build_hold_instructions(self, fund_risks: list, total_cap: float) -> list:
         """持有指令：仓位偏差不大时全部继续持有"""
