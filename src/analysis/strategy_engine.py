@@ -172,17 +172,22 @@ class StrategyEngine:
         return result
 
     def _holding_market_value(self, h: dict) -> float:
-        """持仓市值 = 份额 × 最新单位净值；缺数据退回买入金额。"""
+        """持仓市值 = 份额 × 最新单位净值 **+ 现金分红余额**；缺数据退回买入金额。
+
+        ⚠️ 必须加 `cash_balance`（设计稿 §6）：现金分红的钱出了单位净值、进了现金，
+        不加它会让总市值/权益占比/调仓金额**系统性偏低**。
+        """
+        cash = float(h.get("cash_balance") or 0)
         try:
             shares = h.get("shares") or 0
             if shares:
                 row = self.db.get_latest_fund_nav(h["fund_code"])
                 nav = float(row["unit_nav"]) if row and row.get("unit_nav") is not None else None
                 if nav:
-                    return shares * nav
+                    return shares * nav + cash
         except Exception:
             pass
-        return float(h.get("buy_amount") or 0)
+        return float(h.get("buy_amount") or 0) + cash
 
     def _estimate_rebalance_cost(self) -> dict:
         """估算调仓的交易成本。

@@ -171,3 +171,38 @@ def scan_holding(db, holding: dict):
     events, suspects = detect_dividends(rows)
     return {"events": events, "suspects": suspects,
             "policy": holding.get("dividend_policy") or POLICY_REINVEST}
+
+
+def auto_post_all(db, holdings=None) -> dict:
+    """扫描全部在持持仓 → 对**通过拒收条件**的除息日自动落账（设计稿 §7 第 4 步）。
+
+    用户 2026-09-16 的决定：**自动落账，不设人工确认环节**。因此本函数只落
+    `detect_dividends` 给出的 `events`（三条安全底线已过），`suspects` **一律不落**、
+    只回报给调用方展示（"存疑除息日"）。
+
+    幂等：`post_dividend` 内部按 `(holding_id, apply_date, kind)` 去重，本函数可反复调用
+    ——在 reconcile / 净值更新后顺带跑，不会重复入账。
+
+    Returns: `{"posted": [...], "suspects": [...], "posted_amount": float, "posted_n": int}`
+    """
+    out = {"posted": [], "suspects": [], "posted_amount": 0.0, "posted_n": 0}
+    hs = holdings if holdings is not None else db.get_current_holdings()
+    for h in hs:
+        try:
+            r = scan_holding(db, h)
+        except Exception:
+            continue
+        for ev in r["suspects"]:
+            out["suspects"].append({**ev, "fund_code": h.get("fund_code"),
+                                    "fund_name": h.get("fund_name")})
+        for ev in r["events"]:
+            res = post_dividend(db, h, ev)
+            if res.get("posted"):
+                out["posted"].append({**ev, "fund_code": h.get("fund_code"),
+                                      "fund_name": h.get("fund_name"), **res})
+                out["posted_amount"] += float(res.get("amount") or 0)
+                out["posted_n"] += 1
+                # 同一只持仓可能有多笔（历史补记）：后续笔的份额已变，需刷新
+                h = next((x for x in db.get_current_holdings() if x["id"] == h["id"]), h)
+    out["posted_amount"] = round(out["posted_amount"], 2)
+    return out

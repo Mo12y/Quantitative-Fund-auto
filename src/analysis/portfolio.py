@@ -353,8 +353,11 @@ class PortfolioTracker:
 
             # 获取最新净值
             latest_nav = self._get_latest_nav(h["fund_code"])
+            # 现金分红余额（设计稿 §6）：现金分红的钱**出了净值、进了现金**，
+            # 不加上它这笔钱会在总资产里凭空消失 —— 比不记分红更糟。
+            cash = float(h.get("cash_balance") or 0)
             if latest_nav is not None and shares > 0:
-                current_value = shares * latest_nav
+                current_value = shares * latest_nav + cash
                 pnl = current_value - invested
                 # pnl_pct = **金额法**：「我赚了多少」的展示口径（前端就显示这个）。
                 # 分母 buy_amount 是剩余成本，分子用四舍五入到 2 位的 shares →
@@ -935,6 +938,21 @@ class PortfolioTracker:
                 cost -= sold_cost
 
         sales.sort(key=lambda s: str(s.get("confirm_date") or ""), reverse=True)
+
+        # —— 分红收益（设计稿 §6）：与买卖价差**分开统计**，两者相加才是总收益 ——
+        # · `div_cash`     → `amount` 即实际收到的现金金额
+        # · `div_reinvest` → 金额 = 新增份额 × 再投净值（存量口径 amount 记 0，故需换算）
+        div_total, div_count = 0.0, 0
+        for _txs in tx_by_holding.values():
+            for _t in _txs:
+                k = _t.get("kind")
+                if k == "div_cash":
+                    div_total += float(_t.get("amount") or 0)
+                    div_count += 1
+                elif k == "div_reinvest":
+                    div_total += float(_t.get("shares") or 0) * float(_t.get("confirm_nav") or 0)
+                    div_count += 1
+
         return {
             "total_gross": round(total_gross, 2),
             "total_cost": round(total_cost, 2),
@@ -942,4 +960,9 @@ class PortfolioTracker:
             "total_pnl": round(total_gross - total_cost - total_fee, 2),
             "count": len(sales),
             "sales": sales,
+            # —— 分红收益（设计稿 §6）：与**买卖价差分开列**，两者相加才是总收益 ——
+            # `div_cash`    → amount 即收到的现金
+            # `div_reinvest`→ 金额 = 新增份额 × 再投净值（存量口径：amount 记 0，故需换算）
+            "dividend_total": round(div_total, 2),
+            "dividend_count": div_count,
         }

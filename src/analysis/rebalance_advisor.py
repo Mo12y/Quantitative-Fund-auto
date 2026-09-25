@@ -374,10 +374,15 @@ class RebalanceAdvisor:
     # =================================================================
 
     def _holding_value(self, h: dict) -> float:
-        """持仓市值 = 份额 × 最新净值；缺数据退回买入金额。"""
+        """持仓市值 = 份额 × 最新净值 **+ 现金分红余额**；缺数据退回买入金额。
+
+        ⚠️ 必须加 `cash_balance`（设计稿 §6）：现金分红的钱出了单位净值、进了现金，
+        不加它会让**权益占比与调仓金额口径错**。
+        """
         nav = self._get_latest_nav(h["fund_code"])
         shares = h.get("shares", 0)
-        return float(shares * nav) if nav and shares else float(h["buy_amount"])
+        cash = float(h.get("cash_balance") or 0)
+        return (float(shares * nav) if nav and shares else float(h["buy_amount"])) + cash
 
     def _calc_portfolio_value(self, holdings):
         return round(sum(self._holding_value(h) for h in holdings), 2)

@@ -1202,12 +1202,22 @@ def api_reconcile():
     db = get_db()
     try:
         r = PortfolioTracker(db).reconcile()
-        changed = bool(r.get("settled_buys") or r.get("settled_sells"))
+        # 分红自动落账（设计稿 §7 第 4 步）：对账/新净值入库后顺带跑一次。
+        # · 幂等（幂等键 `(holding_id, apply_date, kind)`）→ 可反复调用，不会重复入账；
+        # · 只落**通过安全底线**的除息日，存疑的一律不落、只回报（用户 2026-09-16 决定：
+        #   自动落账、不设人工确认 —— 所以"拒收条件"就是唯一的安全阀）。
+        try:
+            from src.analysis.dividend import auto_post_all
+            div = auto_post_all(db)
+        except Exception as e:
+            div = {"posted": [], "suspects": [], "posted_n": 0, "posted_amount": 0.0,
+                   "error": str(e)}
+        changed = bool(r.get("settled_buys") or r.get("settled_sells") or div.get("posted_n"))
         if changed:
             _invalidate_caches("rebalance")
-        return jsonify({"ok": True, "data": r, "changed": changed})
+        return jsonify({"ok": True, "data": {**r, "dividend": div}, "changed": changed})
     except Exception as e:
-        return jsonify({"ok": False, "error": f"对账失败: {e}"})
+        return jsonify({"ok": False, "error": f"对账失败: {e}"}), 500
     finally:
         db.close()
 

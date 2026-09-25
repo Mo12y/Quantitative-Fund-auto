@@ -170,3 +170,79 @@ class TestScanHolding:
         r = scan_holding(db, h)
         assert len(r["events"]) == 1
         assert db.conn.execute("SELECT COUNT(*) FROM transactions").fetchone()[0] == before
+
+
+class TestAggregationIncludesCash:
+    """设计稿 §6：现金分红入账后，**总市值/已实现/调仓口径都必须算上 `cash_balance`**。
+
+    只落账不改聚合的话，那笔现金会"隐身"（记进了 cash_balance 但没人读）——比不记更糟。
+    """
+
+    def _mk(self, db, policy, div=50.0):
+        h = _seed_holding(db, policy=policy)
+        ev = {"date": "2026-01-06", "per_share": 0.05, "unit_nav": 1.03}
+        assert post_dividend(db, h, ev)["posted"]
+        return h
+
+    def test_cash_dividend_is_counted_in_total_market_value(self, db):
+        from src.analysis.portfolio import PortfolioTracker
+        h = self._mk(db, "cash")
+        # 给这只持仓一个可读的净值，避免"缺净值退回成本"的干扰
+        db.conn.executemany(
+            "INSERT INTO fund_nav (fund_code, nav_date, unit_nav, acc_nav, daily_return) VALUES (?,?,?,?,0)",
+            [("D001", "2026-01-06", 0.98, 1.03)])
+        db.conn.commit()
+        s = PortfolioTracker(db).get_portfolio_summary()
+        row = [x for x in s["holdings_detail"] if x["fund_code"] == "D001"][0]
+        # 市值 = 份额 × 净值 + cash_balance（少了 cash 就会比这里小 50）
+        assert row["current_value"] == pytest.approx(1000 * 0.98 + 50.0, abs=0.02), row
+
+    def test_cash_dividend_appears_separately_in_realized(self, db):
+        """分红收益与买卖价差**分开列**（设计稿 §6），两者相加才是总收益。"""
+        from src.analysis.portfolio import PortfolioTracker
+        self._mk(db, "cash")
+        rz = PortfolioTracker(db).get_realized_pnl()
+        assert rz["dividend_count"] == 1
+        assert rz["dividend_total"] == pytest.approx(50.0)
+        assert rz["count"] == 0, "分红不是卖出，不得混进价差笔数"
+
+    def test_reinvest_dividend_counts_in_shares_not_cash(self, db):
+        from src.analysis.portfolio import PortfolioTracker
+        self._mk(db, "reinvest")
+        rz = PortfolioTracker(db).get_realized_pnl()
+        assert rz["dividend_count"] == 1
+        assert rz["dividend_total"] == pytest.approx(50.0, abs=0.01)
+        h = db.get_current_holdings()[0]
+        assert float(h["cash_balance"] or 0) == 0, "再投不产生现金"
+
+
+class TestAutoPostAll:
+    def test_auto_post_is_inert_without_dividends_and_idempotent(self, db):
+        from src.analysis.dividend import auto_post_all
+        h = _seed_holding(db)
+        db.conn.executemany(
+            "INSERT INTO fund_nav (fund_code, nav_date, unit_nav, acc_nav, daily_return) VALUES (?,?,?,?,0)",
+            [("D001", "2026-01-02", 1.0, 1.0), ("D001", "2026-01-05", 1.01, 1.01)])
+        db.conn.commit()
+        before = (db.conn.execute("SELECT COUNT(*) FROM transactions").fetchone()[0],
+                  db.conn.execute("SELECT ROUND(SUM(shares),6) FROM holdings").fetchone()[0])
+        r1 = auto_post_all(db)
+        r2 = auto_post_all(db)                    # 再跑一遍：必须幂等
+        assert r1["posted_n"] == 0 and r2["posted_n"] == 0
+        after = (db.conn.execute("SELECT COUNT(*) FROM transactions").fetchone()[0],
+                 db.conn.execute("SELECT ROUND(SUM(shares),6) FROM holdings").fetchone()[0])
+        assert before == after, "无分红时不得改动账本"
+
+    def test_auto_post_posts_real_dividend_once(self, db):
+        from src.analysis.dividend import auto_post_all
+        _seed_holding(db)
+        db.conn.executemany(
+            "INSERT INTO fund_nav (fund_code, nav_date, unit_nav, acc_nav, daily_return) VALUES (?,?,?,?,0)",
+            [("D001", "2026-01-02", 1.00, 1.00),
+             ("D001", "2026-01-05", 1.00, 1.00),
+             ("D001", "2026-01-06", 0.95, 1.05)])   # 除息：diff 0 → 0.05
+        db.conn.commit()
+        r1 = auto_post_all(db)
+        r2 = auto_post_all(db)
+        assert r1["posted_n"] == 1, r1
+        assert r2["posted_n"] == 0, "第二次必须被幂等键挡住"
