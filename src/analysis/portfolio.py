@@ -14,6 +14,10 @@ import threading
 import pandas as pd
 from datetime import date as _date
 from typing import Optional
+
+#: 业绩比较基准：沪深300（本地 index_daily 代码 000300，与 thermometer.HS300_CODE 一致）
+HS300_CODE = "000300"
+HS300_NAME = "沪深300"
 from ..data.database import Database
 from . import trade_rules
 
@@ -652,6 +656,7 @@ class PortfolioTracker:
         if not active:
             n, amt = _not_in()
             return {"dates": [], "value": [], "cost": [], "pnl": [], "return_pct": [],
+                    "benchmark": [], "benchmark_name": HS300_NAME,
                     "funds_used": 0, "excluded_pending": pending,
                     "excluded_not_in": n, "excluded_amount": amt}
 
@@ -664,6 +669,7 @@ class PortfolioTracker:
         if not all_dates:
             n, amt = _not_in()
             return {"dates": [], "value": [], "cost": [], "pnl": [], "return_pct": [],
+                    "benchmark": [], "benchmark_name": HS300_NAME,
                     "funds_used": len(active), "excluded_pending": pending,
                     "excluded_not_in": n, "excluded_amount": amt}
 
@@ -694,8 +700,44 @@ class PortfolioTracker:
 
         n_notin, amt_notin = _not_in(all_dates[-1])
         return {"dates": dates, "value": values, "cost": costs, "pnl": pnls, "return_pct": rets,
+                "benchmark": self._hs300_series(dates), "benchmark_name": HS300_NAME,
                 "funds_used": len(active), "excluded_pending": pending,
                 "excluded_not_in": n_notin, "excluded_amount": amt_notin}
+
+    def _hs300_series(self, dates: list) -> list:
+        """沪深300 在给定日期轴上的**收益率序列**（%，以首个可用日为 0）。
+
+        依据（2026-09-25 加）：pyfolio 把 `benchmark_rets` 视为**一等参数**，其 tear sheet
+        首图就是「策略 vs 基准 的累计收益对比」，并明确警告 returns 与 benchmark 的
+        **日期索引必须对齐**，否则相对指标会被静默扭曲。
+        故这里**按日期对齐**（指数收盘价前向填充，不用位置截断），并归一成
+        "自曲线首日起的累计收益率 %" —— 与 `return_pct` 同量纲、可直接叠画。
+        只读本地 `index_daily`（离线）；取不到返回空列表，前端不画（不编造）。
+        """
+        out = []
+        if not dates:
+            return out
+        try:
+            rows = self.db.get_index_daily(HS300_CODE)
+        except Exception:
+            return out
+        closes = {str(r["trade_date"]): float(r["close"])
+                  for r in (rows or []) if r.get("close") is not None}
+        if not closes:
+            return out
+        import bisect
+        ks = sorted(closes)
+        base = None
+        for d in dates:
+            i = bisect.bisect_right(ks, str(d)) - 1
+            if i < 0:                      # 曲线日期早于指数首个交易日
+                out.append(None)
+                continue
+            c = closes[ks[i]]
+            if base is None:
+                base = c or None
+            out.append(round((c / base - 1) * 100, 4) if base else None)
+        return out
 
     def get_performance_history(self) -> pd.DataFrame:
         """

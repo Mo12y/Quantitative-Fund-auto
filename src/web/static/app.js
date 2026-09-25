@@ -442,7 +442,12 @@ function portfolioChartSVG(C){
   // （建仓期每日定投会使市值单调上升，画市值与真实盈亏无关且把收益率压成一条缝）
   const vals=(C.return_pct||[]).map(v=>Number(v)||0);
   if(vals.length!==n)return'';
-  const mx=Math.max(0,...vals), mn=Math.min(0,...vals);
+  // 基准（沪深300）：虚线参照线。**值域必须把它一起算进去**，否则线会跑到画布外。
+  // 依据：pyfolio 把 benchmark 作为一等参数、tear sheet 首图即「策略 vs 基准 累计收益」。
+  const bench=(C.benchmark||[]).map(v=>(v===null||v===undefined||isNaN(v))?null:Number(v));
+  const hasB=bench.length===n && bench.some(v=>v!==null);
+  const pool=hasB?vals.concat(bench.filter(v=>v!==null)):vals;
+  const mx=Math.max(0,...pool), mn=Math.min(0,...pool);
   const M=Math.max(Math.abs(mx),Math.abs(mn))||1;          // y 轴关于 0 对称 [-M,+M]，零轴居中
   const x=i=>l+i*(W-l-r)/(n-1);
   const y=v=>t+(1-(v+M)/(2*M))*(H-t-b);
@@ -451,6 +456,9 @@ function portfolioChartSVG(C){
   const area=`${x(0).toFixed(1)},${y0} `+pts(vals)+` ${x(n-1).toFixed(1)},${y0}`;
   const step=Math.ceil(n/6);
   const lab=(C.dates||[]).map((d,i)=>i%step===0?`<text x="${x(i).toFixed(1)}" y="${H-7}" font-size="9" fill="var(--ink-tertiary)" text-anchor="${i===0?'start':i===n-1?'end':'middle'}">${esc(String(d).slice(5))}</text>`:'').join('');
+  // 基准点串：缺值（指数还没开市/早于首个交易日）直接跳过，不补 0
+  const bpts=hasB?bench.map((v,i)=>(v===null?null:`${x(i).toFixed(1)},${y(v).toFixed(1)}`))
+                        .filter(Boolean).join(' '):'';
   const last=vals[n-1], lastX=x(n-1).toFixed(1), lastY=y(last).toFixed(1);
   const col=(last>=0)?'var(--up)':'var(--down)';
   return `<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="xMidYMid meet" role="img" aria-label="组合收益率曲线">
@@ -462,13 +470,14 @@ function portfolioChartSVG(C){
       <clipPath id="cpUp"><rect x="0" y="0" width="${W}" height="${y0}"/></clipPath>
       <clipPath id="cpDn"><rect x="0" y="${y0}" width="${W}" height="${(H-Number(y0)).toFixed(1)}"/></clipPath>
     </defs>
-    <text x="${l}" y="9" font-size="9" fill="var(--ink-tertiary)">收益率 %（资金加权：pnl/累计成本，非时间加权）</text>
+    <text x="${l}" y="9" font-size="9" fill="var(--ink-tertiary)">收益率 %（资金加权：pnl/累计成本，非时间加权）${hasB?`　—— 实线 本组合　┄┄ 虚线 ${esc(C.benchmark_name||'基准')}（同期、同起点归一）`:''}</text>
     ${[M,-M].map(v=>`<text x="${W-r}" y="${(y(v)+(v>0?9:-2)).toFixed(1)}" font-size="9" fill="var(--ink-tertiary)" text-anchor="end">${(v>0?'+':'') + v.toFixed(1)}%</text>`).join('')}
     ${[M,-M].map(v=>`<line x1="${l}" y1="${y(v).toFixed(1)}" x2="${W-r}" y2="${y(v).toFixed(1)}" stroke="var(--hairline)" stroke-width="1"/>`).join('')}
     <line x1="${l}" y1="${y0}" x2="${W-r}" y2="${y0}" stroke="var(--ink-subtle)" stroke-width="1.4"/>
     <text x="${W-r}" y="${(Number(y0)-3).toFixed(1)}" font-size="9" fill="var(--ink-subtle)" text-anchor="end">0%</text>
     <polygon points="${area}" fill="url(#cgUp)" clip-path="url(#cpUp)"/>
     <polygon points="${area}" fill="url(#cgDn)" clip-path="url(#cpDn)"/>
+    ${hasB?`<polyline points="${bpts}" fill="none" stroke="var(--ink-tertiary)" stroke-width="1.4" stroke-dasharray="4 3" stroke-linejoin="round" stroke-linecap="round"/>`:''}
     <polyline points="${pts(vals)}" fill="none" stroke="${col}" stroke-width="1.9" stroke-linejoin="round" stroke-linecap="round"/>
     <circle cx="${lastX}" cy="${lastY}" r="3" fill="${col}"/>
     ${lab}</svg>`;
