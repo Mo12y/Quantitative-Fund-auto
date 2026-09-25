@@ -377,6 +377,7 @@ class Database:
 
         # 兼容迁移：给 holdings 补 T+1/T+2 相关列（老库自动升级，不重建表）
         self._migrate_holdings_t1()
+        self._migrate_dividend()
 
         # 常用过滤/排序列补索引（幂等，加速持仓查询与候选采样；对已有大库首开建一次）
         for ddl in (
@@ -410,6 +411,41 @@ class Database:
                     self.conn.execute(f"ALTER TABLE holdings ADD COLUMN {col} {decl}")
                 except Exception:
                     pass
+        self.conn.commit()
+
+    def _migrate_dividend(self):
+        """幂等添加「分红入账」字段（存在则跳过）。
+
+        依据 `docs/现金分红设计方案.md` §4（方案 B）+ §7 第 2 步：
+          · `holdings.dividend_policy` —— `'reinvest'`（默认，与 2026-09-16 的 D4 决策一致）｜`'cash'`
+          · `holdings.cash_balance`    —— 现金分红累计余额（§6：**总市值必须 + 它**，否则现金分红那笔钱仍然丢）
+          · `transactions.dividend_per_share` —— 每份分红，审计/对账用（幂等键 `(holding_id, apply_date, kind)` 见 §5）
+
+        ⚠️ 三列**都带 DEFAULT** → 存量行语义不变（`reinvest` / `0` / NULL），
+        所以迁移本身不改任何历史账（设计稿 §6「迁移与安全」第 2 条）。
+        """
+        try:
+            have_h = {r[1] for r in self.conn.execute("PRAGMA table_info(holdings)")}
+        except Exception:
+            have_h = set()
+        for col, decl in (
+            ("dividend_policy", "TEXT NOT NULL DEFAULT 'reinvest'"),
+            ("cash_balance", "REAL NOT NULL DEFAULT 0"),
+        ):
+            if col not in have_h:
+                try:
+                    self.conn.execute(f"ALTER TABLE holdings ADD COLUMN {col} {decl}")
+                except Exception:
+                    pass
+        try:
+            have_t = {r[1] for r in self.conn.execute("PRAGMA table_info(transactions)")}
+        except Exception:
+            have_t = set()
+        if "dividend_per_share" not in have_t:
+            try:
+                self.conn.execute("ALTER TABLE transactions ADD COLUMN dividend_per_share REAL")
+            except Exception:
+                pass
         self.conn.commit()
 
     # ========== 基金信息操作 ==========
