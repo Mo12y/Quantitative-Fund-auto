@@ -22,6 +22,7 @@ from .nav_series import valuation_nav_series
 from .risk_free import RISK_FREE_ANNUAL
 from . import peer_percentile
 from . import fund_fee
+from . import nav_metrics
 
 # 申购状态分类（D2）——
 #   `暂停申购` / `封闭期`：**买不进去**，直接排除出推荐池；
@@ -167,11 +168,14 @@ class FundScreener:
 
         results = []
         for code, ftype in picked:
-            vals = series_map.get(code)
+            pair = series_map.get(code)
+            if pair is None:
+                continue
+            vals, dates = pair
             if vals is None or len(vals) < 60:
                 continue
             info = fund_info_map[code]
-            result = self._score_series(vals, info)
+            result = self._score_series(vals, info, dates)
 
             # 排除标签为"不合格"的基金，以及**买不进去**的（暂停申购/封闭期）
             if result["risk_label"] == "不合格" or result.get("purchase_blocked"):
@@ -344,25 +348,25 @@ class FundScreener:
             return "pass", "✅ 可申购", None, raw
         return "unknown", f"⊘ 申购状态未知({raw})", None, raw
 
-    def _check_drawdown(self, vals) -> tuple:
+    def _check_drawdown(self, vals, dates=None) -> tuple:
         """近1年最大回撤检查 → (level, check_text, warning, max_dd)
 
         入参是**升序的单位净值序列**（numpy array）。原来用 pandas 逐点循环，
         540 只基金要跑十几万次 Python 迭代；改成 maximum.accumulate 后整批只需几十毫秒。
         """
-        if len(vals) < 60:
+        # 2026-09-25：改走 nav_metrics —— 近1年回撤用**日期窗口**（原为 252 **点数**，
+        # 序列有缺口时会跨过 1 年；口径文档早已指出必须按日期）。
+        m = nav_metrics.compute(vals, dates)
+        if m is None:
             return "unknown", "⚠️ 数据不足", None, None
-        recent = vals[-252:] if len(vals) >= 252 else vals
-        peak = np.maximum.accumulate(recent)
-        peak = np.where(peak == 0, 1e-12, peak)      # 防 0 净值除零
-        max_dd = float(np.max((peak - recent) / peak * 100)) if len(recent) else 0.0
+        max_dd = float(m["max_drawdown_1y"]) if np.isfinite(m["max_drawdown_1y"]) else 0.0
         if max_dd > self.THRESHOLDS["max_drawdown_1y"]:
             return "fail", f"❌ {max_dd:.0f}%(过大)", f"近1年最大回撤{max_dd:.0f}%，超过{self.THRESHOLDS['max_drawdown_1y']}%阈值", round(max_dd, 1)
         if max_dd > 25:
             return "warn", f"⚠️ {max_dd:.0f}%(偏高)", None, round(max_dd, 1)
         return "pass", f"✅ {max_dd:.0f}%", None, round(max_dd, 1)
 
-    def _check_momentum(self, vals, fund_type: str = None) -> tuple:
+    def _check_momentum(self, vals, fund_type: str = None, dates=None) -> tuple:
         """追涨风险检查 → (level, check_text, warning, mom_3m)
 
         **阈值 = 组内 P90**（A1 原则：追涨是相对概念，不能跨组用同一常数）。
@@ -373,9 +377,11 @@ class FundScreener:
         ⚠️ 取不到参照系时**不退回常数 40**（那等于恢复一条已证失效的检查，
         违反"数据缺失必须声明"）。改为如实声明"跳过"，由上层展示。
         """
-        if len(vals) < 63:
+        # 2026-09-25：近3月动量改走 nav_metrics 的**日期窗口**（原为 63 **点数**）。
+        m = nav_metrics.compute(vals, dates)
+        if m is None:
             return "unknown", "⚠️ 数据不足", None, None
-        mom = float((vals[-1] / vals[-63] - 1) * 100)
+        mom = float(m["momentum_3m"]) if np.isfinite(m["momentum_3m"]) else 0.0
         thr, group = self._momentum_threshold(fund_type)
         if thr is None:
             # 显式声明缺什么，不静默放行、也不用假值顶替
@@ -394,23 +400,32 @@ class FundScreener:
             return "warn", f"💡 近3月跌{abs(mom):.0f}%(可能超跌)", None, round(mom, 1)
         return "pass", f"✅ 近3月{mom:+.1f}%(P{self.MOMENTUM_WARNING_PCT}线 {thr:.1f}%)", None, round(mom, 1)
 
-    def _check_sharpe(self, vals) -> tuple:
-        """风险调整收益检查 → (level, check_text, warning, sharpe, ann_vol)"""
-        if len(vals) < 60:
+    def _check_sharpe(self, vals, dates=None) -> tuple:
+        """风险调整收益检查 → (level, check_text, warning, sharpe, ann_vol)
+
+        口径（2026-09-25 统一，实现见 `src/analysis/nav_metrics.py`）：
+        · **固定 3 年窗口**，不再用"基金全历史"。依据：晨星（全球基金评级标准）要求满
+          **36 个月**才予评级、按 **3/5/10 年**固定窗口算；天天基金「特色数据」也只给
+          **近1/2/3 年**固定窗口 —— **没有一家用全历史**，因为只有固定窗口才让不同
+          年龄的基金**可比**。（本项目 3 年同时对晨星最小窗 + 天天基金最长展示窗 + 既有 756 天门槛。）
+        · 年化波动用 `TRADING_DAYS`(244)，**不是 252** —— 项目早已实测"252 会把年化波动
+          高估 3.07%"，但这里漏改了（2026-09-25 修）。
+        · 年化收益用**几何**（按日期跨度），与参照系 `metrics()` 同源 —— 此前本处用
+          "算术均值×252"，导致**同一只基金在两处算出不同夏普**。
+        · 窗口按**日期**切（`_load_nav_series` 已带日期）；序列有缺口，按点数当年数会
+          把年化严重高估（实测最坏约 2.3 倍）。
+        """
+        m = nav_metrics.compute(vals, dates, risk_free=self.risk_free_rate)
+        if m is None:
             return "unknown", "⚠️ 数据不足", None, None, None
-        with np.errstate(divide="ignore", invalid="ignore"):
-            daily = np.diff(vals) / vals[:-1]        # 等价于 pct_change().dropna()
-        daily = daily[np.isfinite(daily)]
-        if len(daily) < 20:
+        sharpe, ann_vol = float(m["sharpe"]), float(m["ann_vol"])   # ann_vol 已是 %
+        if not np.isfinite(sharpe) or not np.isfinite(ann_vol):
             return "unknown", "⚠️ 数据不足", None, None, None
-        ann_ret = float(np.mean(daily) * 252)
-        ann_vol = float(np.std(daily, ddof=1) * np.sqrt(252))
-        sharpe = (ann_ret - self.risk_free_rate) / ann_vol if ann_vol > 0 else 0
         if sharpe < 0:
-            return "fail", "❌ 夏普为负", "夏普比率为负，承担风险但没有获得相应回报", round(sharpe, 2), round(ann_vol * 100, 1)
+            return "fail", "❌ 夏普为负", "夏普比率为负，承担风险但没有获得相应回报", round(sharpe, 2), round(ann_vol, 1)
         if sharpe < 0.3:
-            return "warn", "⚠️ 夏普偏低", None, round(sharpe, 2), round(ann_vol * 100, 1)
-        return "pass", f"✅ {sharpe:.2f}", None, round(sharpe, 2), round(ann_vol * 100, 1)
+            return "warn", "⚠️ 夏普偏低", None, round(sharpe, 2), round(ann_vol, 1)
+        return "pass", f"✅ {sharpe:.2f}", None, round(sharpe, 2), round(ann_vol, 1)
 
     # ------------------------------------------------------------------
     # 净值序列装载
@@ -428,7 +443,7 @@ class FundScreener:
         return valuation_nav_series(df).to_numpy(dtype=float)
 
     def _load_nav_series(self, codes: list) -> dict:
-        """一次性读出多只基金的**估值净值**序列 → {code: np.ndarray(升序)}。
+        """一次性读出多只基金的**估值净值**序列 → {code: (np.ndarray(升序), dates)}。
 
         原来每只基金走一次 `get_fund_nav()`（list[dict] → DataFrame），
         540 只基金要构造 100 多万个 dict；这里改成按批 SQL 直读 + groupby，
@@ -442,12 +457,15 @@ class FundScreener:
         CHUNK = 500                                   # 控制在 SQLite 变量上限内
         for i in range(0, len(codes), CHUNK):
             part = codes[i:i + CHUNK]
-            q = ("SELECT fund_code, unit_nav, acc_nav FROM fund_nav "
+            q = ("SELECT fund_code, nav_date, unit_nav, acc_nav FROM fund_nav "
                  "WHERE unit_nav IS NOT NULL AND fund_code IN (%s) "
                  "ORDER BY fund_code, nav_date" % ",".join("?" * len(part)))
             df = pd.read_sql_query(q, self.db.conn, params=part)
             for code, sub in df.groupby("fund_code", sort=False):
-                out[code] = valuation_nav_series(sub).to_numpy(dtype=float)
+                # 2026-09-25：**同时返回日期** —— 指标窗口必须按日期切（序列有缺口，
+                # 按点数当年数会把年化严重高估，实测最坏约 2.3 倍）。
+                out[code] = (valuation_nav_series(sub).to_numpy(dtype=float),
+                             sub["nav_date"].astype(str).tolist())
         return out
 
     def _screen_single_fund(self, fund_code: str, fund_info: dict) -> Optional[dict]:
@@ -463,7 +481,7 @@ class FundScreener:
             return None
         return self._score_series(vals, fund_info)
 
-    def _score_series(self, vals, fund_info: dict) -> dict:
+    def _score_series(self, vals, fund_info: dict, dates=None) -> dict:
         """对一段已排好序的净值序列做 6 维检查并给风险标签。
 
         批次 4.8：业务判定（fail/warn 计数）只读**结构化 level**
@@ -493,7 +511,7 @@ class FundScreener:
         metrics["total_fee"] = total_fee
 
         # ---- 检查4: 回撤 ----
-        levels["回撤控制"], checks["回撤控制"], w, max_dd = self._check_drawdown(vals)
+        levels["回撤控制"], checks["回撤控制"], w, max_dd = self._check_drawdown(vals, dates)
         if w:
             warnings.append(w)
         if max_dd is not None:
@@ -502,14 +520,14 @@ class FundScreener:
         # ---- 检查5: 动量(追涨风险) ----
         # 需要 fund_type 才能定位"同组"（阈值 = 该组 P90），故把类型传进去。
         levels["追涨风险"], checks["追涨风险"], w, mom = self._check_momentum(
-            vals, fund_info.get("fund_type"))
+            vals, fund_info.get("fund_type"), dates)
         if w:
             warnings.append(w)
         if mom is not None:
             metrics["momentum_3m"] = mom
 
         # ---- 检查6: 夏普比率 ----
-        levels["风险调整收益"], checks["风险调整收益"], w, sharpe, ann_vol = self._check_sharpe(vals)
+        levels["风险调整收益"], checks["风险调整收益"], w, sharpe, ann_vol = self._check_sharpe(vals, dates)
         if w:
             warnings.append(w)
         if sharpe is not None:

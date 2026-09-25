@@ -35,6 +35,18 @@ DB_PATH = os.path.join(ROOT, "data", "fund_quant.db")
 # 导致参照系与线上推荐用两套净值口径。详见 nav_series.py 与 load_navs 的说明。
 from src.analysis.nav_series import VALUATION_NAV_SQL as _VALUATION_SQL  # noqa: E402
 
+# ---- SSOT：指标实现统一在 src/analysis/nav_metrics.py（2026-09-25）----
+# 本文件在 scripts/ 下，nav_metrics 在 src/analysis/ 下；跨模块调用时不能假定
+# 对方已把该目录塞进 sys.path，所以在**导入时**一次性解析好（原写成函数内 import，
+# 被 src.analysis.peer_percentile 调用时 path 不稳 → ModuleNotFoundError，已踩）。
+import os as _os
+import sys as _sys
+_ANALYSIS_DIR = _os.path.join(
+    _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__))), "src", "analysis")
+if _ANALYSIS_DIR not in _sys.path:
+    _sys.path.insert(0, _ANALYSIS_DIR)
+from nav_metrics import compute as _nav_compute          # noqa: E402
+
 TRADING_DAYS = 244
 # ⚠️ 经实测校准（原为 252 的国际惯例值）：
 # 统计 2014~2025 共 12 个完整年份的 A 股实际交易日（全体基金净值日期并集）：
@@ -261,74 +273,18 @@ def load_navs(conn, min_days):
 
 
 def metrics(vals, dates=None):
-    """单只基金的指标。
+    """单只基金的指标 —— **委托给 SSOT `src/analysis/nav_metrics.compute`**。
 
-    ⚠️ **必须传 dates**：净值序列**可能有缺口**（实测 576 只里 135 只点数明显少于
-    应有的交易天数，最严重的比值仅 0.437）。用「点数 / 252」当年数会把年化收益
-    **严重高估**（实测最坏情形约 2.3 倍）。
-    正确做法：年化用**日期跨度**，近 1 年回撤用**日期窗口**，而不是点数窗口。
+    ⚠️ 2026-09-25 口径统一：本函数改为**固定 3 年窗口**（原为"基金全历史"）。
+    依据见 `nav_metrics` 模块 docstring：晨星按 3/5/10 年固定窗口评级、
+    天天基金只给 近1/2/3 年 —— **没有任何一家用全历史**，因为只有固定窗口
+    才能让不同年龄的基金**可比**。
+    同时统一了年化口径（几何 + 日期跨度）与年化波动的交易日数（244，非 252）。
 
-    vals: 累计净值序列（升序）；dates: 对应的 'YYYY-MM-DD' 列表（可选，但强烈建议传）
+    vals: 累计净值序列（升序）；dates: 对应 'YYYY-MM-DD'（强烈建议传 —— 序列有缺口，
+          按点数当年数会把年化严重高估，实测最坏约 2.3 倍）。
     """
-    n = len(vals)
-    if n < 60:
-        return None
-    vals = np.asarray(vals, dtype=float)
-    ret = vals[-1] / vals[0] - 1
-
-    # ---- 年化：优先用日期跨度 ----
-    if dates is not None and len(dates) == n:
-        from datetime import date as _d
-        try:
-            y0 = _d.fromisoformat(str(dates[0]))
-            y1 = _d.fromisoformat(str(dates[-1]))
-            years = max((y1 - y0).days / 365.25, 1e-6)
-        except Exception:
-            years = n / TRADING_DAYS
-    else:
-        years = n / TRADING_DAYS
-    ann_ret = (1 + ret) ** (1.0 / years) - 1 if years > 0 else np.nan
-
-    daily = np.diff(vals) / vals[:-1]
-    ann_vol = float(daily.std(ddof=1) * np.sqrt(TRADING_DAYS)) if daily.size > 1 else np.nan
-
-    peak = np.maximum.accumulate(vals)
-    mdd = float(((peak - vals) / peak).max() * 100)
-
-    # ---- 近 1 年回撤：优先用日期窗口 ----
-    if dates is not None and len(dates) == n:
-        import bisect
-        i0 = bisect.bisect_left(list(dates), str(dates[-1])[:4] + "-" + str(dates[-1])[5:7] + "-" + str(dates[-1])[8:])
-        # 用 dates[-1] 往前 365 天的位置
-        from datetime import date as _d, timedelta as _td
-        try:
-            cut = (_d.fromisoformat(str(dates[-1])) - _td(days=365)).isoformat()
-            i0 = bisect.bisect_left(list(dates), cut)
-        except Exception:
-            i0 = max(0, n - TRADING_DAYS)
-    else:
-        i0 = max(0, n - TRADING_DAYS)
-    seg = vals[i0:]
-    pk = np.maximum.accumulate(seg)
-    mdd1y = float(((pk - seg) / pk).max() * 100) if seg.size else np.nan
-
-    # ---- 近 3 月动量：日期窗口 ----
-    if dates is not None and len(dates) == n:
-        import bisect
-        from datetime import date as _d, timedelta as _td
-        try:
-            cut3 = (_d.fromisoformat(str(dates[-1])) - _td(days=91)).isoformat()
-            j0 = bisect.bisect_left(list(dates), cut3)
-        except Exception:
-            j0 = max(0, n - 63)
-    else:
-        j0 = max(0, n - 63)
-    mom3m = float((vals[-1] / vals[j0] - 1) * 100) if j0 < n and vals[j0] > 0 else np.nan
-
-    sharpe = float((ann_ret - 0.02) / ann_vol) if ann_vol and ann_vol > 0 else np.nan
-    return {"annual_return": ann_ret * 100, "ann_vol": ann_vol * 100,
-            "max_drawdown_1y": mdd1y, "max_drawdown_all": mdd,
-            "momentum_3m": mom3m, "sharpe": sharpe}
+    return _nav_compute(vals, dates)
 
 
 def grade(n):

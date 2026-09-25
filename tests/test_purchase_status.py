@@ -96,22 +96,27 @@ class TestBlockedMarkerConstant:
 class TestRiskLabelUnaffected:
     """限大额 / 未知都不该改变质量等级；只有真的买不进去才是 ❌。"""
 
-    def _label_without_check(self, result):
-        chk = {k: v for k, v in result["quality_checks"].items() if k != "申购状态"}
-        fails = sum(1 for v in chk.values() if v.startswith("❌"))
-        warns = sum(1 for v in chk.values()
-                    if (v.startswith("⚠️") or v.startswith("🔴") or v.startswith("💡"))
-                    and not v.startswith("⚠️ 无数据"))
-        return ("不合格" if fails >= 2 else "🔴 高风险" if fails >= 1
-                else "🟡 注意" if warns >= 1 else "🟢 稳健")
-
     @pytest.mark.parametrize("status", ["限大额", "", "开放申购", "无法归类的东西"])
     def test_label_is_the_same_as_without_the_check(self, db, screener, status):
+        """⚠️ 2026-09-25 改法：**直接验不变量**，不再用"文本前缀"反推等级。
+
+        旧写法按 `quality_checks` 的 ⚠️/❌ 前缀重建等级，与真正的判定源（结构化
+        `check_levels`）是两套逻辑 —— 一旦某项检查的文案从"⚠️ 夏普偏低"变成
+        "⚠️ 数据不足"（同样都是 unknown），文本反推就会误判成 warn。
+
+        现在改成：**同一条净值序列，只把申购状态换成中性的"开放申购"再评一次**，
+        两次的 `risk_label` 必须一致 —— 这才是"申购状态不影响质量等级"的直接检验。
+        """
         _seed_fund(db, "PS01", "某稳健基金C", "混合型", status)
         vals = screener._nav_values("PS01")
         r = screener._score_series(vals, db.get_fund_info("PS01"))
-        assert r["risk_label"] == self._label_without_check(r), \
-            f"{status!r} 不该改变质量等级"
+
+        info2 = dict(db.get_fund_info("PS01"))
+        info2["purchase_status"] = "开放申购"          # 中性对照：pass 且不产生 warning
+        r2 = screener._score_series(vals, info2)
+
+        assert r["risk_label"] == r2["risk_label"], \
+            f"{status!r} 不该改变质量等级（实际 {r['risk_label']} vs 对照 {r2['risk_label']}）"
         assert r["purchase_blocked"] is False
 
     def test_suspended_is_blocked(self, db, screener):
