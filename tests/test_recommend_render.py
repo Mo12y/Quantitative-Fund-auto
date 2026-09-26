@@ -43,9 +43,10 @@ def test_loadrec_wires_review_and_fixes_peer_tag():
     assert "p.sharpe!==undefined" not in body, \
         "旧判据读的是不存在的顶层字段 → 百分位永远显示「同类 P—」（已修的 bug，不得回退）"
     assert "qChips(p)" in body, "三问之一：为什么入选须展示维度百分位"
+    assert 'class="fund-row recrec"' in body, "候选行用 .recrec 布局（保底宽度，防被 meta 挤成 0 宽）"
     assert "没有候选通过全部约束" in body, "空结果要指向「落选/未评估」明细，而不是无解释的空"
 
 
 def test_review_css_classes_exist():
-    for cls in (".qh{", ".rec3row{"):
+    for cls in (".qh{", ".rec3row{", ".recrec{", ".recrec .fund-meta{"):
         assert cls in APP_CSS, f"缺少样式类 {cls}（有 HTML 无样式）"

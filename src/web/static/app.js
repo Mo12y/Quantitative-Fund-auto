@@ -1016,7 +1016,7 @@ async function loadRec(el){
       const ddAbs=(p.metrics&&p.metrics.max_drawdown_1y!=null)?`<span class="qtag">近1年回撤 ${fmt(p.metrics.max_drawdown_1y,1)}%</span>`:'';
       const tag=ok?`<span class="qtag">同类 P${comp} · ${esc(p.group||'—')}${p.group_n?(' · '+Number(p.group_n).toLocaleString()+' 只对照'):''}${p.nav_asof?(' · 截至 '+esc(p.nav_asof)):''}</span>`
                    :`<span class="qtag">同类 P— · ${esc(p.reason||'数据不足')}</span>`;
-      h+=`<div class="fund-row" style="grid-template-columns:74px 1fr auto">
+      h+=`<div class="fund-row recrec">
         <span class="fund-code">${esc(p.code||'')}</span>
         <span class="fund-name">${esc(p.name||p.code||'')}</span>
         <span class="fund-meta">${tag}${qChips(p)}${ddAbs}</span></div>`;

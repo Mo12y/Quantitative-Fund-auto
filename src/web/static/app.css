@@ -120,6 +120,10 @@
   .rec3row{display:grid;grid-template-columns:74px 1.1fr 1.6fr;gap:8px;font-size:12px;
            padding:3px 0;border-top:1px dashed var(--hairline);align-items:start}
   .rec3row .fund-name{font-size:12px}
+  /* §4.6 候选行：meta 很长（同类 P + 维度 chips + 原始回撤）→ 浏览器实测发现
+     `1fr` 列会被 `auto` 列挤成 0 宽（基金名肉眼消失）。改用 minmax 保底宽度 + meta 允许换行。 */
+  .recrec{grid-template-columns:70px minmax(130px,1fr) auto}
+  .recrec .fund-meta{flex-wrap:wrap;row-gap:2px}
   .fund-meta .val{font-weight:600;min-width:44px;text-align:right;color:var(--ink);font-family:var(--font-mono);font-variant-numeric:tabular-nums}
   .sparkline{width:46px;height:18px;flex-shrink:0}
   .sparkline svg{width:100%;height:100%}
