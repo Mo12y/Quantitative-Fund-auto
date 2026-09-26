@@ -106,7 +106,9 @@ def _seed_holding(db, code="D001", shares=1000.0, policy="reinvest"):
         " VALUES (?,?,?,?,?,?,?,?,?,0)",
         (code, "分红测试基金C", "2026-01-02", "2026-01-02", "2026-01-02", shares, 1000.0, "holding", policy))
     db.conn.commit()
-    return db.get_current_holdings()[0]
+    rows = db.get_current_holdings()
+    # 多只基金时 `[0]` 会拿到**别的**基金 → 必须按 code 取，否则跨基金用例会静默测错对象
+    return next((r for r in rows if r["fund_code"] == code), rows[0])
 
 
 class TestPosting:
@@ -214,6 +216,133 @@ class TestAggregationIncludesCash:
         assert rz["dividend_total"] == pytest.approx(50.0, abs=0.01)
         h = db.get_current_holdings()[0]
         assert float(h["cash_balance"] or 0) == 0, "再投不产生现金"
+
+
+class TestRealizedDividendDetail:
+    """前端「已了结」表要按笔列出分红（设计稿 §7 第 6 步）→ 聚合必须给出**明细**，不能只有合计。
+
+    少了明细，前端就只能显示一个总额，用户无法核对是哪天、哪只、按什么方式入的账。
+    """
+
+    def test_detail_rows_cover_both_modes(self, db):
+        from src.analysis.portfolio import PortfolioTracker
+        h1 = _seed_holding(db, code="D001", policy="cash")
+        h2 = _seed_holding(db, code="D002", policy="reinvest")
+        assert post_dividend(db, h1, {"date": "2026-01-06", "per_share": 0.05, "unit_nav": 1.03})["posted"]
+        assert post_dividend(db, h2, {"date": "2026-01-07", "per_share": 0.08, "unit_nav": 1.00})["posted"]
+        rz = PortfolioTracker(db).get_realized_pnl()
+        rows = rz["dividends"]
+        assert len(rows) == 2 and rz["dividend_count"] == 2
+        by_code = {r["fund_code"]: r for r in rows}
+        cash, rein = by_code["D001"], by_code["D002"]
+        # 现金：金额即流水 amount；不涉及份额/净值
+        assert cash["mode"] == "现金" and cash["amount"] == pytest.approx(50.0)
+        assert cash["shares"] is None and cash["date"] == "2026-01-06"
+        # 再投：金额 = 新增份额 × 再投净值（存量口径 amount 记 0，必须换算，否则这里会是 0）
+        assert rein["mode"] == "再投" and rein["amount"] == pytest.approx(80.0, abs=0.01)
+        assert rein["nav"] == pytest.approx(1.00) and rein["shares"] > 0
+        assert rein["fund_name"], "明细要带基金名，便于前端直接显示"
+
+    def test_detail_is_sorted_desc_by_date(self, db):
+        from src.analysis.portfolio import PortfolioTracker
+        h = _seed_holding(db)
+        for d in ("2026-01-06", "2026-03-06", "2026-02-06"):
+            post_dividend(db, h, {"date": d, "per_share": 0.05, "unit_nav": 1.03})
+            h = db.get_current_holdings()[0]
+        rows = PortfolioTracker(db).get_realized_pnl()["dividends"]
+        assert [r["date"] for r in rows] == ["2026-03-06", "2026-02-06", "2026-01-06"]
+
+    def test_portfolio_payload_keeps_dividend_fields(self):
+        """⚠️ 回归哨兵：`_portfolio_payload` 的 `realized` 是**白名单字段**。
+
+        曾因没把 `dividend_total/dividend_count/dividends` 放进去，导致前端「已实现收益」
+        整块漏掉分红（只分红账户看到 ¥0.00）——聚合层明明算对了，payload 层剥掉了。
+        """
+        from src.web.app import _portfolio_payload
+        data = {"has_holdings": True, "total_invested": 100, "total_market_value": 200,
+                "total_pnl": 100, "total_return_pct": 100.0, "asset_allocation": {},
+                "holdings": [],
+                "realized": {"total_pnl": 50.0, "total_gross": 60, "total_cost": 10,
+                             "total_fee": 0, "count": 1, "sales": [],
+                             "dividend_total": 30.0, "dividend_count": 2,
+                             "dividends": [{"date": "2026-01-06", "fund_code": "D001",
+                                            "fund_name": "X", "mode": "现金", "per_share": 0.05,
+                                            "shares": None, "nav": None, "amount": 30.0}]}}
+        rz = _portfolio_payload(data)["realized"]
+        assert rz["dividend_total"] == 30.0 and rz["dividend_count"] == 2
+        assert len(rz["dividends"]) == 1 and rz["dividends"][0]["mode"] == "现金"
+
+
+class TestDividendPolicyApi:
+    """`POST /api/holdings {action:'dividend_policy'}` —— 前端持仓行上的分红方式切换按钮。
+
+    库内粒度是**每一笔持仓**，而 UI 按基金汇总 → 传 `code` 时必须一次改完整只基金的所有笔，
+    否则用户会看到"点了按钮但只有部分笔生效"（切完仍显示「分红方式不一致」）。
+    """
+
+    @pytest.fixture()
+    def client(self, tmp_path, monkeypatch):
+        import src.web.app as webapp
+        dbp = str(tmp_path / "divpolicy.db")
+        d = Database(dbp)
+        d.upsert_fund_info({"fund_code": "D001", "fund_name": "分红测试基金C", "fund_type": "债券型-长债"})
+        d.upsert_fund_info({"fund_code": "D002", "fund_name": "另一只C", "fund_type": "债券型-长债"})
+        for i, code in enumerate(("D001", "D001", "D002"), start=1):
+            d.conn.execute(
+                "INSERT INTO holdings (fund_code, fund_name, buy_date, confirm_date, accrual_start,"
+                " shares, buy_amount, status, dividend_policy, cash_balance)"
+                " VALUES (?,?,'2026-01-02','2026-01-02','2026-01-02',100,1000,'holding','reinvest',0)",
+                (code, "分红测试基金C" if code == "D001" else "另一只C"))
+        d.conn.commit()
+        d.close()
+        monkeypatch.setattr(webapp, "DB_PATH", dbp)
+        with webapp._slot_lock:
+            webapp._slot_store.clear()
+        webapp._dash_cache = None
+        with webapp.app.test_client() as c:
+            yield c, dbp
+
+    @staticmethod
+    def _pols(dbp):
+        d = Database(dbp)
+        rows = [dict(r) for r in d.conn.execute(
+            "SELECT fund_code, dividend_policy FROM holdings ORDER BY id")]
+        d.close()
+        return rows
+
+    def test_switch_by_code_updates_every_lot_of_that_fund(self, client):
+        c, dbp = client
+        j = c.post("/api/holdings", json={"action": "dividend_policy", "code": "D001", "policy": "cash"})
+        assert j.status_code == 200 and j.get_json()["ok"] is True
+        assert j.get_json()["changed"] == 2, "D001 有两笔，必须全部改掉"
+        got = {r["fund_code"]: r["dividend_policy"] for r in self._pols(dbp)}
+        assert got["D001"] == "cash"
+        assert got["D002"] == "reinvest", "只改被点的那只基金，别动别的"
+
+    def test_switch_by_id_is_single_lot(self, client):
+        c, dbp = client
+        d = Database(dbp)
+        hid = d.conn.execute("SELECT id FROM holdings ORDER BY id").fetchone()["id"]
+        d.close()
+        j = c.post("/api/holdings", json={"action": "dividend_policy", "id": hid, "policy": "cash"})
+        assert j.get_json()["changed"] == 1
+        assert [r["dividend_policy"] for r in self._pols(dbp)] == ["cash", "reinvest", "reinvest"]
+
+    def test_bad_policy_is_rejected(self, client):
+        c, _ = client
+        j = c.post("/api/holdings", json={"action": "dividend_policy", "code": "D001", "policy": "dividend"})
+        assert j.status_code == 400 and "policy" in j.get_json()["error"]
+
+    def test_unknown_code_is_rejected(self, client):
+        c, dbp = client
+        j = c.post("/api/holdings", json={"action": "dividend_policy", "code": "999999", "policy": "cash"})
+        assert j.status_code == 400
+        assert {r["dividend_policy"] for r in self._pols(dbp)} == {"reinvest"}, "拒绝时不得改动任何数据"
+
+    def test_missing_locator_is_rejected(self, client):
+        c, _ = client
+        j = c.post("/api/holdings", json={"action": "dividend_policy", "policy": "cash"})
+        assert j.status_code == 400
 
 
 class TestAutoPostAll:

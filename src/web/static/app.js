@@ -38,6 +38,7 @@ document.addEventListener('click', function(e){
       case 'actBuy': actBuy(); break;
       case 'editPlanItem': if(el.dataset.prevent) e.preventDefault(); editPlanItem(Number(id), code); break;
       case 'actHolding': actHolding(op, Number(id)); break;
+      case 'holdingsDividendPolicy': if(el.dataset.prevent) e.preventDefault(); setDividendPolicy(code, el.dataset.policy); break;
     }
     return;
   }
@@ -74,7 +75,7 @@ function riskBadge(risk){
   return`<span class="badge ${cls}">${esc(txt)}</span>`;
 }
 
-const STATE={all:null, current:'overview', seen:{overview:0,position:0,pool:0,sector:0,quant:0}};
+const STATE={all:null, current:'overview', dividend:null, seen:{overview:0,position:0,pool:0,sector:0,quant:0}};
 // 深链：/?view=position 直接打开指定面板（便于分享与截图核对）
 const VIEWS=['overview','position','pool','sector','quant'];
 const QV=(typeof location!=='undefined')
@@ -177,8 +178,9 @@ async function reloadHoldings(silent){
   setT('kpi-pnl', fmtMoney(port.total_pnl||0));
   setH('kpi-pnl-sub', '收益率 '+fmtPct(port.total_return_pct||0));
   const RZ=port.realized||{};
-  setT('kpi-realized', fmtMoney(RZ.total_pnl||0));
-  setH('kpi-realized-sub', RZ.count?('已了结 '+RZ.count+' 笔'+(RZ.total_fee?(' · 赎回费 '+fmtMoney(RZ.total_fee)):'')):'暂无了结');
+  const rzp=realizedParts(RZ);
+  setT('kpi-realized', fmtMoney(rzp.total));
+  setH('kpi-realized-sub', rzp.sub);
   if(!silent)toast('已按买入确认日逐日重算',true);
   // 组合曲线同步刷新（局部）
   fetch('/api/portfolio/curve').then(r=>r.json()).then(k=>{
@@ -234,6 +236,42 @@ async function actHolding(action,id){
     const j=await postJSON('/api/holdings',{action:'delete',id});
     toast(j.message||j.error||'完成',!!j.ok); if(j.ok)reloadHoldings(true);
   }
+}
+
+// 分红方式切换（设计稿 §7 第 6 步）。
+// 库内粒度是**每一笔持仓**，而 UI 按基金汇总 → 这里按 fund_code 批量改，
+// 与用户"这只基金以后怎么分红"的认知一致（否则会出现"点了只改了一笔"的困惑）。
+async function setDividendPolicy(code,policy){
+  if(!code)return;
+  const label=policy==='cash'?'现金分红':'红利再投';
+  if(!confirm(`把 ${code} 的全部持仓分红方式改为「${label}」？\n\n· 只影响之后检测到的除息日；\n· 已入账的历史分红**不重算**。`))return;
+  const j=await postJSON('/api/holdings',{action:'dividend_policy',code,policy});
+  toast(j.message||j.error||'完成',!!j.ok);
+  if(j.ok)reloadHoldings(true);
+}
+
+// 存疑除息日提示（设计稿 §7 第 6 步）：形状像分红、但没过安全底线的候选。
+// 数据只在 POST /api/reconcile 的返回里（服务器不落库）→ 存 STATE.dividend，重渲染后补挂。
+function renderDividendNote(dv){
+  const sus=(dv&&dv.suspects)||[], posted=(dv&&dv.posted)||[];
+  let host=document.getElementById('dividend-note');
+  if(!sus.length){ if(host)host.remove(); return; }
+  if(!host){
+    host=document.createElement('div');
+    host.id='dividend-note'; host.className='card full';
+    const hc=document.getElementById('holdings-card');
+    if(hc&&hc.parentNode)hc.parentNode.insertBefore(host,hc);
+    else (document.getElementById('app')||document.body).appendChild(host);
+  }
+  const rows=sus.slice(0,12).map(s=>`<li>${esc(s.fund_code||'')} ${esc(s.fund_name||'')} · ${esc(s.date||'')}${
+    s.per_share!=null?` · 每份 ${fmt(s.per_share,4)}`:''}${s.unit_fall!=null?` · 当日净值跌 ${fmt(s.unit_fall,4)}`:''} · ${esc(s.reason||'形状像分红但未通过条件')}</li>`).join('');
+  host.innerHTML=`<h2>存疑除息日 <span class="sub">— 检测到形状像分红、但未通过安全条件的净值跳变</span></h2>
+    <div class="stat-line">共 <b>${sus.length}</b> 个候选，<b class="u-twarn">一律未自动入账</b>${posted.length?`；同批已自动落账 <b>${posted.length}</b> 笔（${fmtMoney(dv.posted_amount||0)}）`:''}。</div>
+    <ul class="qtag" style="line-height:1.9;margin:8px 0 0 16px">${rows}</ul>
+    ${sus.length>12?`<div class="qtag u-mt8">（仅列前 12 条）</div>`:''}
+    <div class="qtag u-mt8">判定与拒收条件见 <code>src/analysis/dividend.py</code>。本项目采用「自动落账、不设人工确认」，
+      因此<b>拒收条件就是唯一的安全阀</b> —— 存疑项一律只展示、不落账。若确认其中某笔是真分红，
+      可在净值/持仓核对后手工补记一笔买入（再投）或调整现金余额。</div>`;
 }
 
 // ========== 定投管理（页面内渲染与操作） ==========
@@ -407,6 +445,8 @@ function renderApp(){
   showView(ready ? START_VIEW : STATE.current);
   // 定投卡片内容异步填充
   if(document.getElementById('dca-wrap'))loadDca();
+  // 存疑除息日提示（设计稿 §7 第 6 步）：数据来自 /api/reconcile，重渲染后要补挂回去
+  renderDividendNote(STATE.dividend);
 }
 
 function kpi(lb,vv,su,color,vid,sid){
@@ -414,6 +454,21 @@ function kpi(lb,vv,su,color,vid,sid){
 }
 
 // 总览 KPI（总资产/累计收益/温度/仓位/市值/计划投入）—— 两条渲染路径共用，避免口径不一致
+// 已实现收益 = 买卖价差 + 分红收益（口径见 docs/现金分红设计方案.md §6）。
+// 【单一实现】总览 KPI 与「刷新涨跌」后的局部更新都必须走这里 ——
+// 本项目已因"双渲染路径"分叉踩过坑（见 docs/前端优化设计方案.md），此处不再各写一份。
+// 传入兼容两种来源：stats（realized_pnl/...）与 portfolio.realized（total_pnl/...）。
+function realizedParts(rz){
+  rz=rz||{};
+  const pnl=Number(rz.total_pnl||0), div=Number(rz.dividend_total||0);
+  const n=Number(rz.count||0), dn=Number(rz.dividend_count||0), fee=Number(rz.total_fee||0);
+  const bits=[];
+  if(n)bits.push('已了结 '+n+' 笔');
+  // 有分红才展开拆分，否则会把「已了结 1 笔」这条常态信息挤没
+  if(dn)bits.push('买卖价差 '+fmtMoney(pnl)+' + 分红 '+fmtMoney(div)+'（'+dn+' 笔）');
+  if(fee)bits.push('赎回费 '+fmtMoney(fee));
+  return {total:pnl+div, sub:bits.length?bits.join(' · '):'暂无了结'};
+}
 function overviewKpis(T,P,PL,S){
   S=S||{};
   const pnl=(S.total_pnl!=null)?S.total_pnl:(P.total_pnl||0);
@@ -421,17 +476,19 @@ function overviewKpis(T,P,PL,S){
   const assets=(S.total_assets!=null)?S.total_assets:(P.total_market_value||0);
   const pend=(S.pending_amount||0);
   const tgt=(PL.total_capital||0)-(PL.cash_reserve||0);
+  const rz=realizedParts({total_pnl:S.realized_pnl, total_fee:S.realized_fee, count:S.realized_count,
+                          dividend_total:S.realized_dividend, dividend_count:S.realized_dividend_count});
   // 后端的 level_desc 自带 emoji（TEMP_LEVELS）→ 在展示层用 esc() 剥离并转义
   return `<div class="kpi">
       ${kpi('总资产', fmtMoney(assets), '实时市值 '+fmtMoney(P.total_market_value)+(pend>0?(' · 在途 '+fmtMoney(pend)):''), null, 'kpi-assets', 'kpi-assets-sub')}
       ${kpi('累计收益', fmtMoney(pnl), '收益率 '+fmtPct(ret), (pnl>=0?'var(--green)':'var(--red)'), 'kpi-pnl', 'kpi-pnl-sub')}
-      ${kpi('已实现收益', fmtMoney(S.realized_pnl||0), (S.realized_count?('已了结 '+S.realized_count+' 笔'+(S.realized_fee?(' · 赎回费 '+fmtMoney(S.realized_fee)):'')):'暂无了结'), ((S.realized_pnl||0)>=0?'var(--green)':'var(--red)'), 'kpi-realized', 'kpi-realized-sub')}
+      ${kpi('已实现收益', fmtMoney(rz.total), rz.sub, (rz.total>=0?'var(--green)':'var(--red)'), 'kpi-realized', 'kpi-realized-sub')}
       ${kpi('市场温度', (T.temperature==null?'数据不足':fmt(T.temperature)+'°'), esc(T.level_desc||''), (T.temperature==null?'var(--dim)':tempMeta(T.temperature)[3]))}
       ${kpi('建议权益仓位', (T.target_equity_pct==null?'—':(T.target_equity_pct+'%')), (T.target_equity_pct==null?'温度数据不足':('固收 '+fmt(100-T.target_equity_pct)+'%')))}
       ${kpi('持仓市值', fmtMoney(P.total_market_value), P.has_holdings? ('盈亏 '+fmtPct(P.total_return_pct)):'暂无持仓', null, 'kpi-mv', 'kpi-mv-sub')}
       ${kpi('计划投入', fmtMoney(PL.total_invested||0), '目标 '+fmtMoney(tgt), null, 'kpi-plan', 'kpi-plan-sub')}
     </div>
-    <div class="qtag u-mt8">口径：历史持仓成本按旧口径（确认日 T+1 净值）；新流水按申请日 T 净值定价。已实现收益含赎回费（持有 &lt;7 天按 1.5%）。<br>「收益」= 金额法（市值 − 剩余成本）÷ 剩余成本，即<b>我赚了多少</b>；与「基金净值涨跌」（净值比值法，不含份额舍入）会有约 0.1% 的差 —— 那是份额四舍五入到 2 位造成的，两数不可混用。</div>`;
+    <div class="qtag u-mt8">口径：历史持仓成本按旧口径（确认日 T+1 净值）；新流水按申请日 T 净值定价。<b>已实现收益 = 买卖价差 + 分红收益</b>（现金分红入现金余额、红利再投增份额），赎回费已扣除（持有 &lt;7 天按 1.5%）。<br>「收益」= 金额法（市值 − 剩余成本）÷ 剩余成本，即<b>我赚了多少</b>；与「基金净值涨跌」（净值比值法，不含份额舍入）会有约 0.1% 的差 —— 那是份额四舍五入到 2 位造成的，两数不可混用。</div>`;
 }
 
 function portfolioChartSVG(C){
@@ -628,10 +685,12 @@ function groupHoldingsByFund(holds){
   for(const h of holds){
     const k=h.code||h.name||'?';
     if(!m.has(k))m.set(k,{code:h.code,name:h.name||h.code,lots:[],shares:0,cost:0,value:0,pnl:0,
-                          curve:[],pendingN:0,pendingCost:0,estNum:0,estDen:0});
+                          curve:[],pendingN:0,pendingCost:0,estNum:0,estDen:0,cash:0,policy:null});
     const g=m.get(k); g.lots.push(h);
     g.shares+=Number(h.shares||0); g.cost+=Number(h.buy_amount||0);
     g.value+=Number(h.current_value||0); g.pnl+=Number(h.pnl||0);
+    // 现金分红余额（设计稿 §7 第 6 步）：已计入 current_value，这里单独露出让用户看得见
+    g.cash+=Number(h.cash_balance||0);
     if((!g.curve||!g.curve.length)&&h.curve&&h.curve.length)g.curve=h.curve;
     if(h.status==='pending_confirm'){
       g.pendingN++; g.pendingCost+=Number(h.buy_amount||0);
@@ -646,6 +705,11 @@ function groupHoldingsByFund(holds){
     g.pnl_pct=g.cost? g.pnl/g.cost*100 : 0;
     g.allPending=g.lots.every(l=>l.status==='pending_confirm');
     g.estPct=g.estDen? g.estNum/g.estDen : null;
+    // 分红方式（设计稿 §7 第 6 步）：库里存的粒度是**每一笔持仓**，前端按基金汇总展示。
+    // 同基金各笔不一致时不猜、不静默取第一笔，显式标「不一致」并让用户一键统一。
+    const pols=new Set(g.lots.map(l=>l.dividend_policy||'reinvest'));
+    g.policyMixed=pols.size>1;
+    g.policy=pols.size===1?[...pols][0]:'mixed';
     g.lots.sort((a,b)=>String(a.apply_date||a.buy_date).localeCompare(String(b.apply_date||b.buy_date)));
   }
   return out.sort((a,b)=>b.value-a.value);
@@ -684,6 +748,18 @@ function holdingsHTML(P,PL){
         (pf.next&&pf.next.amount>0)?` · 下一笔 ${fmtMoney(pf.next.amount)}`:''}${
         pf.item_id?` <button class="btn mini" data-action="editPlanItem" data-prevent="1" data-id="${pf.item_id}" data-code="${esc(g.code)}">改计划</button>`:''}</div>`
       :'';
+    // 分红方式切换 + 现金余额（设计稿 §7 第 6 步）。
+    // · 库内粒度是"每一笔持仓"，这里挂在基金行上 → 切换时按 fund_code 批量改（见 api_holdings_action）；
+    // · 各笔不一致 → 不给切换按钮，先让用户点一次统一，避免"点了却只改了一笔"的错觉。
+    const POL_LABEL={reinvest:'红利再投',cash:'现金分红'};
+    const policyCtrl=g.policyMixed
+      ? `<span class="badge b-yellow" title="该基金下各笔持仓的分红方式不一致">分红方式不一致</span>`
+      : `<button class="btn mini" data-action="holdingsDividendPolicy" data-prevent="1" data-code="${esc(g.code)}"
+           data-policy="${g.policy==='cash'?'reinvest':'cash'}"
+           title="当前：${POL_LABEL[g.policy]||g.policy}。点击切换该基金全部 ${g.lots.length} 笔（新除息日按新方式入账，历史已入账的不重算）">分红：${POL_LABEL[g.policy]||g.policy}</button>`;
+    const cashTag=g.cash>0
+      ? `<span class="badge b-blue" title="现金分红累计余额（已计入上方市值）">现金分红 ${fmtMoney(g.cash)}</span>` : '';
+    const divLine=(cashTag||policyCtrl)?`<div class="fg-div">${cashTag}${policyCtrl}</div>`:'';
     let perf;
     if(g.allPending){
       perf=g.estPct!=null
@@ -694,7 +770,7 @@ function holdingsHTML(P,PL){
     }
     h+=`<details class="fund-group">
       <summary>
-        <span class="fg-line"><span class="fg-code">${esc(g.code)}</span><span class="fg-name" title="${esc(g.name)}">${esc(g.name)}</span>${badge}${planLine}</span>
+        <span class="fg-line"><span class="fg-code">${esc(g.code)}</span><span class="fg-name" title="${esc(g.name)}">${esc(g.name)}</span>${badge}${divLine}${planLine}</span>
         <span class="curve">${curveSVG(g.curve,tone)}</span>
         <span class="num">${fmtMoney(g.value)}</span>
         <span class="num">${perf}</span>
@@ -721,13 +797,24 @@ function holdingsHTML(P,PL){
     h+=`</tbody></table></div></details>`;
   }
   // 已了结：把卖出后的落袋盈亏与赎回费摊开（原先这部分完全不在报表里）
+  // 分红收益（设计稿 §6/§7-6）：与买卖价差**口径不同、必须分开列**，两者相加才是总收益。
+  // 注意条件包含 dividend_count —— 只分红、未卖出的账户也要能看到这笔收益。
   const RZ=P.realized||{};
-  if(RZ.count){
+  const divN=RZ.dividend_count||0, divAmt=Number(RZ.dividend_total||0);
+  if(RZ.count||divN){
+    const grand=Number(RZ.total_pnl||0)+divAmt;
+    const rzTitle=RZ.count?`已了结（${RZ.count} 笔）`:('分红收益（'+divN+' 笔）');
+    const rzMeta=[];
+    if(RZ.count)rzMeta.push(`买卖价差 <b style="color:${(RZ.total_pnl||0)>=0?'var(--up)':'var(--down)'}">${fmtMoney(RZ.total_pnl)}</b>`);
+    if(divN)rzMeta.push(`分红收益 <b class="u-tink">${fmtMoney(divAmt)}</b>（${divN} 笔）`);
+    rzMeta.push(`合计 <b style="color:${grand>=0?'var(--up)':'var(--down)'}">${fmtMoney(grand)}</b>`);
+    if(RZ.total_fee)rzMeta.push(`赎回费 ${fmtMoney(RZ.total_fee)}`);
     h+=`<details class="fund-group u-mt10"><summary style="grid-template-columns:1fr auto">
-      <span class="fg-line"><span class="fg-name">已了结（${RZ.count} 笔）</span>
-        <span class="qtag">已实现 <b style="color:${(RZ.total_pnl||0)>=0?'var(--up)':'var(--down)'}">${fmtMoney(RZ.total_pnl)}</b> · 赎回费合计 ${fmtMoney(RZ.total_fee)}</span></span>
-      <span class="num qtag">展开明细</span></summary>
-      <div class="lots-wrap"><table class="tbl">
+      <span class="fg-line"><span class="fg-name">${rzTitle}</span>
+        <span class="qtag">${rzMeta.join(' · ')}</span></span>
+      <span class="num qtag">展开明细</span></summary>`;
+    if(RZ.count){
+      h+=`<div class="lots-wrap"><table class="tbl">
       <thead><tr><th>确认日</th><th>基金</th><th>份额</th><th>卖出净值</th><th>毛额</th><th>成本</th><th>赎回费</th><th>已实现</th></tr></thead><tbody>
       ${(RZ.sales||[]).map(s=>`<tr>
         <td>${esc(s.confirm_date||'—')}</td>
@@ -738,7 +825,23 @@ function holdingsHTML(P,PL){
         <td>${fmtMoney(s.cost)}</td>
         <td>${fmtMoney(s.fee)}</td>
         <td style="color:${(s.pnl||0)>=0?'var(--up)':'var(--down)'}">${fmtMoney(s.pnl)}</td></tr>`).join('')}
-      </tbody></table></div></details>`;
+      </tbody></table></div>`;
+    }
+    if(divN){
+      h+=`<div class="lots-wrap"><table class="tbl">
+      <thead><tr><th>除息日</th><th>基金</th><th>方式</th><th>每份分红</th><th>新增份额</th><th>再投净值</th><th>入账金额</th></tr></thead><tbody>
+      ${(RZ.dividends||[]).map(d=>`<tr>
+        <td>${esc(d.date||'—')}</td>
+        <td>${esc(d.fund_name||d.fund_code||'')}</td>
+        <td>${esc(d.mode||'')}</td>
+        <td>${d.per_share==null?'—':fmt(d.per_share,4)}</td>
+        <td>${d.shares==null?'—':Number(d.shares).toFixed(2)}</td>
+        <td>${d.nav==null?'—':fmt(d.nav)}</td>
+        <td class="u-tink">${fmtMoney(d.amount)}</td></tr>`).join('')}
+      </tbody></table>
+      <div class="qtag" style="padding:4px 0 0">分红收益与买卖价差口径不同，<b>不可直接相除</b>；再投方式的金额 = 新增份额 × 再投净值（钱没出净值，直接变份额）。</div></div>`;
+    }
+    h+=`</details>`;
   }
   h+=`<div class="qtag u-mt10">历史持仓成本按<b>旧口径</b>（确认日 T+1 净值）计算，仅新流水按<b>申请日 T 净值</b>定价。
     评估历史回填的影响：<code>python scripts/rebuild_costs_dryrun.py</code>（只读，不改数据）</div>`;
@@ -1170,6 +1273,9 @@ async function boot(){
   // 只有真的结算了东西才局部刷新，绝不打断用户当前所在的视图。
   try{
     const rc=await postJSON('/api/reconcile',{});
+    // 分红自动落账的结果（含"存疑除息日"）：存在就渲染提示；只有真落了账才刷新持仓
+    const dv=(rc&&rc.ok&&rc.data)?rc.data.dividend:null;
+    if(dv){ STATE.dividend=dv; renderDividendNote(dv); }
     if(rc&&rc.ok&&rc.changed)await reloadHoldings(true);
   }catch(e){ /* 对账失败不影响浏览 */ }
   setBusy(false);

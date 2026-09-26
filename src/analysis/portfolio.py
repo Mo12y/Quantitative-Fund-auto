@@ -455,6 +455,11 @@ class PortfolioTracker:
                 "pnl": round(pnl, 2),
                 "pnl_pct": round(pnl_pct, 2),
                 "days_held": self._calc_days_held(h["buy_date"]),
+                # —— 分红（设计稿 §6 前端部分）——
+                # `current_value` / `pnl` 已含 `cash_balance`（现金分红的钱在现金里）；
+                # 这两个字段透出去是为了让持仓行能**显示**现金余额与策略切换。
+                "cash_balance": round(cash, 2),
+                "dividend_policy": h.get("dividend_policy") or "reinvest",
             })
 
         total_pnl = total_market_value - total_invested
@@ -943,15 +948,42 @@ class PortfolioTracker:
         # · `div_cash`     → `amount` 即实际收到的现金金额
         # · `div_reinvest` → 金额 = 新增份额 × 再投净值（存量口径 amount 记 0，故需换算）
         div_total, div_count = 0.0, 0
-        for _txs in tx_by_holding.values():
+        div_rows = []
+        for _hid, _txs in tx_by_holding.items():
+            _h = holdings.get(_hid) or {}
             for _t in _txs:
                 k = _t.get("kind")
                 if k == "div_cash":
-                    div_total += float(_t.get("amount") or 0)
+                    amt = float(_t.get("amount") or 0)
+                    div_total += amt
                     div_count += 1
+                    div_rows.append({
+                        "date": _t.get("confirm_date") or _t.get("apply_date"),
+                        "fund_code": _h.get("fund_code"),
+                        "fund_name": _h.get("fund_name"),
+                        "mode": "现金",
+                        "per_share": _t.get("dividend_per_share"),
+                        "shares": None,
+                        "nav": None,
+                        "amount": round(amt, 2),
+                    })
                 elif k == "div_reinvest":
-                    div_total += float(_t.get("shares") or 0) * float(_t.get("confirm_nav") or 0)
+                    amt = float(_t.get("shares") or 0) * float(_t.get("confirm_nav") or 0)
+                    div_total += amt
                     div_count += 1
+                    div_rows.append({
+                        "date": _t.get("confirm_date") or _t.get("apply_date"),
+                        "fund_code": _h.get("fund_code"),
+                        "fund_name": _h.get("fund_name"),
+                        "mode": "再投",
+                        "per_share": _t.get("dividend_per_share"),
+                        "shares": float(_t.get("shares") or 0),
+                        "nav": _t.get("confirm_nav"),
+                        # 再投流水的 `amount` 存量口径记 0（钱没出净值、直接变份额）→ 必须换算
+                        "amount": round(amt, 2),
+                    })
+
+        div_rows.sort(key=lambda r: str(r.get("date") or ""), reverse=True)
 
         return {
             "total_gross": round(total_gross, 2),
@@ -965,4 +997,5 @@ class PortfolioTracker:
             # `div_reinvest`→ 金额 = 新增份额 × 再投净值（存量口径：amount 记 0，故需换算）
             "dividend_total": round(div_total, 2),
             "dividend_count": div_count,
+            "dividends": div_rows,
         }

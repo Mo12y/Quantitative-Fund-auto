@@ -453,6 +453,9 @@ def _holdings_payload(data: dict) -> list:
             # 若要把本字段露出，必须显式标注为「基金净值涨跌（不含份额舍入）」（F-05 口径纪律）。
             "replay_pct": h.get("replay_pct"),
             "pending_est_pct": h.get("pending_est_pct"),
+            # 分红（设计稿 §6 前端部分）：现金余额 + 策略，供持仓行展示与切换
+            "cash_balance": h.get("cash_balance", 0) or 0,
+            "dividend_policy": h.get("dividend_policy") or "reinvest",
             "curve": h.get("curve", []),
         })
     return out
@@ -470,6 +473,16 @@ def _portfolio_payload(data: dict) -> dict:
             "total_pnl": r.get("total_pnl", 0), "total_gross": r.get("total_gross", 0),
             "total_cost": r.get("total_cost", 0), "total_fee": r.get("total_fee", 0),
             "count": r.get("count", 0),
+            # 分红收益（设计稿 §6/§7 第 6 步）：与买卖价差**分开列**，前端相加才是总已实现。
+            # 缺失 → 前端「已实现收益」整块漏掉分红（只分红账户显示 ¥0.00）。
+            "dividend_total": r.get("dividend_total", 0),
+            "dividend_count": r.get("dividend_count", 0),
+            "dividends": [{
+                "date": d.get("date"), "fund_code": d.get("fund_code"),
+                "fund_name": d.get("fund_name"), "mode": d.get("mode"),
+                "per_share": d.get("per_share"), "shares": d.get("shares"),
+                "nav": d.get("nav"), "amount": d.get("amount"),
+            } for d in (r.get("dividends") or [])[:50]],
             "sales": [{
                 "fund_code": s.get("fund_code"), "fund_name": s.get("fund_name"),
                 "confirm_date": s.get("confirm_date"), "shares": s.get("shares"),
@@ -683,6 +696,10 @@ def _overview_stats(port: dict, plan: dict) -> dict:
         "realized_pnl": round(float(realized.get("total_pnl") or 0), 2),
         "realized_fee": round(float(realized.get("total_fee") or 0), 2),
         "realized_count": int(realized.get("count") or 0),
+        # 分红收益（设计稿 §6/§7 第 6 步）：与买卖价差**分开给**，前端相加才是"真·总已实现"。
+        # 只给合计的话，KPI 上的"已实现收益"会把分红整块漏掉（用户少看到一笔真钱）。
+        "realized_dividend": round(float(realized.get("dividend_total") or 0), 2),
+        "realized_dividend_count": int(realized.get("dividend_count") or 0),
         "total_return_pct": round((pnl / invested * 100) if invested else 0, 2),
         "cash_reserve": round(cash, 2),
         "pending_amount": pending_amt,
@@ -1140,6 +1157,34 @@ def api_holdings_action():
             hid = int(q.get("id") or 0)
             ok = db.delete_holding(hid)
             return jsonify({"ok": ok, "message": f"已删除持仓ID={hid}" if ok else f"未找到持仓ID={hid}"})
+
+        if action == "dividend_policy":
+            # 分红策略切换（设计稿 §7 第 6 步）：reinvest（红利再投，默认）| cash（现金分红）
+            # 两种定位方式：
+            #   · `code` → 该基金**全部**持仓（前端按基金分组展示，与用户认知一致）
+            #   · `id`   → 单笔持仓（细粒度，供脚本/调试用）
+            # 只改**以后**检测到的除息日怎么入账；已入账历史不动（不重算、不回填）。
+            hid = int(q.get("id") or 0)
+            code = str(q.get("code") or "").strip()
+            pol = str(q.get("policy") or "").strip().lower()
+            if pol not in ("reinvest", "cash"):
+                return jsonify({"ok": False, "error": "policy 只能是 reinvest 或 cash"}), 400
+            cur = db.conn.cursor()
+            if code:
+                rows = cur.execute("SELECT id FROM holdings WHERE fund_code=?", (code,)).fetchall()
+            elif hid:
+                rows = cur.execute("SELECT id FROM holdings WHERE id=?", (hid,)).fetchall()
+            else:
+                rows = []
+            if not rows:
+                return jsonify({"ok": False, "error": "未找到对应持仓（需提供 code 或 id）"}), 400
+            cur.executemany("UPDATE holdings SET dividend_policy=? WHERE id=?",
+                            [(pol, r["id"]) for r in rows])
+            db.conn.commit()
+            label = "红利再投" if pol == "reinvest" else "现金分红"
+            return jsonify({"ok": True, "changed": len(rows),
+                            "message": (f"{code} 的 {len(rows)} 笔已改为{label}" if code
+                                        else f"持仓ID={hid} 分红方式已改为{label}")})
 
         return jsonify({"ok": False, "error": "未知操作: %s" % (action or "(空)")}), 400
     except (ValueError, TypeError):
