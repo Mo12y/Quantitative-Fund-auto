@@ -20,6 +20,8 @@
   或绝对阈值（读 `item["metrics"]`，如回撤 ≤ 25%）；
 - `holding_overlap`：候选板块（`fund_boards` 关键词映射）在现有持仓中的金额占比 ≥ 上限
   → 剔除；已持有同一只 → 剔除。**"其他"板块（关键词未命中）不猜重叠**→ skipped。
+- `corr_overlap`（"伪分散"）：候选与已持基金近 1 年**周收益相关性** ≥ 上限 → 剔除。
+  数据由调用方注入（`ctx["overlap"]`，见 `portfolio_overlap`）；净值不足 20 周 → skipped。
 
 架构纪律（必须遵守，违反即破坏叠加性）
 ------------------------------------
@@ -43,13 +45,14 @@ from typing import Callable, Optional
 
 from . import fund_boards
 
-# ── 约束种类（B 层要实现的三种，与设计稿 §4.4 一一对应）────────────────
-HOLDING_OVERLAP = "holding_overlap"   # 持仓重叠度：候选 vs 已持，避免重复买同类/同赛道
+# ── 约束种类（B 层要实现的，与设计稿 §4.4 一一对应）────────────────
+HOLDING_OVERLAP = "holding_overlap"   # 持仓重叠度（板块）：候选 vs 已持，避免重复买同板块
 TYPE_PREFERENCE = "type_preference"   # 组别/类型偏好：只保留用户偏好的参照系组（A/B/C/D...）
 RISK_PREFERENCE = "risk_preference"   # 风险偏好：对指标上限/下限的个性化约束（如回撤 ≤ 某值）
+CORR_OVERLAP = "corr_overlap"         # 相关性重叠（"伪分散"）：与已持基金同涨同跌（见 §4.4 / 阶段 3）
 
 # 全部合法 kind（校验用；将来新增约束在此登记）
-ALL_KINDS = (HOLDING_OVERLAP, TYPE_PREFERENCE, RISK_PREFERENCE)
+ALL_KINDS = (HOLDING_OVERLAP, TYPE_PREFERENCE, RISK_PREFERENCE, CORR_OVERLAP)
 
 # ── 约束来源（谁提供的这条约束，决定"谁的数据谁负责注入"）────────────────
 SOURCE_USER_PROFILE = "user_profile"
@@ -73,10 +76,13 @@ DEFAULT_MAX_BOARD_PCT = 40.0
 #: - max_values / min_values            : 指标绝对上限 / 下限（需 item["metrics"]）→ risk_preference
 #: - overlap_max_board_pct              : 单板块占比上限（%）→ holding_overlap
 #: - overlap_exclude_held               : 已持有的同一只基金是否剔除（默认 True）→ holding_overlap
+#: - corr_max_r                         : 相关性重叠上限（周收益 Pearson r）→ corr_overlap
+#:   ⚠️ **不设默认、不自动启用** —— 阈值属统计判断值（本项目吃过"拍脑袋阈值"的亏），
+#:   要显式写进画像才生效；建议起点 0.8（强相关），>1 即永不触发。
 PROFILE_KEYS = (
     "preferred_groups", "excluded_groups",
     "min_percentiles", "max_percentiles", "max_values", "min_values",
-    "overlap_max_board_pct", "overlap_exclude_held",
+    "overlap_max_board_pct", "overlap_exclude_held", "corr_max_r",
 )
 
 
@@ -335,14 +341,43 @@ def eval_holding_overlap(item: dict, params: dict, ctx: dict) -> tuple:
     return True, ""
 
 
+def eval_corr_overlap(item: dict, params: dict, ctx: dict) -> tuple:
+    """相关性重叠（"伪分散"）：候选与已持基金是否**同涨同跌**。
+
+    数据：`ctx["overlap"][code] = {"max_r", "against", "n"}` —— 由调用方用
+    `portfolio_overlap.overlap_map()`（近 1 年周收益 Pearson r）预计算并注入；
+    本函数**纯读入参**，不查库。
+
+    算不了就 skipped（**不猜成通过**）：未注入 / 该基金净值不足 20 周 / r 为 None。
+    口径与阈值性质见 `portfolio_overlap` 模块 docstring（阈值是政策、不是口径）。
+    """
+    thr = params.get("max_r")
+    if thr is None:
+        return missing("约束未提供 max_r（相关性上限）")
+    omap = ctx.get("overlap")
+    if omap is None:
+        return missing("ctx 未提供相关性数据（overlap）")
+    entry = omap.get(str(item.get("code")))
+    if not entry:
+        return missing("净值不足（<20 周）或未计算 → 相关性未评估")
+    r = entry.get("max_r")
+    if r is None:
+        return missing("相关性结果为 None")
+    if float(r) >= float(thr):
+        return False, "与持仓 %s 的近 1 年周收益相关 %.2f（≥上限 %.2f）—— 同涨同跌" % (
+            entry.get("against"), float(r), float(thr))
+    return True, ""
+
+
 def register_builtin_constraints() -> None:
-    """注册三种内置约束（幂等）。**import 本模块时自动调用**。
+    """注册内置约束（幂等）。**import 本模块时自动调用**。
 
     测试若清空 `REGISTRY` 换桩实现，可再次调用本函数恢复。
     """
     register_constraint(TYPE_PREFERENCE, eval_type_preference)
     register_constraint(RISK_PREFERENCE, eval_risk_preference)
     register_constraint(HOLDING_OVERLAP, eval_holding_overlap)
+    register_constraint(CORR_OVERLAP, eval_corr_overlap)
 
 
 register_builtin_constraints()
@@ -401,6 +436,16 @@ def build_constraints_from_user(user_profile: Optional[dict] = None,
     if risk_params:
         desc = "风险偏好：" + "；".join("%s=%s" % (k, v) for k, v in risk_params.items())
         constraints.append(Constraint(RISK_PREFERENCE, risk_params, SOURCE_USER_PROFILE, desc))
+
+    # 相关性重叠：**只有画像显式写了 corr_max_r 才启用**（统计阈值不设默认，见 PROFILE_KEYS 注释）
+    corr_r = profile.get("corr_max_r")
+    if corr_r is not None:
+        try:
+            constraints.append(Constraint(
+                CORR_OVERLAP, {"max_r": float(corr_r)}, SOURCE_USER_PROFILE,
+                "相关性重叠：与持仓任一只近 1 年周收益 r ≤ %.2f" % float(corr_r)))
+        except (TypeError, ValueError):
+            notes.append("corr_max_r=%r 不是数字 → 已忽略（不猜）" % (corr_r,))
 
     if holdings:
         cap = float(profile.get("overlap_max_board_pct") or DEFAULT_MAX_BOARD_PCT)

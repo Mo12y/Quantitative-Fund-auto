@@ -23,6 +23,7 @@ from src.analysis.investment_plan import get_plan, get_progress, ensure_seed
 from src.analysis import fund_boards
 from src.analysis import peer_percentile
 from src.analysis import user_constraint, user_profile
+from src.analysis import portfolio_overlap
 
 app = Flask(__name__)
 
@@ -345,11 +346,14 @@ def _pick_metrics(res: dict) -> dict:
     return out
 
 
-def _user_constraints(db):
-    """装配 B 层运行时数据：持仓（库内）+ 画像（本地配置）→ `(built, ctx, meta)`。
+def _user_constraints(db, codes=None):
+    """装配 B 层运行时数据：持仓（库内）+ 画像（本地配置）+ 相关性（候选×持仓）→ `(built, ctx, meta)`。
 
     只读；读持仓失败 → `(None, None, {"error": ...})`（调用方**不得**当成"无约束"，
     必须显式声明，否则"没算"会被当成"通过"）。
+
+    codes：本次要评估的候选代码（给了才计算相关性重叠 —— 只有 `corr_overlap`
+    约束需要它；没给则该约束评估时为 skipped）。
     """
     try:
         holdings = [dict(r) for r in db.conn.execute(
@@ -358,8 +362,17 @@ def _user_constraints(db):
         return None, None, {"error": "持仓读取失败，未应用用户约束：%s" % str(e)[:60]}
     profile, profile_note = user_profile.load_profile()
     built = user_constraint.build_constraints_from_user(profile, holdings)
-    return built, {"holdings": holdings, "profile": profile}, {
-        "profile_note": profile_note, "holdings_n": len(holdings)}
+    ctx = {"holdings": holdings, "profile": profile}
+    meta = {"profile_note": profile_note, "holdings_n": len(holdings), "overlap_note": None}
+    if codes:
+        held = [h.get("fund_code") for h in holdings if h.get("fund_code")]
+        try:
+            ctx["overlap"] = portfolio_overlap.overlap_map(db.conn, list(codes), held)
+            meta["overlap_note"] = "相关性：%d/%d 只可计算（近 1 年周收益）" % (len(ctx["overlap"]), len(codes))
+        except Exception as e:
+            ctx["overlap"] = {}
+            meta["overlap_note"] = "相关性计算失败：%s" % str(e)[:60]
+    return built, ctx, meta
 
 
 def _review_block(built, res, meta, before_n: int) -> dict:
@@ -370,6 +383,7 @@ def _review_block(built, res, meta, before_n: int) -> dict:
         "note": built.note,
         "profile_note": meta.get("profile_note"),
         "holdings_n": meta.get("holdings_n"),
+        "overlap_note": meta.get("overlap_note"),
         "counts": {"before": before_n, "kept": len(res.kept),
                    "dropped": len(res.dropped), "skipped": len(res.skipped)},
         "dropped": [{"code": p.get("code"), "name": p.get("name"),
@@ -386,7 +400,7 @@ def _apply_user_constraints(db, picks: list) -> tuple:
     返回 `(kept_picks, review_block)` —— **未通过/未评估的不在 kept 里**，
     但必须通过 review 显式回报（不静默丢弃）。**失败不阻断主流程**。
     """
-    built, ctx, meta = _user_constraints(db)
+    built, ctx, meta = _user_constraints(db, [p.get("code") for p in (picks or [])])
     if built is None:
         return list(picks), {"error": meta["error"]}
     res = user_constraint.apply_constraints(picks, built.constraints, ctx)
@@ -401,7 +415,7 @@ def _annotate_user_constraints(db, funds: list) -> tuple:
     （那里用 `_apply_user_constraints` 过滤）。每只基金加 `constraint_status` ∈
     kept/dropped/skipped + `constraint_reasons`（§4.6 三问之②③）。
     """
-    built, ctx, meta = _user_constraints(db)
+    built, ctx, meta = _user_constraints(db, [f.get("code") for f in (funds or [])])
     if built is None:
         return list(funds), {"error": meta["error"]}
     res = user_constraint.apply_constraints(funds, built.constraints, ctx)

@@ -22,7 +22,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from src.analysis import user_constraint as uc
 from src.analysis.user_constraint import (
     Constraint, apply_constraints, build_constraints_from_user, register_constraint,
-    HOLDING_OVERLAP, TYPE_PREFERENCE, RISK_PREFERENCE,
+    HOLDING_OVERLAP, TYPE_PREFERENCE, RISK_PREFERENCE, CORR_OVERLAP,
     SOURCE_USER_HOLDINGS, SOURCE_USER_PROFILE,
 )
 
@@ -311,6 +311,43 @@ class TestRiskPreference:
         assert r.kept == [] and len(r.skipped) == 3
 
 
+class TestCorrOverlap:
+    """相关性重叠（"伪分散"）：与已持基金同涨同跌 → 剔除；无数据 → skipped。"""
+
+    def test_over_threshold_is_dropped_with_evidence(self, builtins):
+        c = Constraint(CORR_OVERLAP, {"max_r": 0.8}, description="相关性重叠")
+        ctx = {"overlap": {"X1": {"max_r": 0.88, "against": "024663", "n": 56}}}
+        r = apply_constraints([{"code": "X1", "name": "甲"}], [c], ctx)
+        assert [p["code"] for p in r.dropped] == ["X1"]
+        why = r.dropped[0]["dropped_reasons"][0]
+        assert "0.88" in why and "024663" in why, "理由必须带 r 值与对手基金（可解释性）"
+
+    def test_below_threshold_is_kept(self, builtins):
+        c = Constraint(CORR_OVERLAP, {"max_r": 0.8}, description="相关性重叠")
+        ctx = {"overlap": {"X1": {"max_r": 0.42, "against": "018392", "n": 56}}}
+        r = apply_constraints([{"code": "X1", "name": "甲"}], [c], ctx)
+        assert _kept_codes(r) == ["X1"]
+
+    def test_no_overlap_in_ctx_is_skipped(self, builtins):
+        """调用方没注入相关性 → 算不了 → skipped（不猜成通过）。"""
+        c = Constraint(CORR_OVERLAP, {"max_r": 0.8}, description="相关性重叠")
+        r = apply_constraints(PICKS, [c])
+        assert r.kept == [] and r.dropped == []
+        assert all("数据缺失" in s for p in r.skipped for s in p["skipped_reasons"])
+
+    def test_insufficient_history_is_skipped(self, builtins):
+        """净值不足 20 周 → 该候选没有结果 → skipped。"""
+        c = Constraint(CORR_OVERLAP, {"max_r": 0.8}, description="相关性重叠")
+        r = apply_constraints([{"code": "X1", "name": "甲"}], [c], {"overlap": {}})
+        assert len(r.skipped) == 1 and "未评估" in r.skipped[0]["skipped_reasons"][0]
+
+    def test_missing_param_is_skipped(self, builtins):
+        r = apply_constraints([{"code": "X1", "name": "甲"}],
+                              [Constraint(CORR_OVERLAP, {}, description="相关性重叠")],
+                              {"overlap": {}})
+        assert len(r.skipped) == 1
+
+
 class TestBuildConstraintsFromUser:
     """用户数据 → 约束的翻译（不猜语义，未识别键显式声明）。"""
 
@@ -342,6 +379,19 @@ class TestBuildConstraintsFromUser:
         o = build_constraints_from_user({"overlap_max_board_pct": 25}, REAL_LIKE_HOLDINGS)
         cap2 = [c for c in o.constraints if c.kind == HOLDING_OVERLAP][0].params["max_board_pct"]
         assert cap2 == 25.0
+
+    def test_corr_max_r_is_opt_in(self, builtins):
+        """统计阈值**不设默认**：画像不写 corr_max_r → 不生成该约束。"""
+        r0 = build_constraints_from_user({"preferred_groups": ["A"]}, REAL_LIKE_HOLDINGS)
+        assert all(c.kind != CORR_OVERLAP for c in r0.constraints)
+        r1 = build_constraints_from_user({"corr_max_r": 0.8}, REAL_LIKE_HOLDINGS)
+        corr = [c for c in r1.constraints if c.kind == CORR_OVERLAP]
+        assert corr and corr[0].params["max_r"] == 0.8 and corr[0].source == SOURCE_USER_PROFILE
+
+    def test_bad_corr_max_r_is_declared_not_guessed(self, builtins):
+        r = build_constraints_from_user({"corr_max_r": "强"}, REAL_LIKE_HOLDINGS)
+        assert all(c.kind != CORR_OVERLAP for c in r.constraints), "不是数字就不启用"
+        assert "corr_max_r" in r.note and "不是数字" in r.note
 
     def test_unknown_keys_and_risk_pref_text_are_declared(self, builtins):
         """未识别的画像键（含自由文本 risk_pref）→ 明确声明"已忽略/未映射"，不编造。"""

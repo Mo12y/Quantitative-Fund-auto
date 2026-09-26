@@ -56,6 +56,22 @@ def _seed(dbp, holdings=(("017470", "嘉实上证科创板芯片ETF发起联接C
     d.close()
 
 
+def _seed_nav(dbp, code, seed=1, n=400):
+    """造确定性随机游走净值（**同 seed → 同序列 → r ≈ 1.00**，用于相关性重叠用例）"""
+    import random
+    from datetime import date, timedelta
+    d = _db(dbp)
+    rnd = random.Random(seed)
+    v = 1.0
+    d0 = date(2025, 8, 1)
+    rows = []
+    for i in range(n):
+        v *= (1 + rnd.gauss(0, 0.006))
+        rows.append((code, (d0 + timedelta(days=i)).isoformat(), round(v, 6), round(v, 6), 0.0))
+    d.insert_nav_batch(rows)
+    d.close()
+
+
 @pytest.fixture()
 def dbp(tmp_path, monkeypatch):
     p = str(tmp_path / "constraint.db")
@@ -236,6 +252,24 @@ class TestAnnotateUserConstraints:
         d.close()
         assert annotated[0]["constraint_status"] == "kept"
         assert review["applied"] == []
+
+    def test_corr_overlap_active_only_with_profile(self, dbp, tmp_path, monkeypatch):
+        """画像写 corr_max_r + 库里有净值 → 相关性重叠真的参与判定（理由带 r 与对手代码）。"""
+        _seed(dbp)
+        _seed_nav(dbp, "017470", seed=1)     # 持仓的半导体基金
+        _seed_nav(dbp, "000059", seed=1)     # 候选与它**同序列** → r ≈ 1.0
+        prof = tmp_path / "user_profile.local.yaml"
+        prof.write_text("corr_max_r: 0.8\n", encoding="utf-8")
+        monkeypatch.setattr(webapp.user_profile, "PROFILE_PATH", str(prof))
+        d = _db(dbp)
+        annotated, review = webapp._annotate_user_constraints(
+            d, [{"code": "000059", "name": "国联安中证医药100A"}])
+        d.close()
+        assert annotated[0]["constraint_status"] == "dropped", "同涨同跌必须被剔除"
+        why = annotated[0]["constraint_reasons"][0]
+        assert "相关" in why and "017470" in why
+        assert review["overlap_note"].startswith("相关性：1/1"), \
+            "相关性可计算只数必须如实回报（%s）" % review["overlap_note"]
 
 
 class TestPoolEndpointWiring:
