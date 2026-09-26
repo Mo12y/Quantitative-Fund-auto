@@ -857,7 +857,13 @@ function holdingsInner(P,PL){ return holdingsHTML(P,PL); }
 function rebalanceHTML(RB,P){
   if(!RB||RB.error){return`<div class="empty">${RB&&RB.error?esc(RB.error):'调仓分析不可用'}</div>`;}
   if(!(P&&P.has_holdings))return`<div class="empty">暂无持仓，暂无需调仓</div>`;
-  if(!RB.instructions||!RB.instructions.length)return`<div class="empty">当前无需调仓</div>`;
+  if(!RB.instructions||!RB.instructions.length){
+    // §4.4：没有指令时要说清是"无需调仓"还是"候选被用户约束挡住"（不得含糊成前者）
+    const msg=RB.constraint_blocked_buy
+      ? '本应加仓，但买入候选均未通过用户约束（明细见下）—— 不是"无需调仓"'
+      : '当前无需调仓';
+    return `<div class="empty">${msg}</div>`+rbConstraintBlock(RB);
+  }
   const summary=RB.summary||{};
   const col=RB.need_rebalance?'var(--yellow)':'var(--green)';
   let h=`<div style="font-size:15px;font-weight:700;margin-bottom:6px;color:${col}">${esc(summary.verdict||'')}</div>
@@ -877,6 +883,7 @@ function rebalanceHTML(RB,P){
       <span class="u-tdim">${esc(inst.reason||'')}</span></div>`;
   }
   h+=`<div class="qtag u-mt8">操作前确认持有天数 — 不满7天有 1.5% 惩罚赎回费</div>`;
+  h+=rbConstraintBlock(RB);        // §4.4：买入候选的约束明细（可折叠，默认收起）
   return h;
 }
 
@@ -899,6 +906,7 @@ function poolHTML(F){
   // 口径说明（C1/C2 的可读性前提）：不解释清楚，"同类 P" 会被当成预测能力
   h+=`<div class="qtag" style="margin:6px 0 12px;line-height:1.7">口径：「同类 P__」= 该基金在<b>同组存续基金</b>中的百分位（0–100，越大越好，已按方向归一：回撤/波动越小=分越高）。`+
      `动量单独以「位置」展示 —— <b>越大只表示近 3 月涨得越多，不代表更好</b>。存续不足 3 年（样本不足）时不给百分位，只说明原因。</div>`;
+  h+=poolConstraintLine(F.constraint_review);          // §4.4：用户约束在池内的标注汇总
   // C4：把此前从未被前端调用的 /api/recommend 接进来（可折叠 + 强口径声明），
   //     不让它继续当"死接口"，但也不把它渲染成"推荐榜"误导用户。
   h+=`<details class="recbox" ontoggle="loadRec(this)"><summary>历史回测验证（样本内 · 仅供参考，不是推荐）</summary>`+
@@ -942,6 +950,37 @@ function qChips(f){
   const one=(k,lb)=>(P[k]==null)?'':`<span class="qchip">${lb} P${Math.round(P[k])}</span>`;
   return one('sharpe','夏普')+one('max_drawdown_1y','回撤')+one('annual_return','年化');
 }
+// §4.4 主路径接入：筛选池**只标注不剔除**（见后端 _annotate_user_constraints）
+function cBrief(rs){
+  const s=(rs&&rs[0])||''; const i=s.lastIndexOf('：');
+  const t=i>=0?s.slice(i+1):s;
+  return t.length>22?t.slice(0,22)+'…':t;
+}
+function constraintTag(f){
+  // 只标"被剔除"（可操作：已持有/与偏好冲突）；"未评估"不逐行打标 ——
+  // 实测池内 38/40 都是"板块关键词未命中"（多为债券指数名），逐行打标是噪声，
+  // 计数与原因放到卡片汇总行（poolConstraintLine），信息不丢。
+  const st=f.constraint_status||''; const rs=f.constraint_reasons||[];
+  if(st==='dropped')return `<span class="pill u-pillwarn" title="用户约束：${esc(rs.join('；'))}">约束：${esc(cBrief(rs))}</span>`;
+  return '';
+}
+function poolConstraintLine(cr){
+  if(!cr)return '';
+  if(cr.error)return `<div class="qtag u-twarn" style="margin:0 0 10px">用户约束：未应用（${esc(cr.error)}）</div>`;
+  const c=cr.counts||{}; const n=(cr.applied||[]).length;
+  return `<div class="qtag" style="margin:0 0 10px;line-height:1.7">用户约束（第 2 层）：${n} 条 · 持仓 ${cr.holdings_n||0} 只 —— `+
+    `池内 ${c.before||0} 只：通过 <b>${c.kept||0}</b> · 被约束剔除 ${c.dropped||0} · 未评估 ${c.skipped||0}（<b>只标注不剔除</b>；`+
+    `未评估多为"板块关键词未命中"，无法判定重叠≠通过）。真正“买哪只”由调仓顾问按约束过滤。</div>`;
+}
+function rbConstraintBlock(RB){
+  const cr=RB.constraint_review;
+  if(!cr)return '';
+  if(cr.error)return `<div class="qtag u-twarn" style="margin-top:8px">用户约束：未应用（${esc(cr.error)}）</div>`;
+  const c=cr.counts||{}; const apps=cr.applied||[];
+  if(!apps.length)return `<div class="qtag" style="margin-top:8px">买入候选未受用户约束影响（${esc(cr.note||'')}）</div>`;
+  return `<details class="recbox" style="margin-top:8px"><summary>买入候选的用户约束：${apps.length} 条 · ${c.before||0} 只候选 → 通过 ${c.kept||0} · 剔除 ${c.dropped||0} · 未评估 ${c.skipped||0}</summary>`+
+    `<div class="recmain">${constraintReviewHTML(cr)}</div></details>`;
+}
 function poolRow(f){
   const navs=f.nav_trend||[]; const mom=f.momentum_3m||0; const dd=f.max_dd_1y||0;
   const trendC=mom>=0?'var(--green)':'var(--red)';
@@ -954,7 +993,7 @@ function poolRow(f){
   const psTag=ps?`<span class="pill u-pillwarn" title="${esc(f.purchasable||ps)}">${esc(ps)}</span>`:'';
   return `<div class="fund-row">
     <span><span class="fund-code">${esc(f.code)}</span>${riskBadge(f.risk)}</span>
-    <span class="fund-name" title="${esc(name)}">${esc(name.length>26?name.slice(0,26)+'…':name)}${psTag}</span>
+    <span class="fund-name" title="${esc(name)}">${esc(name.length>26?name.slice(0,26)+'…':name)}${psTag}${constraintTag(f)}</span>
     <span class="fund-meta"><span class="sparkline">${sparkSVG(navs,trendC)}</span>${scoreTag}
       <span style="color:var(--ink-muted);min-width:62px;text-align:right">近3月 ${mom>=0?'+':''}${fmt(mom,1)}%</span>
       <span class="qtag">回撤 ${fmt(dd,0)}%</span></span>
@@ -1054,7 +1093,8 @@ function boardPoolHTML(d){
   const boards=d.boards||[];
   let h=`<h2>基金质量筛选池 <span class="sub">— 按行业板块总榜（每板块前 ${d.size||20}）</span>
       <span class="u-right"><button class="btn mini" data-action="showPool" data-mode="type">按类型</button></span></h2>
-    <div class="stat-line">共 ${d.total_funds||0} 只候选 · ${boards.length} 个板块 · 组内“稳健优先 → 夏普 → 动量”排序</div>`;
+    <div class="stat-line">共 ${d.total_funds||0} 只候选 · ${boards.length} 个板块 · 组内“稳健优先 → 夏普 → 动量”排序</div>`
+      +poolConstraintLine(d.constraint_review);      // §4.4：与按类型视图同一口径
   if(!boards.length)return h+'<div class="empty">暂无可展示的板块分组</div>';
   boards.forEach((b,i)=>{
     h+=`<details class="groupbox" ${i<3?'open':''}><summary class="gh u-pointer">

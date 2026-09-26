@@ -211,8 +211,17 @@ def fill_report(db: Database, tag: str, codes=None):
 
 # ============================ 范围 ============================
 
-def scope_codes(db: Database, scope: str) -> list:
-    """返回本次要采的基金代码（去重排序，可复现）"""
+def scope_codes(db: Database, scope: str, only_missing: str = "") -> list:
+    """返回本次要采的基金代码（去重排序，可复现）
+
+    scope:
+      holdings  持仓（holding / pending_confirm）
+      pool      UI「基金筛选池」快照（analysis_snapshot key=funds）
+      universe  **筛选域**：申购开放 且 净值点 ≥252（≈1 年）—— 即真正会进入
+                筛选/推荐视野的基金（2026-09-26 实测 16,030 只；全市场 27,864 只中
+                其余多为无净值/货基/封闭，采了也不进池）
+    only_missing: 只取该字段为空的（避免重复请求已有数据的基金；仍受缓存二次去重）
+    """
     codes = set()
     if "holdings" in scope:
         codes |= {r[0] for r in db.conn.execute(
@@ -224,6 +233,19 @@ def scope_codes(db: Database, scope: str) -> list:
         else:
             print("  ⚠️ 未找到 funds 快照（筛选池未预热）→ pool 范围为空；"
                   "可先刷新 Web 页面或显式 --codes")
+    if "universe" in scope:
+        codes |= {r[0] for r in db.conn.execute(
+            "SELECT f.fund_code FROM fund_info f WHERE f.purchase_status LIKE '%开放%' "
+            "AND f.fund_code IN (SELECT fund_code FROM fund_nav GROUP BY fund_code "
+            "HAVING COUNT(*) >= 252)")}
+    if only_missing:
+        if only_missing not in FIELDS:
+            print("  ⚠️ --only-missing %r 不在字段清单 %s 内 → 忽略该过滤" % (only_missing, FIELDS))
+        else:
+            have = {r[0] for r in db.conn.execute(
+                "SELECT fund_code FROM fund_info WHERE %s IS NOT NULL AND TRIM(%s) != ''"
+                % (only_missing, only_missing))}
+            codes -= have
     return sorted(codes)
 
 
@@ -232,9 +254,11 @@ def scope_codes(db: Database, scope: str) -> list:
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--scope", default="holdings,pool")
+    ap.add_argument("--only-missing", default="", help="只采该字段为空的（如 establish_date）")
     ap.add_argument("--codes", default="", help="显式代码列表（逗号分隔），给了就只用它")
     ap.add_argument("--limit", type=int, default=0)
     ap.add_argument("--workers", type=int, default=4)
+    ap.add_argument("--batch", type=int, default=400, help="每 N 只增量落库一次")
     ap.add_argument("--dry-run", action="store_true", help="只抓取解析，不写库")
     ap.add_argument("--replay", action="store_true", help="只用缓存重建，不联网")
     args = ap.parse_args()
@@ -251,7 +275,7 @@ def main():
     if args.codes:
         codes = sorted({c.strip() for c in args.codes.split(",") if c.strip()})
     else:
-        codes = scope_codes(db, args.scope)
+        codes = scope_codes(db, args.scope, args.only_missing)
     if args.limit:
         codes = codes[:args.limit]
     print("\n[1] 目标 %d 只：%s" % (len(codes), ",".join(codes[:12]) + (" ..." if len(codes) > 12 else "")))
@@ -276,6 +300,7 @@ def main():
     print("\n[2] 已有缓存 %d 只 | 本次待采 %d 只" % (len(cache), len(todo)))
 
     rows, ok, fail, failed = [], 0, 0, []
+    buf = []
     if todo:
         t0 = time.time()
         with open(CACHE, "a", encoding="utf-8") as cf, ThreadPoolExecutor(args.workers) as ex:
@@ -283,15 +308,23 @@ def main():
                 if good:
                     ok += 1
                     rows.append(res)
+                    buf.append(res)
                     cache[code] = res
                     cf.write(json.dumps(res, ensure_ascii=False) + "\n")
                 else:
                     fail += 1
                     failed.append((code, res))
-                if i % 50 == 0 or i == len(todo):
+                if i % args.batch == 0 or i == len(todo):
                     cf.flush()
-                    print("    %d/%d 成功 %d 失败 %d  %.1f 只/秒"
-                          % (i, len(todo), ok, fail, i / max(time.time() - t0, .1)), flush=True)
+                    # 增量落库：长任务（万只级）中断也不丢已采部分；幂等，重跑无副作用
+                    if buf and not args.dry_run:
+                        upsert(db, buf)
+                    buf = []
+                if i % 500 == 0 or i == len(todo):
+                    el = time.time() - t0
+                    print("    %d/%d 成功 %d 失败 %d  %.1f 只/秒  剩余约 %.0f 分钟"
+                          % (i, len(todo), ok, fail, i / max(el, .1),
+                             (len(todo) - i) / max(i / max(el, .1), .1) / 60), flush=True)
 
     if failed:
         json.dump(failed, open(os.path.join(ROOT, "data", "fund_jbgk_failed.json"), "w",

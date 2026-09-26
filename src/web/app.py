@@ -345,43 +345,118 @@ def _pick_metrics(res: dict) -> dict:
     return out
 
 
-def _apply_user_constraints(db, picks: list) -> tuple:
-    """设计稿 §4.4 第 3 层：推荐 = 第 1 层（同类百分位）∩ 第 2 层（用户约束）。
+def _user_constraints(db):
+    """装配 B 层运行时数据：持仓（库内）+ 画像（本地配置）→ `(built, ctx, meta)`。
 
-    装配 ctx 并应用约束（**只读**，不写库、不改入参）：
-      - holdings ← 库内 `holdings`（holding / pending_confirm）
-      - profile  ← 本地配置 `config/user_profile.local.yaml`（缺文件则无画像）
-
-    返回 `(kept_picks, review_block)`：
-      kept 进 `current_picks`；dropped / skipped 连同 reason 进 `review_block`
-      （对应 §4.6 的三问：为什么入选 / 为什么落选 / 缺什么没评估）。
-
-    **失败不阻断主流程**：读持仓失败 → 返回原 picks + error 声明（不假装筛过）。
+    只读；读持仓失败 → `(None, None, {"error": ...})`（调用方**不得**当成"无约束"，
+    必须显式声明，否则"没算"会被当成"通过"）。
     """
     try:
         holdings = [dict(r) for r in db.conn.execute(
             "SELECT * FROM holdings WHERE status IN ('holding','pending_confirm')")]
     except Exception as e:
-        return list(picks), {"error": "持仓读取失败，未应用用户约束：%s" % str(e)[:60]}
-
+        return None, None, {"error": "持仓读取失败，未应用用户约束：%s" % str(e)[:60]}
     profile, profile_note = user_profile.load_profile()
     built = user_constraint.build_constraints_from_user(profile, holdings)
-    res = user_constraint.apply_constraints(picks, built.constraints,
-                                            {"holdings": holdings, "profile": profile})
-    review = {
+    return built, {"holdings": holdings, "profile": profile}, {
+        "profile_note": profile_note, "holdings_n": len(holdings)}
+
+
+def _review_block(built, res, meta, before_n: int) -> dict:
+    """§4.6 可解释性块（三个接入点共用同一结构）"""
+    return {
         "applied": [{"kind": c.kind, "params": c.params, "source": c.source,
                      "description": c.description} for c in built.constraints],
         "note": built.note,
-        "profile_note": profile_note,
-        "holdings_n": len(holdings),
-        "counts": {"before": len(picks), "kept": len(res.kept),
+        "profile_note": meta.get("profile_note"),
+        "holdings_n": meta.get("holdings_n"),
+        "counts": {"before": before_n, "kept": len(res.kept),
                    "dropped": len(res.dropped), "skipped": len(res.skipped)},
         "dropped": [{"code": p.get("code"), "name": p.get("name"),
                      "reasons": p.get("dropped_reasons", [])} for p in res.dropped],
         "skipped": [{"code": p.get("code"), "name": p.get("name"),
                      "reasons": p.get("skipped_reasons", [])} for p in res.skipped],
     }
-    return res.kept, review
+
+
+def _apply_user_constraints(db, picks: list) -> tuple:
+    """设计稿 §4.4 第 3 层：推荐 = 第 1 层（同类百分位）∩ 第 2 层（用户约束）。
+
+    用于"给出一个列表"的场合（`/api/recommend` 的候选、调仓顾问的买入候选池）：
+    返回 `(kept_picks, review_block)` —— **未通过/未评估的不在 kept 里**，
+    但必须通过 review 显式回报（不静默丢弃）。**失败不阻断主流程**。
+    """
+    built, ctx, meta = _user_constraints(db)
+    if built is None:
+        return list(picks), {"error": meta["error"]}
+    res = user_constraint.apply_constraints(picks, built.constraints, ctx)
+    return res.kept, _review_block(built, res, meta, len(picks))
+
+
+def _annotate_user_constraints(db, funds: list) -> tuple:
+    """筛选池用：**只标注、不剔除**（浏览面保持完整），返回 `(annotated, review_block)`。
+
+    为什么池子不剔除：池子是"浏览/排雷"面，被约束剔除的基金对用户仍有信息价值
+    （"这只已持有/与偏好冲突"本身是结论）；而真正的"买哪只"由调仓顾问的候选池把关
+    （那里用 `_apply_user_constraints` 过滤）。每只基金加 `constraint_status` ∈
+    kept/dropped/skipped + `constraint_reasons`（§4.6 三问之②③）。
+    """
+    built, ctx, meta = _user_constraints(db)
+    if built is None:
+        return list(funds), {"error": meta["error"]}
+    res = user_constraint.apply_constraints(funds, built.constraints, ctx)
+    status = {}
+    for p in res.kept:
+        status[str(p.get("code"))] = ("kept", [])
+    for p in res.dropped:
+        status[str(p.get("code"))] = ("dropped", p.get("dropped_reasons", []))
+    for p in res.skipped:
+        status[str(p.get("code"))] = ("skipped", p.get("skipped_reasons", []))
+    annotated = []
+    for f in funds:
+        st, rs = status.get(str(f.get("code")), ("kept", []))
+        annotated.append(dict(f, constraint_status=st, constraint_reasons=rs))
+    review = _review_block(built, res, meta, len(funds))
+    review["mode"] = "annotate"          # 声明：本块只标注，不剔除
+    return annotated, review
+
+
+def _with_pool_constraints(data):
+    """给筛选池载荷附加用户约束**标注**（不剔除）。
+
+    ⚠️ 缓存载荷是被共享的 dict（内存 TTL / SQLite 快照都用它）→ **必须复制后再返回**，
+    否则"给响应加字段"会污染缓存（下次所有请求都带着旧持仓算出的标注）。
+    """
+    if not isinstance(data, dict) or data.get("funds") is None:
+        return data
+    try:
+        db = get_db()
+        try:
+            annotated, review = _annotate_user_constraints(db, data["funds"])
+        finally:
+            db.close()
+    except Exception as e:
+        return dict(data, constraint_review={"error": "用户约束标注失败：%s" % str(e)[:60]})
+    return dict(data, funds=annotated, constraint_review=review)
+
+
+def _with_board_constraints(data):
+    """板块总榜版（结构是 boards[].funds[]）——同上，只标注不剔除。"""
+    if not isinstance(data, dict) or not data.get("boards"):
+        return data
+    try:
+        db = get_db()
+        try:
+            all_funds = [f for b in data["boards"] for f in (b.get("funds") or [])]
+            annotated, review = _annotate_user_constraints(db, all_funds)
+        finally:
+            db.close()
+    except Exception as e:
+        return dict(data, constraint_review={"error": "用户约束标注失败：%s" % str(e)[:60]})
+    by_code = {str(f.get("code")): f for f in annotated}
+    boards = [dict(b, funds=[by_code.get(str(f.get("code")), f) for f in (b.get("funds") or [])])
+              for b in data["boards"]]
+    return dict(data, boards=boards, constraint_review=review)
 
 
 def _slot_ready(key: str) -> bool:
@@ -479,6 +554,8 @@ def _all_funds():
                 "sharpe": m.get("sharpe"),
                 "ann_vol": m.get("ann_vol"),
                 "reasons": row.get("risk_reasons", []),
+                # B 层绝对阈值口径需要原始指标（只增字段，向后兼容）
+                "metrics": _pick_metrics({"metrics": m}),
                 "nav_trend": _get_nav_trend(db, row["fund_code"]),
             })
         summary = s.get_pool_summary(df)
@@ -586,6 +663,13 @@ def _all_rebalance():
             _pool = (_funds_payload or {}).get("funds")
         except Exception:
             _pool = None                       # 拿不到就回退旧路径（自己算），不静默出错
+        # B 层（§4.4 第 3 层）：买入候选 = 筛选池 ∩ 用户约束。
+        # ⚠️ 这里与筛选池的"只标注不剔除"不同 —— **这里才是"买哪只"，必须过滤**：
+        # 明确不通过（dropped）与无法评估（skipped）都不进候选；被剔除的连同理由回报，
+        # 若因此一个候选都不剩，前端要能说出"不是无需调仓，是候选都被约束挡住"。
+        constraint_review = None
+        if _pool:
+            _pool, constraint_review = _apply_user_constraints(db, _pool)
         advisor = RebalanceAdvisor(db, pool=_pool)
         # 总资金口径 = 持仓市值 + 计划现金弹药（cash_reserve）。
         # 旧版用 total_invested * 1.1 拍脑袋估算，与计划卡数字互相打架。
@@ -603,6 +687,12 @@ def _all_rebalance():
             cash_reserve = 0.0
             degraded.append("cash_reserve")
         rb = advisor.analyze(cash_reserve=cash_reserve)
+        # 本应加仓（权益不足）却没有候选 → 是**约束挡住的**还是本来就没有？
+        # 这个布尔值让前端能说实话（而不是显示"当前无需调仓"）。
+        counts = (constraint_review or {}).get("counts") or {}
+        blocked = bool(constraint_review and counts.get("before", 0) > 0 and counts.get("kept") == 0
+                       and rb.get("need_rebalance")
+                       and (rb.get("current_equity_pct") or 0) < (rb.get("target_equity_pct") or 0))
         db.close()
         return {
             "need_rebalance": rb["need_rebalance"],
@@ -613,6 +703,8 @@ def _all_rebalance():
             "instructions": rb["instructions"],
             "cash_reserve": cash_reserve,
             "degraded": degraded,
+            "constraint_review": constraint_review,
+            "constraint_blocked_buy": blocked,
         }
     except Exception as e:
         return {"error": str(e), "instructions": [], "summary": {"verdict": "分析失败"}}
@@ -792,7 +884,8 @@ def api_funds():
         return jsonify({"ok": True, "data": None, "status": "warming",
                         "retry_in": FUNDS_WARM_RETRY, "source": "warming"})
     data, source = _cached_get("funds", _all_funds, fresh=fresh)
-    return jsonify({"ok": True, "data": data, "source": source})
+    # B 层（§4.4/§4.6）：池子只**标注**用户约束、不剔除（浏览面保持完整）
+    return jsonify({"ok": True, "data": _with_pool_constraints(data), "source": source})
 
 
 @app.route("/api/rebalance")
@@ -1494,7 +1587,7 @@ def api_funds_board():
                         "retry_in": FUNDS_WARM_RETRY, "source": "warming"})
     data, source = _cached_get(key, lambda: _compute_board_pool(size, limit),
                                ttl=600.0, fresh=fresh)
-    return jsonify({"ok": True, "data": data, "source": source})
+    return jsonify({"ok": True, "data": _with_board_constraints(data), "source": source})
 
 
 def _compute_board_pool(size: int, limit: int) -> dict:
@@ -1527,6 +1620,7 @@ def _compute_board_pool(size: int, limit: int) -> dict:
                 "percentiles": _peer["percentiles"], "nav_asof": _peer["nav_asof"],
                 "insufficient_data": _peer["insufficient_data"], "reason": _peer["reason"],
                 "percentiles_scale": _peer["percentiles_scale"],
+                "metrics": _pick_metrics({"metrics": m}),
                 "nav_trend": _get_nav_trend(db, row["fund_code"]),
             })
         db.close()

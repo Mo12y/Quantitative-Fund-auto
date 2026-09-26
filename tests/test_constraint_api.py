@@ -205,3 +205,112 @@ class TestRecommendEndpointWiring:
         kept = data["current_picks"][0]
         assert kept["metrics"]["max_drawdown_1y"] == 20.0, "原始指标须注入（供绝对阈值口径）"
         assert kept["percentiles"], "同侪百分位块保留（为什么入选）"
+
+
+# =================================================================
+# 主路径接入（§4.4 第 3 层）：筛选池只标注 / 买入候选才过滤
+# =================================================================
+
+class TestAnnotateUserConstraints:
+    def test_annotate_keeps_all_and_marks_status(self, dbp):
+        """池子**只标注不剔除**：数量不变，每只带 status + reasons。"""
+        _seed(dbp)                      # 持仓含 017470（半导体）→ 该只是"已持有"
+        funds = [{"code": "017470", "name": "嘉实上证科创板芯片ETF发起联接C"},
+                 {"code": "000059", "name": "国联安中证医药100A"},
+                 {"code": "X1", "name": "某某灵活配置混合"}]
+        d = _db(dbp)
+        annotated, review = webapp._annotate_user_constraints(d, funds)
+        d.close()
+        assert len(annotated) == 3, "只标注不剔除 → 数量必须不变"
+        assert {f["code"]: f["constraint_status"] for f in annotated} == {
+            "017470": "dropped", "000059": "kept", "X1": "skipped"}
+        assert all(f["constraint_reasons"] for f in annotated if f["constraint_status"] != "kept")
+        assert review["mode"] == "annotate"
+        assert review["counts"] == {"before": 3, "kept": 1, "dropped": 1, "skipped": 1}
+
+    def test_no_constraints_marks_all_kept(self, dbp):
+        _seed(dbp, holdings=())          # 无持仓 → 无约束（pass-through）
+        d = _db(dbp)
+        annotated, review = webapp._annotate_user_constraints(
+            d, [{"code": "000059", "name": "国联安中证医药100A"}])
+        d.close()
+        assert annotated[0]["constraint_status"] == "kept"
+        assert review["applied"] == []
+
+
+class TestPoolEndpointWiring:
+    """`/api/funds` 的载荷要带标注，且**不得污染缓存载荷**（共享 dict）。"""
+
+    @pytest.fixture()
+    def client(self, dbp, monkeypatch):
+        _seed(dbp)
+        canned = {"funds": [{"code": "017470", "name": "嘉实上证科创板芯片ETF发起联接C", "risk": "🟢稳健"},
+                            {"code": "000059", "name": "国联安中证医药100A", "risk": "🟢稳健"}],
+                  "summary": {"total": 2}}
+        monkeypatch.setattr(webapp, "_all_funds", lambda: canned)
+        with webapp._slot_lock:
+            webapp._slot_store.clear()
+        with webapp.app.test_client() as c:
+            yield c, canned
+
+    def test_funds_payload_annotated_without_polluting_cache(self, client):
+        c, canned = client
+        d = c.get("/api/funds?fresh=1").get_json()["data"]
+        assert {f["code"]: f["constraint_status"] for f in d["funds"]} == {
+            "017470": "dropped", "000059": "kept"}
+        assert d["constraint_review"]["mode"] == "annotate"
+        assert all("constraint_status" not in f for f in canned["funds"]), \
+            "缓存载荷被污染了（下次请求会带着旧持仓算出的标注）"
+
+
+class TestRebalanceBuyPoolFiltering:
+    """调仓顾问的买入候选**必须过滤**（这里是"买哪只"，与筛选池的只标注不同）。"""
+
+    @staticmethod
+    def _stub_advisor(captured, need, cur, tgt):
+        class _Stub:
+            def __init__(self, db, pool=None):
+                captured["pool"] = pool
+
+            def analyze(self, cash_reserve=0.0):
+                return {"need_rebalance": need, "current_equity_pct": cur, "target_equity_pct": tgt,
+                        "gap_pct": tgt - cur, "summary": {"verdict": "x", "detail": ""},
+                        "instructions": []}
+        return _Stub
+
+    def _run(self, dbp, monkeypatch, pool, need=True, cur=10.0, tgt=40.0):
+        captured = {}
+        monkeypatch.setattr(webapp, "RebalanceAdvisor",
+                            self._stub_advisor(captured, need, cur, tgt))
+        monkeypatch.setattr(webapp, "_all_funds", lambda: {"funds": pool, "summary": {}})
+        with webapp._slot_lock:
+            webapp._slot_store.clear()
+        return captured, webapp._all_rebalance()
+
+    def test_dropped_candidate_not_passed_to_advisor(self, dbp, monkeypatch):
+        _seed(dbp)
+        captured, data = self._run(dbp, monkeypatch, [
+            {"code": "017470", "name": "嘉实上证科创板芯片ETF发起联接C"},   # 已持有 → 剔除
+            {"code": "000059", "name": "国联安中证医药100A"},               # 通过
+        ], need=False, cur=10.0, tgt=10.0)
+        assert [f["code"] for f in captured["pool"]] == ["000059"], "已持有的不得进买入候选"
+        assert data["constraint_review"]["counts"] == {"before": 2, "kept": 1,
+                                                       "dropped": 1, "skipped": 0}
+        assert data["constraint_blocked_buy"] is False
+
+    def test_blocked_flag_when_all_candidates_filtered(self, dbp, monkeypatch):
+        """候选全被挡住 + 本应加仓 → 必须置位（前端不得显示"当前无需调仓"）。"""
+        _seed(dbp)
+        captured, data = self._run(dbp, monkeypatch, [
+            {"code": "017470", "name": "嘉实上证科创板芯片ETF发起联接C"}],
+            need=True, cur=10.0, tgt=40.0)
+        assert captured["pool"] == [], "全部被剔除 → 顾问拿到空候选池"
+        assert data["constraint_blocked_buy"] is True
+
+    def test_not_blocked_when_no_need_to_rebalance(self, dbp, monkeypatch):
+        """仓位已达标（无需调仓）→ 即便候选全被剔除也不置位（避免误导）。"""
+        _seed(dbp)
+        _, data = self._run(dbp, monkeypatch, [
+            {"code": "017470", "name": "嘉实上证科创板芯片ETF发起联接C"}],
+            need=False, cur=40.0, tgt=40.0)
+        assert data["constraint_blocked_buy"] is False

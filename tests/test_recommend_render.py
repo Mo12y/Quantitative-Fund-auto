@@ -50,3 +50,32 @@ def test_loadrec_wires_review_and_fixes_peer_tag():
 def test_review_css_classes_exist():
     for cls in (".qh{", ".rec3row{", ".recrec{", ".recrec .fund-meta{"):
         assert cls in APP_CSS, f"缺少样式类 {cls}（有 HTML 无样式）"
+
+
+# ── 主路径接入（§4.4 第 3 层）：筛选池标注 / 调仓候选过滤 ──────────────
+
+def test_pool_marks_constraint_without_removing_rows():
+    """池子是浏览面：被约束剔除的行要打标，但**不剔除**（行数不变由后端保证）。"""
+    assert "constraintTag(f)" in _fn_body("poolRow"), "池内每行须带约束标注"
+    tag = _fn_body("constraintTag")
+    assert "u-pillwarn" in tag, "被约束剔除 → 警示 pill"
+    assert "st==='skipped'" not in tag, \
+        "未评估不逐行打标（实测 38/40 是噪声），改由汇总行计数 —— 见 poolConstraintLine"
+
+
+def test_pool_header_shows_constraint_summary():
+    assert "poolConstraintLine(F.constraint_review)" in _fn_body("poolHTML")
+    assert "poolConstraintLine(d.constraint_review)" in _fn_body("boardPoolHTML"), \
+        "按板块视图与按类型视图必须同一口径"
+    line = _fn_body("poolConstraintLine")
+    assert "只标注不剔除" in line and "被约束剔除" in line
+    assert "无法判定重叠≠通过" in line, "未评估的语义必须写清（不得被读成通过）"
+
+
+def test_rebalance_states_blocked_buy_explicitly():
+    body = _fn_body("rebalanceHTML")
+    assert "constraint_blocked_buy" in body, \
+        "候选被用户约束挡住时**不得**显示『当前无需调仓』（会把'没算'说成'不用做'）"
+    assert "rbConstraintBlock(RB)" in body, "买入候选的约束明细要可见（可折叠）"
+    blk = _fn_body("rbConstraintBlock")
+    assert "constraintReviewHTML(cr)" in blk, "复用同一套三问渲染（口径一致）"
