@@ -962,6 +962,32 @@ function poolRow(f){
     <span class="peer-line">${peerLine(f)}</span>
     <span class="fund-meta">${posChip(f)}${qChips(f)}</span></div>`;
 }
+// §4.6 可解释性：推荐三问 —— 为什么入选（同类百分位维度）/ 为什么落选 / 缺什么没评估
+function recReasonList(items){
+  let h='';
+  for(const p of (items||[])){
+    const rs=(p.reasons||[]).map(r=>`<div class="qtag">· ${esc(r)}</div>`).join('')||'<div class="qtag">（无理由）</div>';
+    h+=`<div class="rec3row"><span class="fund-code">${esc(p.code||'')}</span>`+
+       `<span class="fund-name">${esc(p.name||p.code||'')}</span>`+
+       `<span>${rs}</span></div>`;
+  }
+  return h;
+}
+function constraintReviewHTML(cr){
+  if(!cr)return '';
+  if(cr.error)return `<div class="qh u-twarn">用户约束：未应用（${esc(cr.error)}）</div>`;
+  const c=cr.counts||{}; const apps=cr.applied||[];
+  let h=`<div class="qh">用户约束（第 2 层）：${apps.length} 条 · 持仓 ${cr.holdings_n||0} 只</div>`;
+  h+=`<div class="qtag" style="line-height:1.7">${esc(cr.note||'')}${cr.profile_note?('；'+esc(cr.profile_note)):''}</div>`;
+  if(apps.length)h+=`<div class="qtag" style="line-height:1.7">已应用：`+
+    apps.map(a=>`${esc(a.description)}（${esc(a.source)}）`).join('；')+`</div>`;
+  h+=`<div class="stat-line">约束前 ${c.before||0} 只 → 通过 <b>${c.kept||0}</b> · 落选 ${c.dropped||0} · 未评估 ${c.skipped||0}</div>`;
+  if((cr.dropped||[]).length)
+    h+=`<div class="qh u-twarn">为什么落选（明确不通过某条约束）</div>`+recReasonList(cr.dropped);
+  if((cr.skipped||[]).length)
+    h+=`<div class="qh">缺什么没评估（算不了 → <b>没有</b>当成通过）</div>`+recReasonList(cr.skipped);
+  return h;
+}
 // C4：/api/recommend 的懒加载渲染（可折叠；口径声明必须与内容同屏）
 let REC_LOADED=false;
 async function loadRec(el){
@@ -977,17 +1003,23 @@ async function loadRec(el){
       `口径：这是<b>样本内</b>结果 —— 用已实现的前向收益反筛"赢家"存在同义反复，`+
       `<b>不构成选基能力证据</b>；本项目 L1 基线（见 docs/recsys_ml_report.md）也未跑赢手工权重。`+
       `主推荐请回到上方温度驱动的实时筛选池。</div>`;
-    h+=`<div class="stat-line">本期候选 ${picks.length} 只</div>`;
+    h+=constraintReviewHTML(d.constraint_review);
+    h+=`<div class="qh">通过约束的候选（为什么入选：见维度同类百分位）</div>`;
+    h+=`<div class="stat-line">约束后候选 ${picks.length} 只</div>`;
+    if(!picks.length)h+=`<div class="empty">没有候选通过全部约束 —— 原因见上方「落选 / 未评估」明细</div>`;
     for(const p of picks){
       const P=p.percentiles||{};
-      const ok=!p.insufficient_data&&p.sharpe!==undefined;
+      // 修 2026-09-26：原判据读的是顶层字段 p.sharpe（百分位其实在 P 里 → 永远不存在），
+      // 导致该区块的百分位永远显示「同类 P—」。判据改为 percentiles 块本身。
+      const ok=!p.insufficient_data&&P.sharpe!=null;
       const comp=(P.sharpe!=null&&P.max_drawdown_1y!=null)?Math.round(0.6*P.sharpe+0.4*P.max_drawdown_1y):null;
+      const ddAbs=(p.metrics&&p.metrics.max_drawdown_1y!=null)?`<span class="qtag">近1年回撤 ${fmt(p.metrics.max_drawdown_1y,1)}%</span>`:'';
       const tag=ok?`<span class="qtag">同类 P${comp} · ${esc(p.group||'—')}${p.group_n?(' · '+Number(p.group_n).toLocaleString()+' 只对照'):''}${p.nav_asof?(' · 截至 '+esc(p.nav_asof)):''}</span>`
                    :`<span class="qtag">同类 P— · ${esc(p.reason||'数据不足')}</span>`;
       h+=`<div class="fund-row" style="grid-template-columns:74px 1fr auto">
         <span class="fund-code">${esc(p.code||'')}</span>
         <span class="fund-name">${esc(p.name||p.code||'')}</span>
-        <span class="fund-meta">${tag}</span></div>`;
+        <span class="fund-meta">${tag}${qChips(p)}${ddAbs}</span></div>`;
     }
     box.innerHTML=h||'<div class="empty">无可展示的历史验证结果</div>';
   }catch(e){

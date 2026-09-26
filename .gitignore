@@ -82,3 +82,4 @@ data/fund_profile_cache.jsonl
 
 # 个人投资计划（F-01 外置，2026-09-25）—— 个人数据，不进版本库
 config/investment_plan.local.yaml
+config/user_profile.local.yaml

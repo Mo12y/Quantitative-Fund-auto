@@ -115,6 +115,11 @@
   .recbox>summary::before{content:"▸ ";color:var(--ink-tertiary)}
   .recbox[open]>summary::before{content:"▾ "}
   .recbox .recmain{margin-top:6px}
+  /* §4.6 可解释性：推荐三问（约束审查块）—— .qh 小节标题 / .rec3row 逐基明细 */
+  .qh{font-size:12.5px;font-weight:700;color:var(--ink);margin:10px 0 3px}
+  .rec3row{display:grid;grid-template-columns:74px 1.1fr 1.6fr;gap:8px;font-size:12px;
+           padding:3px 0;border-top:1px dashed var(--hairline);align-items:start}
+  .rec3row .fund-name{font-size:12px}
   .fund-meta .val{font-weight:600;min-width:44px;text-align:right;color:var(--ink);font-family:var(--font-mono);font-variant-numeric:tabular-nums}
   .sparkline{width:46px;height:18px;flex-shrink:0}
   .sparkline svg{width:100%;height:100%}

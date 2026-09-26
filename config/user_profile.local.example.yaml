@@ -1,0 +1,35 @@
+# 用户画像本地配置 —— **模板**（可入库）
+# 用法：复制本文件为 config/user_profile.local.yaml 并填入自己的偏好。
+# 该 local 文件已加入 .gitignore，不会进版本库（与 investment_plan.local 同一模式）。
+#
+# 键与 src/analysis/user_constraint.py 的 PROFILE_KEYS 一一对应；
+# **未识别的键会被显式忽略**（如 risk_pref 这类自由文本不做映射 —— 没有经校准的
+# "文字→阈值"表，不编造；见 docs/基金推荐系统设计方案.md §4.4）。
+#
+# ── 组别偏好 ──────────────────────────────────────────────────────
+# preferred_groups : 只保留这些参照系组；excluded_groups : 排除这些组
+#   六个组别（精确名称）：
+#     A 偏股混合 / B 灵活配置 / C 主动股票 / D 指数股票 / E 债券 / F QDII/其他
+#
+# ── 风险偏好（两套口径可同时用）────────────────────────────────────
+# min_percentiles / max_percentiles : 同类百分位下限/上限（0-100，**越大越好**口径；
+#   回撤/波动已按方向归一：分越高 = 回撤控制越好）。缺该指标时不猜 → 归"未评估"。
+# max_values / min_values : 指标绝对上限/下限，需要候选带 metrics（当前 /api/recommend 已注入）。
+#   字段：max_drawdown_1y（%）、ann_vol（%）、annual_return（%）、momentum_3m（%）、sharpe
+#   例：max_drawdown_1y: 25 表示"近一年最大回撤不超过 25%"
+#
+# ── 持仓重叠 ─────────────────────────────────────────────────────
+# overlap_max_board_pct : 单个板块在现有持仓中的金额占比上限（%）。默认 40。
+#   ⚠️ 这是**用户偏好值**（不是统计阈值）：现有持仓里 半导体/人工智能 各 19.4%、
+#   黄金 15.2%、宽基 12.1%（2026-09-26 实测）—— 40% 基本只会拦住"已持有同一只"，
+#   想让半导体/AI 触发就用 20%，连黄金一起拦用 15%。
+# overlap_exclude_held : 候选就是已持有的同一只是否剔除（默认 true；想加仓某只时设 false）
+#
+# 下面全是**示例**（不是任何人的真实偏好），按需删改。去掉行首 # 即生效：
+
+# preferred_groups: ['A 偏股混合', 'B 灵活配置', 'C 主动股票', 'D 指数股票']
+# excluded_groups: ['F QDII/其他']
+# min_percentiles: {max_drawdown_1y: 50}
+# max_values: {max_drawdown_1y: 30}
+# overlap_max_board_pct: 40
+# overlap_exclude_held: true

@@ -22,6 +22,7 @@ from src.analysis.historical_recommender import HistoricalRecommender
 from src.analysis.investment_plan import get_plan, get_progress, ensure_seed
 from src.analysis import fund_boards
 from src.analysis import peer_percentile
+from src.analysis import user_constraint, user_profile
 
 app = Flask(__name__)
 
@@ -320,6 +321,67 @@ def _peer_block(cache: dict, code: str, fund_type: str, metrics: dict, span_info
     if missing:
         block["reason"] = "部分指标缺失，未纳入分位：%s" % "、".join(missing)
     return block
+
+
+_PICK_METRIC_KEYS = ("annual_return", "ann_vol", "max_drawdown_1y", "momentum_3m", "sharpe")
+
+
+def _pick_metrics(res: dict) -> dict:
+    """把筛选器算出的**原始指标**注入 pick（供 B 层"绝对阈值"口径，如回撤 ≤ 25%）。
+
+    谁的数据谁注入：第 1 层只给百分位，绝对阈值需要原始值 —— 由本组合层补上。
+    非有限值（NaN/±inf）**不注入**：宁可让下游判为"缺这个指标"（→ 未评估），
+    也不要把 NaN 塞进去假装有值（本项目"五个维度全缺仍显示 50°"的反面教材）。
+    """
+    m = (res or {}).get("metrics") or {}
+    out = {}
+    for k in _PICK_METRIC_KEYS:
+        try:
+            v = float(m.get(k))
+        except (TypeError, ValueError):
+            continue
+        if v == v and abs(v) != float("inf"):
+            out[k] = round(v, 4)
+    return out
+
+
+def _apply_user_constraints(db, picks: list) -> tuple:
+    """设计稿 §4.4 第 3 层：推荐 = 第 1 层（同类百分位）∩ 第 2 层（用户约束）。
+
+    装配 ctx 并应用约束（**只读**，不写库、不改入参）：
+      - holdings ← 库内 `holdings`（holding / pending_confirm）
+      - profile  ← 本地配置 `config/user_profile.local.yaml`（缺文件则无画像）
+
+    返回 `(kept_picks, review_block)`：
+      kept 进 `current_picks`；dropped / skipped 连同 reason 进 `review_block`
+      （对应 §4.6 的三问：为什么入选 / 为什么落选 / 缺什么没评估）。
+
+    **失败不阻断主流程**：读持仓失败 → 返回原 picks + error 声明（不假装筛过）。
+    """
+    try:
+        holdings = [dict(r) for r in db.conn.execute(
+            "SELECT * FROM holdings WHERE status IN ('holding','pending_confirm')")]
+    except Exception as e:
+        return list(picks), {"error": "持仓读取失败，未应用用户约束：%s" % str(e)[:60]}
+
+    profile, profile_note = user_profile.load_profile()
+    built = user_constraint.build_constraints_from_user(profile, holdings)
+    res = user_constraint.apply_constraints(picks, built.constraints,
+                                            {"holdings": holdings, "profile": profile})
+    review = {
+        "applied": [{"kind": c.kind, "params": c.params, "source": c.source,
+                     "description": c.description} for c in built.constraints],
+        "note": built.note,
+        "profile_note": profile_note,
+        "holdings_n": len(holdings),
+        "counts": {"before": len(picks), "kept": len(res.kept),
+                   "dropped": len(res.dropped), "skipped": len(res.skipped)},
+        "dropped": [{"code": p.get("code"), "name": p.get("name"),
+                     "reasons": p.get("dropped_reasons", [])} for p in res.dropped],
+        "skipped": [{"code": p.get("code"), "name": p.get("name"),
+                     "reasons": p.get("skipped_reasons", [])} for p in res.skipped],
+    }
+    return res.kept, review
 
 
 def _slot_ready(key: str) -> bool:
@@ -949,6 +1011,10 @@ def api_recommend():
     - 主路径 = 温度驱动的实时筛选（`/api/strategy` → `screen_funds`，带类型过滤）；
     - 本端点 = 历史回测验证，回答「过去哪些基金被反复选中且真的赚了钱」。
     两者结论可能不同，**不是同一件事**，前端/调用方不得混称“推荐”。
+
+    §4.4 第 3 层（2026-09-26 接入）：本端点同时是「同类百分位 ∩ 用户约束」的组合点 ——
+    `current_picks` 已过用户约束；落选与"未评估"的候选连同理由进 `constraint_review`
+    （§4.6 可解释性三问），**不得**把它们静默丢掉。
     """
     try:
         db = get_db()
@@ -973,18 +1039,23 @@ def api_recommend():
                                  res.get("metrics", {}), spans.get(code))
                 p.update({"group": pb["group"], "group_n": pb["group_n"],
                           "percentiles": pb["percentiles"], "nav_asof": pb["nav_asof"],
-                          "insufficient_data": pb["insufficient_data"], "reason": pb["reason"]})
+                          "insufficient_data": pb["insufficient_data"], "reason": pb["reason"],
+                          "metrics": _pick_metrics(res)})
         except Exception as _e:
             for p in picks:
                 p.setdefault("insufficient_data", True)
                 p.setdefault("reason", "同侪参照系计算失败：%s" % str(_e)[:60])
+
+        # §4.4 第 3 层：用户约束（只读；失败不阻断，见 _apply_user_constraints）
+        kept, constraint_review = _apply_user_constraints(db, picks)
         db.close()
 
         # 精简输出
         return jsonify({"ok": True, "data": {
             "stats": result.get("stats", {}),
             "proven_winners": result.get("proven_winners", [])[:15],
-            "current_picks": picks,
+            "current_picks": kept,
+            "constraint_review": constraint_review,
         }, "purpose": "历史回测验证（样本内）——辅助参考，不是主推荐",
            "methodology_note": ("以下为**样本内**历史表现：用已实现的前向收益筛选"
                                 "“赢家”存在同义反复，不构成样本外的选基能力证据。"
