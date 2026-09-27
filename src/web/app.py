@@ -838,6 +838,26 @@ def api_portfolio_curve():
     return jsonify({"ok": True, "data": _portfolio_curve()})
 
 
+@app.route("/api/calendar")
+def api_calendar():
+    """交易日历查询（《前端优化设计方案》§246 原标注"未实现"）。
+
+    只读。**刷新仍走 CLI** `python src/main.py calendar` —— 抓交易所日历要出网，
+    不适合放进请求路径（那会让页面等一个外部依赖）。
+    """
+    db = get_db()
+    try:
+        start = request.args.get("start")
+        end = request.args.get("end")
+        dates = db.get_trade_dates(start, end)
+        return jsonify({"ok": True, "data": {
+            "count": len(dates), "dates": dates, "start": start, "end": end,
+            "refresh_cmd": "python src/main.py calendar",
+        }})
+    finally:
+        db.close()
+
+
 @app.route("/api/market/live")
 def api_market_live():
     """指数盘中快照 + 本地净值时滞（数据源扩展计划书 阶段 5「补实时行情时滞」）。
