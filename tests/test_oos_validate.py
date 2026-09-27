@@ -1,0 +1,149 @@
+"""批次 4.3 滚动样本外验证测试。
+
+四条哨兵（全部用**合成数据**，不依赖真实库、不联网）：
+  1. **无前视**：把验证期的净值篡改成极端值，选择期的选人结果**必须一字不变**；
+  2. **能检出真实能力**：构造"打分高且未来继续涨"的基金 → S1 必须跑赢对照；
+  3. **不误报**：所有基金走势完全相同（打分法无从区分）→ S1 与对照**必须相等**；
+  4. **样本不足如实说**：窗口不足时不编结论。
+另含 `_compile_proven_winners` 的**分桶交错**回归（修掉"榜单债基一边倒"）。
+"""
+import os
+import sys
+from datetime import date, timedelta
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from src.analysis.oos_validate import evaluate_windows, month_ends  # noqa: E402
+
+START, END = "2019-01-01", "2023-12-29"
+
+
+def _series(monthly: float, start=START, end=END):
+    """合成净值序列：工作日点，按月复利 `monthly`。"""
+    d0, d1 = date.fromisoformat(start), date.fromisoformat(end)
+    out, v, d = [], 1.0, d0
+    while d <= d1:
+        if d.weekday() < 5:
+            v *= (1 + monthly / 21.0)
+            out.append((d.isoformat(), round(v, 6)))
+        d += timedelta(days=1)
+    return out
+
+
+def _mk(monthly_by_code: dict) -> tuple:
+    nav = {c: _series(r) for c, r in monthly_by_code.items()}
+    info = {c: ("债券型-长债" if c.startswith("B") else "混合型-偏股") for c in monthly_by_code}
+    return nav, info
+
+
+ENDS = month_ends("2020-01-01", END)
+
+
+# ── 1. 无前视 ─────────────────────────────────────────────────────
+
+def test_no_lookahead():
+    """篡改**验证期**净值 → 选择期的选人结果不得改变（否则就是前视）。"""
+    nav, info = _mk({**{f"A{i}": 0.015 for i in range(6)},
+                     **{f"B{i}": 0.002 for i in range(6)}})
+    base = evaluate_windows(nav, ENDS, info, window_months=12, step_months=6,
+                            top_k=5, min_picks=2)
+
+    # 只把 2022-06-30 之后的点乘 5（验证期全变），选择期原样
+    tampered = {}
+    for c, s in nav.items():
+        tampered[c] = [(d, v * 5 if d > "2022-06-30" else v) for d, v in s]
+    after = evaluate_windows(tampered, ENDS, info, window_months=12, step_months=6,
+                             top_k=5, min_picks=2)
+
+    assert base["windows"], "应当至少产出一个窗口"
+    n = min(len(base["windows"]), len(after["windows"]))
+    assert n >= 2, "本用例需要多个窗口才有意义"
+    for w1, w2 in zip(base["windows"][:n], after["windows"][:n]):
+        assert w1["s1_codes"] == w2["s1_codes"], \
+            "选择期选人受验证期数据影响 → 前视泄漏"
+
+
+# ── 2. 能检出真实能力 ─────────────────────────────────────────────
+
+def test_detects_real_ability():
+    """打分高的基金（高动量+低回撤）未来继续涨 → S1 必须优于全池中位与随机。"""
+    nav, info = _mk({**{f"A{i}": 0.020 for i in range(6)},     # 稳定上涨 → 打分高
+                     **{f"B{i}": 0.001 for i in range(6)},     # 低波动低收益
+                     **{f"A_low{i}": -0.010 for i in range(6)}})  # 下跌 → 打分低
+    out = evaluate_windows(nav, ENDS, info, window_months=12, step_months=6,
+                           top_k=5, min_picks=2)
+    s = out["summary"]
+    assert s["n_windows"] >= 3, s
+    assert s["s1_minus_c1"]["median"] > 0, "有真实能力时应跑赢全池中位：%s" % s["s1_minus_c1"]
+    assert s["win_rate_vs_c1"] >= 70, "逐窗胜率应显著高于 50%：%s" % s["win_rate_vs_c1"]
+    assert "迹象" in out["verdict"], out["verdict"]
+
+
+# ── 3. 不误报（无能力 → 必须相等） ────────────────────────────────
+
+def test_no_false_positive_when_indistinguishable():
+    """所有基金走势完全相同 → 打分法无从区分 → S1 与对照收益必须相等（差 0）。"""
+    nav, info = _mk({f"A{i}": 0.010 for i in range(10)})
+    out = evaluate_windows(nav, ENDS, info, window_months=12, step_months=6,
+                           top_k=5, min_picks=2)
+    s = out["summary"]
+    assert s["n_windows"] >= 3, s
+    assert abs(s["s1_minus_c1"]["median"]) < 1e-9, \
+        "无法区分时不得凭空造出超额：%s" % s["s1_minus_c1"]
+    assert "看不出" in out["verdict"], out["verdict"]
+
+
+# ── 4. 样本不足 ───────────────────────────────────────────────────
+
+def test_insufficient_windows_says_so():
+    nav, info = _mk({f"A{i}": 0.01 for i in range(10)})
+    ends = month_ends("2023-06-01", END)          # 只有 7 个月末
+    out = evaluate_windows(nav, ends, info, window_months=12, step_months=6,
+                           top_k=5, min_picks=2)
+    assert out["summary"]["n_windows"] < 3
+    assert "无法判定" in out["verdict"], out["verdict"]
+
+
+def test_empty_input_is_safe():
+    out = evaluate_windows({}, ENDS, {}, window_months=12, step_months=6)
+    assert out["windows"] == [] and out["summary"]["n_windows"] == 0
+
+
+# ── 5. 确定性 ─────────────────────────────────────────────────────
+
+def test_reproducible():
+    nav, info = _mk({**{f"A{i}": 0.015 for i in range(6)}, **{f"B{i}": 0.002 for i in range(6)}})
+    a = evaluate_windows(nav, ENDS, info, window_months=12, step_months=6, top_k=5, min_picks=2)
+    b = evaluate_windows(nav, ENDS, info, window_months=12, step_months=6, top_k=5, min_picks=2)
+    assert a["summary"] == b["summary"], "同输入必须同输出（否则无法复核）"
+
+
+# ── 6. 分桶交错（修掉「榜单债基一边倒」） ──────────────────────────
+
+def test_compile_proven_winners_interleaves_buckets(tmp_path):
+    """equity 与 bond 必须**交错**出现在榜单里，否则全局按 composite 排又会债基一边倒。"""
+    from src.analysis.historical_recommender import HistoricalRecommender
+    from src.data.database import Database
+
+    db = Database(str(tmp_path / "pw.db"))
+    try:
+        for c, t in (("E1", "混合型-偏股"), ("E2", "混合型-偏股"),
+                     ("B1", "债券型-长债"), ("B2", "债券型-长债")):
+            db.upsert_fund_info({"fund_code": c, "fund_name": c, "fund_type": t})
+        hr = HistoricalRecommender(db)
+
+        def _st(score):
+            return {"times_picked": 12, "total_score": score * 12,
+                    "returns_1m": [0.5] * 12, "returns_3m": [1.0] * 12,
+                    "returns_6m": [2.0] * 12, "first_pick": "2024-01-31",
+                    "last_pick": "2024-12-31"}
+
+        # 债基 composite 更高（模拟"低波动 → 高频选中 → 高分"）
+        stats = {"E1": _st(80), "E2": _st(75), "B1": _st(95), "B2": _st(90)}
+        got = hr._compile_proven_winners(stats, [f"2024-{m:02d}-31" for m in range(1, 13)])
+        buckets = [p["bucket"] for p in got]
+        assert buckets[:2] == ["bond", "equity"], \
+            "分桶交错：第一名可以是最高的债基，第二名必须是另一个桶：%s" % buckets
+        assert buckets.count("bond") == 2 and buckets.count("equity") == 2
+    finally:
+        db.close()

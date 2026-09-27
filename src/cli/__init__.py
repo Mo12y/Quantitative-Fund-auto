@@ -21,6 +21,7 @@ from src.cli.analysis_cmds import (
     cmd_rebalance,
     cmd_sector,
     cmd_recommend,
+    cmd_oos,
     cmd_plan,
     cmd_precompute,
 )
@@ -60,6 +61,7 @@ COMMANDS = {
     "rebalance": cmd_rebalance,
     "sector": cmd_sector,
     "recommend": cmd_recommend,
+    "oos": cmd_oos,
     "plan": cmd_plan,
     "precompute": cmd_precompute,
     "backtest": cmd_backtest,

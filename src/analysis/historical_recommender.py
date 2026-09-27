@@ -146,8 +146,29 @@ class HistoricalRecommender:
                 "last_pick": st["last_pick"],
             })
 
-        proven.sort(key=lambda x: x["composite_score"], reverse=True)
-        return proven
+        proven.sort(key=lambda x: (-x["composite_score"], x["code"]))
+
+        # 批次 4.3 修正：**分桶交错取**，否则债基一边倒。
+        # 背景：`_run_monthly_backtest` 已按 equity/bond 分桶各取 TopN（批次 4.4），
+        # 但榜单在这里又混回一个池子 —— 全局按 composite 排序时，债基因"每月都被选中"
+        # （低波动 → dd_score 高 → 每月都在 Top30）拿到高 freq_score，重新占满前 20。
+        # 实测（2026-09-27）：旧口径 Top10 里 8 只是债券/持有期/FOF，
+        # 且 composite 与后续收益的 Spearman 为 **−0.403**（负相关）。
+        by_bucket = {}
+        for p in proven:
+            by_bucket.setdefault(p["bucket"], []).append(p)
+        order = sorted(by_bucket, key=lambda b: (-len(by_bucket[b]), b))
+        merged, idx = [], 0
+        while len(merged) < len(proven):
+            progressed = False
+            for b in order:
+                if idx < len(by_bucket[b]):
+                    merged.append(by_bucket[b][idx])
+                    progressed = True
+            if not progressed:
+                break
+            idx += 1
+        return merged
 
     def _build_current_picks(self, monthly_picks: dict, fund_stats: dict, latest_date: str) -> list:
         """当前推荐：取最新一期 picks，附带历史表现"""

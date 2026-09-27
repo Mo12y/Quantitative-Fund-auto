@@ -432,6 +432,65 @@ def cmd_plan():
 
 
 
+def cmd_oos():
+    """滚动样本外验证（批次 4.3）——「打分法到底有没有选基能力」。
+
+    与 `recommend` 的区别：`recommend` 是**样本内**（用同一批已实现收益选赢家，
+    同义反复）；本命令把选择期与验证期**切开**，并给出三组对照。
+    结论可能是负的 —— 那也是有价值的结果，本命令不提供让结果好看的开关。
+    """
+    from src.analysis.oos_validate import run as run_oos
+    from src.data.database import Database
+
+    print("🔄 滚动样本外验证（walk-forward）")
+    print("   选择期 18 个月 → 验证期 6 个月，逐窗滚动；两段**不重叠**（选择期看不到验证期）。")
+    print("   对照：① 全池中位数  ② 随机等量  ③ 选择期末打分 TopK")
+    print()
+    db = Database()
+    try:
+        out = run_oos(db)
+    finally:
+        db.close()
+
+    if out.get("error"):
+        print("❌ %s" % out["error"])
+        return
+
+    meta = out.get("meta", {})
+    print("候选池：%s · 载入净值 %d 只" % (meta.get("pool"), meta.get("nav_loaded", 0)))
+    print("持有期：%d 个交易日（≈%d 个月）\n" % (
+        (out["windows"][0]["hold_days"] if out["windows"] else 0), meta.get("step_months", 6)))
+
+    print("%-12s %-16s %8s %8s %8s %8s %9s" % (
+        "验证起点", "选择期", "S1高频", "S2打分", "全池中位", "随机", "S1-中位"))
+    for w in out["windows"]:
+        f = lambda v: ("%+7.2f%%" % v) if v is not None else "     n/a"   # noqa: E731
+        print("%-12s %-16s %8s %8s %8s %8s %9s" % (
+            w["as_of"], "%s起%d月" % (w["sel_start"], w["sel_months"]),
+            f(w["s1"]), f(w["s2"]), f(w["c1_median"]), f(w["c2_random"]), f(w["s1_minus_c1"])))
+
+    s = out["summary"]
+    print("\n=== 汇总（%d 个互不重叠的验证窗口，%s）===" % (s["n_windows"], s.get("span")))
+    for k, label in (("s1_frequent_pick", "S1 选择期高频选中"),
+                     ("s2_top_score", "S2 选择期末打分TopK"),
+                     ("c1_pool_median", "C1 全池中位数"),
+                     ("c2_random", "C2 随机等量")):
+        d = s.get(k)
+        if d:
+            print("  %-22s 中位 %+6.2f%%  均值 %+6.2f%%  （n=%d）" % (
+                label, d["median"], d["mean"], d["n"]))
+    for k, label in (("s1_minus_c1", "S1 − 全池中位"), ("s1_minus_c2", "S1 − 随机")):
+        d = s.get(k)
+        if d:
+            wr = s.get("win_rate_vs_c1" if k.endswith("c1") else "win_rate_vs_c2")
+            print("  %-22s 中位 %+6.2f pp  逐窗胜率 %.1f%%" % (label, d["median"], wr or 0))
+
+    print("\n判定：%s" % out["verdict"])
+    print("\n⚠️ 口径：本结果是**样本外**（选择期与验证期不重叠）；"
+          "但候选池仍是当前存续基金 → 存在**幸存者偏差**，绝对收益偏高，"
+          "看的是 S1 与对照的**差**，不是绝对数。")
+
+
 def cmd_precompute():
     """预计算并落 SQLite 快照（温度/筛选池/调仓/聚合总览/板块总榜）。
 
