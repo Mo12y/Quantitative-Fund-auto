@@ -58,6 +58,29 @@ def clip_window(vals, dates=None, years: float = WINDOW_YEARS):
     return v[i0:], dates[i0:]
 
 
+def _default_risk_free() -> float:
+    """无风险利率 SSOT 的默认值；**兼容两种加载方式**。
+
+    `nav_metrics` 既被当作包成员导入（`from src.analysis.nav_metrics import ...`），
+    也被 `scripts/calibrate_thresholds.py` 按**顶层模块**导入
+    （它把 `src/analysis` 塞进 sys.path 后 `from nav_metrics import compute`）。
+    后一种情况下相对导入 `from .risk_free import ...` 会抛
+    `ImportError: attempted relative import with no known parent package`
+    —— 2026-09-27 实测踩到（重建参照系缓存时炸）。
+    """
+    try:
+        from .risk_free import RISK_FREE_ANNUAL          # 包内正常路径
+        return RISK_FREE_ANNUAL
+    except ImportError:
+        import os as _os
+        import sys as _sys
+        _d = _os.path.dirname(_os.path.abspath(__file__))
+        if _d not in _sys.path:
+            _sys.path.insert(0, _d)
+        from risk_free import RISK_FREE_ANNUAL           # scripts/ 的顶层模块路径
+        return RISK_FREE_ANNUAL
+
+
 def compute(vals, dates=None, risk_free: float = None, years: float = WINDOW_YEARS):
     """单只基金的窗口化指标。返回 dict；点数不足返回 None。
 
@@ -70,8 +93,7 @@ def compute(vals, dates=None, risk_free: float = None, years: float = WINDOW_YEA
        本文件**不再写 0.02 字面量**（2026-09-27：原默认值 0.02 是第 5 处硬编码，已收敛）。
     """
     if risk_free is None:
-        from .risk_free import RISK_FREE_ANNUAL
-        risk_free = RISK_FREE_ANNUAL
+        risk_free = _default_risk_free()
     v, d = clip_window(vals, dates, years)
     n = v.size
     if n < MIN_POINTS:
