@@ -34,8 +34,13 @@
 用法：
     python scripts/collect_fund_jbgk.py --dry-run --limit 3      # 只抓取解析、不写库
     python scripts/collect_fund_jbgk.py                          # 默认范围，写库（需先有快照）
+    python scripts/collect_fund_jbgk.py --scope universe --only-missing establish_date --workers 3
     python scripts/collect_fund_jbgk.py --replay                 # 只用缓存重建，不联网
-缓存：data/fund_jbgk_cache.jsonl（以后重解析不必再联网）
+缓存：data/fund_jbgk_cache.jsonl（以后重解析不必再联网；**失败的不会进缓存，重跑自动重试**）
+
+⚠️ **频率限制（实测 2026-09-27）**：`--workers 5` 跑到万只级时会收到
+`HTTP Error 514: Frequency Cap`（东财限流，样本 152 只**全部是有效基金**，不是 404）。
+→ 万只级任务请用 `--workers 2~3`；被打回的基金留在失败清单里，重跑会自动重试。
 
 铁律：写库前必须有 `data/_snapshot_*.db`（本脚本会检查并中止）。
 """
@@ -47,8 +52,15 @@ import re
 import sys
 import time
 import urllib.request
+import warnings
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
+
+# ⚠️ 本脚本 import `src.data.collector` 只为复用 `_parse_fee`（费率解析 SSOT，不重复实现），
+# 但该模块顶部 `import akshare` → 会连带把 akshare 的未关闭文件/套接字警告刷满 stderr
+# （实测上万只任务时日志被 "feedparser = FeedParser(...)" 淹没，进度行读不出来）。
+# 这些警告来自 akshare 内部而非本脚本，故就地屏蔽 —— 保日志可读。
+warnings.filterwarnings("ignore", category=ResourceWarning)
 
 sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -257,7 +269,7 @@ def main():
     ap.add_argument("--only-missing", default="", help="只采该字段为空的（如 establish_date）")
     ap.add_argument("--codes", default="", help="显式代码列表（逗号分隔），给了就只用它")
     ap.add_argument("--limit", type=int, default=0)
-    ap.add_argument("--workers", type=int, default=4)
+    ap.add_argument("--workers", type=int, default=3, help="并发数；万只级建议 2~3（5 会触发东财 514 限流）")
     ap.add_argument("--batch", type=int, default=400, help="每 N 只增量落库一次")
     ap.add_argument("--dry-run", action="store_true", help="只抓取解析，不写库")
     ap.add_argument("--replay", action="store_true", help="只用缓存重建，不联网")
