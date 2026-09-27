@@ -14,7 +14,7 @@ from dataclasses import dataclass
 
 from ..data.database import Database
 from .thermometer import MarketThermometer
-from .fund_scorer import FundScreener
+from .fund_scorer import FundScreener, type_bucket
 
 
 @dataclass
@@ -82,12 +82,14 @@ class RebalanceAdvisor:
         cash = max(0.0, total_capital - portfolio_value)
 
         # 权益占比用**市值**（与持仓卡口径统一；旧版用成本 buy_amount，浮盈浮亏不进判断）
-        equity_types = {"股票型", "混合型", "指数型", "QDII"}
+        # 口径走 SSOT `type_bucket`：它与 `reporter` 的"当前权益占比"、`strategy_engine`
+        # 的权益仓位是**同一件事**，全项目只此一个定义（§8.4，2026-09-27 统一；
+        # 原实现内联了 `{"股票型","混合型","指数型","QDII"}` + 冗余的 `or "股票" in ftype`）。
         equity_mv = 0.0
         for h in holdings:
             info = self._get_fund_info(h["fund_code"])
             ftype = info.get("fund_type", "") if info else ""
-            if any(et in ftype for et in equity_types) or "股票" in ftype or "混合" in ftype:
+            if type_bucket(ftype) == "equity":
                 equity_mv += self._holding_value(h)
         current_equity_pct = (equity_mv / total_capital * 100) if total_capital > 0 else 0
 

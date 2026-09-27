@@ -34,11 +34,27 @@ _LIMITED_PURCHASE_MARKERS = ("限大额", "限购")
 
 
 def type_bucket(fund_type: str) -> str:
-    """粗分类型桶：权益（equity） / 非权益（bond）。
+    """粗分类型桶：权益（equity） / 非权益（bond）—— **全项目「权益类」的唯一定义（SSOT）**。
 
     批次 4.1/4.4 的归一化口径：债基与权益的回撤、动量区间天然不可比，
     综合评分的百分位归一化必须**在同一个桶内**进行，否则债基的"低回撤"
-    会变成挤掉权益的免费分。historical_recommender 复用同一函数。
+    会变成挤掉权益的免费分。`historical_recommender` / `strategy_engine` /
+    `rebalance_advisor` / `reporter` 全部复用本函数。
+
+    匹配方式是**子串**（`kw in t`），因此：
+      · "指数型-海外股票"（QDII 联接）→ 命中"指数" → equity ✓
+      · "混合型-偏股" / "混合型-灵活配置" → 命中"混合" → equity ✓
+      · "债券型-长债" / "货币型" → bond ✓
+
+    ⚠️ **以下场景「不是」本函数**（名字像、语义不同，2026-09-27 §8.4 清理时逐一确认）：
+      · `vol_predictor.VOL_MODEL_FUND_TYPES` —— 波动模型的**可预测性白名单**，
+        **刻意排除 QDII**，比权益类更窄；
+      · `FundScreener.screen_funds(fund_types=...)` —— 筛选**范围参数**；
+        默认不含 QDII 是"默认采不采"的选择，不是资产类别判断；
+      · `recsys_dataset._bucket` —— 五分类（index/equity/mixed/bond/qdii），
+        需要把"指数"从权益里单独拆出来；
+      · `strategy_engine.MARKET_STATE_FUND_TYPES` —— 温度→**建议买入类型**，
+        是策略选择而非资产类别。
     """
     t = str(fund_type or "")
     return "equity" if any(kw in t for kw in ("股票", "混合", "指数", "QDII")) else "bond"
@@ -146,6 +162,9 @@ class FundScreener:
             metrics (dict of actual values)
         """
         if fund_types is None:
+            # ⚠️ 这是**筛选范围**（"默认从哪些类型里挑"），不是"权益类判断"。
+            # 全项目权益类的唯一定义见 `type_bucket`（见其 docstring）。
+            # 这里不含 QDII 是"默认采不采"的选择，**不影响**任何"权益占比"口径。
             fund_types = ["股票型", "混合型", "指数型"]
 
         all_funds = self.db.get_all_funds()

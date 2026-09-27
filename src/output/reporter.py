@@ -25,7 +25,7 @@ except ImportError:
 from ..data.database import Database
 from ..analysis.thermometer import MarketThermometer
 from ..analysis.portfolio import PortfolioTracker
-from ..analysis.fund_scorer import FundScreener, format_fee
+from ..analysis.fund_scorer import FundScreener, format_fee, type_bucket
 
 
 class WeeklyReporter:
@@ -453,20 +453,24 @@ class WeeklyReporter:
         return "\n".join(lines)
 
     def _calc_current_equity_pct(self, portfolio_data: dict) -> float:
-        """计算当前权益类基金占比"""
+        """计算当前权益类基金占比。
+
+        口径见 SSOT `fund_scorer.type_bucket`（股票/混合/指数/QDII）。
+        ⚠️ 原实现在这里内联了另一份集合 `{"股票型","混合型","指数型",
+        "混合型-偏股","混合型-灵活"}` —— **漏 QDII**，而 `rebalance_advisor`
+        算的是同一件事却含 QDII → 同一持仓在两个页面可能显示两个数字
+        （§8.4 口径分裂，2026-09-27 统一）。
+        """
         if not portfolio_data.get("has_holdings"):
             return 0
 
-        # 权益类型: 股票型、混合型、指数型
-        equity_types = {"股票型", "混合型", "指数型", "混合型-偏股", "混合型-灵活"}
         total = portfolio_data["total_market_value"]
         if total == 0:
             return 0
 
         equity_value = 0
         for d in portfolio_data["holdings_detail"]:
-            ftype = d.get("fund_type", "")
-            if any(et in ftype for et in equity_types):
+            if type_bucket(d.get("fund_type", "")) == "equity":
                 equity_value += d["current_value"]
 
         return (equity_value / total) * 100

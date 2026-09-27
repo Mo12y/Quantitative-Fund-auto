@@ -82,9 +82,12 @@ CACHE_DIR.mkdir(parents=True, exist_ok=True)
 RESULT_DIR.mkdir(parents=True, exist_ok=True)
 DOCS_DIR.mkdir(parents=True, exist_ok=True)
 
-# 基金类型白名单：股票型 + 偏股 + 指数股票（vol 聚类强，可预测性高）
-# 排除债基/货基/QDII（vol 几乎为零，无聚类可利用）
-EQUITY_FUND_TYPES = [
+# 波动模型的**可预测性白名单**：股票型 + 偏股 + 指数股票（vol 聚类强，可预测性高）。
+# ⚠️ 这**不是**"权益类"（≠ `fund_scorer.type_bucket`）：本白名单**刻意排除 QDII**
+#    与混合型-灵活（其 vol 特性不同、无聚类可利用），比权益类更窄。
+#    2026-09-27 §8.4 清理时由 `EQUITY_FUND_TYPES` 改名而来 —— 原名会被误读成"权益类"，
+#    进而被"顺手统一"，把 QDII 混进 vol 模型。
+VOL_MODEL_FUND_TYPES = [
     "股票型", "股票型-普通", "股票型-标准指数", "股票型-增强指数",
     "混合型-偏股", "指数型-股票",
 ]
@@ -145,7 +148,7 @@ def load_fund_universe(db_path, max_funds=200):
     cur = c.cursor()
 
     # 取白名单类型的基金 + 净值覆盖统计
-    type_placeholders = ",".join("?" * len(EQUITY_FUND_TYPES))
+    type_placeholders = ",".join("?" * len(VOL_MODEL_FUND_TYPES))
     q = f"""
     SELECT fi.fund_code, fi.fund_type, fi.fund_size, fi.mgt_fee,
            COUNT(fn.nav_date) AS n_days,
@@ -158,7 +161,7 @@ def load_fund_universe(db_path, max_funds=200):
     ORDER BY n_days DESC
     LIMIT ?
     """
-    rows = cur.execute(q, (*EQUITY_FUND_TYPES, MIN_HISTORY_DAYS, max_funds)).fetchall()
+    rows = cur.execute(q, (*VOL_MODEL_FUND_TYPES, MIN_HISTORY_DAYS, max_funds)).fetchall()
     c.close()
 
     df = pd.DataFrame(rows, columns=[
@@ -990,7 +993,7 @@ def generate_report(universe_df, panel, summaries, ic_series_dict,
 
     # 数据概况
     lines.append("## 二、数据概况\n")
-    lines.append(f"- 基金池: {len(universe_df)} 只 (类型: {', '.join(EQUITY_FUND_TYPES)})")
+    lines.append(f"- 基金池: {len(universe_df)} 只 (类型: {', '.join(VOL_MODEL_FUND_TYPES)})")
     lines.append(f"- 净值区间: {data_info['nav_start']} ~ {data_info['nav_end']}")
     lines.append(f"- 月度预测样本: {len(panel)} fund-month")
     lines.append(f"- 训练期: {PRED_START[:7]} ~ {TRAIN_END[:7]}")

@@ -18,7 +18,7 @@ import pandas as pd
 from datetime import datetime
 from typing import Tuple
 from ..data.database import Database
-from .fund_scorer import FundScreener
+from .fund_scorer import FundScreener, type_bucket
 from .thermometer import MarketThermometer
 from .portfolio import redeem_fee_rate, DEFAULT_PURCHASE_FEE
 
@@ -281,10 +281,13 @@ class StrategyEngine:
             return 999  # 无法解析视为长期持有
 
     def _is_equity(self, fund_code: str) -> bool:
-        """是否为权益类基金（股票/混合/指数/QDII），用于权益仓位口径。"""
+        """是否为权益类基金，用于权益仓位口径。
+
+        口径走 SSOT `fund_scorer.type_bucket` —— 全项目"权益类"只此一处定义。
+        （原实现在这里内联了同一份关键词表，属 §8.4 口径分裂六处之一，2026-09-27 统一。）
+        """
         try:
             info = self.db.get_fund_info(fund_code) or {}
         except Exception:
             return False
-        ftype = str(info.get("fund_type", "") or "")
-        return any(t in ftype for t in ("股票", "混合", "指数", "QDII"))
+        return type_bucket(info.get("fund_type", "")) == "equity"
