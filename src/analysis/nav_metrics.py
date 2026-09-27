@@ -58,14 +58,20 @@ def clip_window(vals, dates=None, years: float = WINDOW_YEARS):
     return v[i0:], dates[i0:]
 
 
-def compute(vals, dates=None, risk_free: float = 0.02, years: float = WINDOW_YEARS):
+def compute(vals, dates=None, risk_free: float = None, years: float = WINDOW_YEARS):
     """单只基金的窗口化指标。返回 dict；点数不足返回 None。
 
     keys: annual_return(%) / ann_vol(%) / max_drawdown_win(%) / max_drawdown_1y(%) /
-          max_drawdown_all(%) / momentum_3m(%) / sharpe / window_points / window_years
+          max_drawdown_all(%) / momentum_3m(%) / sharpe / sortino / calmar /
+          window_points / window_years
 
     ⚠️ `max_drawdown_all` 是**全历史**回撤（保留作参考，**不参与同类比较**）。
+    ⚠️ `risk_free` 默认取 SSOT `risk_free.RISK_FREE_ANNUAL`（当期中国 10Y 国债），
+       本文件**不再写 0.02 字面量**（2026-09-27：原默认值 0.02 是第 5 处硬编码，已收敛）。
     """
+    if risk_free is None:
+        from .risk_free import RISK_FREE_ANNUAL
+        risk_free = RISK_FREE_ANNUAL
     v, d = clip_window(vals, dates, years)
     n = v.size
     if n < MIN_POINTS:
@@ -109,6 +115,23 @@ def compute(vals, dates=None, risk_free: float = 0.02, years: float = WINDOW_YEA
     v3, _ = clip_window(vals, dates, 0.25)
     mom3m = float((allv[-1] / v3[0] - 1) * 100) if v3.size > 1 and v3[0] > 0 else np.nan
 
+    # ---- 下行偏差 / 索提诺（2026-09-27 新增）----
+    # 学术标准式（同类项目 sososun/mutual-fund-skills 采用）：
+    #   DD = sqrt(mean(min(0, r − MAR)²)) × sqrt(交易日数)      MAR = 无风险利率
+    # 交易日数用**项目口径 244**（不是 252）—— 与 ann_vol 同一分母，否则两指标不可比。
+    if daily.size:
+        _ex = daily - risk_free / TRADING_DAYS
+        _down = np.minimum(_ex, 0.0)
+        dd = float(np.sqrt((_down ** 2).mean()) * np.sqrt(TRADING_DAYS))
+    else:
+        dd = np.nan
+    sortino = (float((ann_ret - risk_free) / dd)
+               if dd and dd > 0 and np.isfinite(dd) else np.nan)
+
+    # ---- 卡玛 = 年化收益 / 窗口内最大回撤（同一个回撤口径，避免跨口径混算）----
+    calmar = (float(ann_ret * 100 / mdd_win)
+              if mdd_win and mdd_win > 0 and np.isfinite(mdd_win) else np.nan)
+
     return {
         "annual_return": ann_ret * 100,
         "ann_vol": ann_vol * 100,
@@ -117,6 +140,9 @@ def compute(vals, dates=None, risk_free: float = 0.02, years: float = WINDOW_YEA
         "max_drawdown_all": mdd_all,
         "momentum_3m": mom3m,
         "sharpe": sharpe,
+        "sortino": sortino,
+        "calmar": calmar,
+        "downside_dev": dd * 100 if np.isfinite(dd) else np.nan,
         "window_points": int(n),
         "window_years": years,
     }

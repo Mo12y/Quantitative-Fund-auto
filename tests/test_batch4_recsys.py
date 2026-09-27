@@ -235,7 +235,12 @@ class TestRiskFreeSingleSource:
         assert bt.compute_metrics.__defaults__ == (RISK_FREE_ANNUAL,)
         assert vp._portfolio_metrics.__defaults__ == (RISK_FREE_ANNUAL,)
         assert fs_mod.FundScreener.__init__.__defaults__ == (RISK_FREE_ANNUAL,)
-        assert hr_mod.RISK_FREE_ANNUAL == RISK_FREE_ANNUAL == 0.02
+        assert hr_mod.RISK_FREE_ANNUAL == RISK_FREE_ANNUAL
+        # ⚠️ 这里**不把具体数值写死**：它随中国 10Y 国债变动
+        # （2026-09-27 由 0.02 更新为 0.0168，依据 `risk_free.py` 里记的实测）。
+        # 本测试要守的是"各处共享同一常数 + 量级合理"，不是"等于 0.02"。
+        assert 0 < RISK_FREE_ANNUAL < 0.06, \
+            "无风险利率应是当期中国 10Y 国债量级，不是拍脑袋常数：%r" % RISK_FREE_ANNUAL
 
     def test_score_uses_constant_not_hardcoded_003(self, db, monkeypatch):
         """historical_recommender 原来硬编码 0.03；现在跟随单一真源。"""

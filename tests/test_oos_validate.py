@@ -11,6 +11,8 @@ import os
 import sys
 from datetime import date, timedelta
 
+import pytest
+
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from src.analysis.oos_validate import evaluate_windows, month_ends  # noqa: E402
@@ -147,3 +149,73 @@ def test_compile_proven_winners_interleaves_buckets(tmp_path):
         assert buckets.count("bond") == 2 and buckets.count("equity") == 2
     finally:
         db.close()
+
+
+# ── 7. 统计工具（2026-09-27 新增）────────────────────────────────
+
+def test_binom_p_is_one_tailed():
+    from src.analysis.oos_validate import _binom_p
+    assert _binom_p(0, 0) == 1.0
+    assert _binom_p(10, 10) == pytest.approx(1 / 1024, abs=1e-9)     # 全胜
+    assert _binom_p(5, 10) == pytest.approx(0.623, abs=0.001)        # 掷硬币附近
+    assert _binom_p(99, 100) < 1e-25                                 # 极端显著
+
+
+def test_bh_adjust_is_monotone_and_more_conservative():
+    from src.analysis.oos_validate import _bh_adjust
+    raw = [0.01, 0.04, 0.03, 0.20]
+    adj = _bh_adjust(raw)
+    assert adj[0] == pytest.approx(0.04)
+    assert adj[3] == pytest.approx(0.20)
+    for a, p in zip(adj, raw):
+        assert a >= p - 1e-12, "BH 校正只会让 p 变大（更保守），不会更显著"
+
+
+def test_ols_alpha_recovers_known_line():
+    from src.analysis.oos_validate import _ols_alpha
+    x = [1.0, 2.0, 3.0, 4.0, 5.0]
+    y = [2.0 + 3.0 * xi for xi in x]          # α=2, β=3，完美拟合
+    r = _ols_alpha(y, x)
+    assert r["alpha"] == pytest.approx(2.0)
+    assert r["beta"] == pytest.approx(3.0)
+    assert r["r2"] == pytest.approx(1.0)
+    assert r["n"] == 5
+
+
+def test_ols_alpha_needs_three_points():
+    from src.analysis.oos_validate import _ols_alpha
+    assert _ols_alpha([1.0], [1.0]) is None
+    assert _ols_alpha([1.0, 2.0], [1.0, 2.0]) is None
+
+
+def test_c1_is_equal_weight_not_median():
+    """C1 必须是**全池等权平均**。
+
+    收益分布右偏（少数基金贡献大部分收益）时，中位数会**系统性低估**"随机持有"的
+    期望收益，从而让策略显得没那么差 —— 这正是 2026-09-27 修掉的口径问题。
+    """
+    nav, info = _mk({**{f"B{i}": 0.001 for i in range(8)},      # 8 只几乎不动
+                     **{f"A{i}": 0.050 for i in range(2)}})     # 2 只大涨（右尾）
+    out = evaluate_windows(nav, ENDS, info, window_months=12, step_months=6,
+                           top_k=5, min_picks=2)
+    w = out["windows"][0]
+    assert w["c1_pool"] is not None and w["c1_pool_ref"] is not None
+    assert w["c1_pool"] > w["c1_pool_ref"], \
+        "右偏分布下等权均值必须 > 中位数：avg=%s med=%s" % (w["c1_pool"], w["c1_pool_ref"])
+
+
+def test_random_control_is_averaged_over_repeats():
+    """随机对照必须**重复多次**（单次抽样方差极大，实测中位 +0.15% vs 均值 +1.85%）。"""
+    nav, info = _mk({**{f"A{i}": 0.02 for i in range(5)}, **{f"B{i}": 0.001 for i in range(5)}})
+    out = evaluate_windows(nav, ENDS, info, window_months=12, step_months=6,
+                           top_k=5, min_picks=2, c2_repeats=20)
+    assert out["windows"][0]["c2_n"] == 20, "应记录实际重复次数"
+
+
+def test_top_pct_controls_holding_count():
+    """给了 top_pct（十分位）时，每期持有只数由**池子比例**决定，不再固定。"""
+    nav, info = _mk({**{f"A{i}": 0.015 for i in range(15)}, **{f"B{i}": 0.001 for i in range(15)}})
+    out = evaluate_windows(nav, ENDS, info, window_months=12, step_months=6,
+                           top_k=None, top_pct=0.1, min_picks=2)
+    k = out["windows"][0]["k"]
+    assert k == 3, "30 只候选 × 10% = 3 只（top-decile）"

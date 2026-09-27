@@ -57,10 +57,15 @@ def month_ends(start: str, end: str) -> list:
     return [d.strftime("%Y-%m-%d") for d in rng]
 
 
+C2_REPEATS = 100              # 随机对照重复次数（单次抽样方差极大，必须取分布）
+BH_ALPHA = 0.05               # 多重检验校正的显著性水平
+
+
 def evaluate_windows(nav_cache: dict, ends: list, info_map: dict, *,
-                     window_months: int = 18, step_months: int = 6, top_k: int = 10,
-                     min_picks: int = 3, per_bucket_topn: int = PER_BUCKET_TOPN,
-                     seed: int = 42) -> dict:
+                     window_months: int = 18, step_months: int = 6, top_k: int = None,
+                     top_pct: float = None, min_picks: int = 3,
+                     per_bucket_topn: int = PER_BUCKET_TOPN, market_series: list = None,
+                     c2_repeats: int = C2_REPEATS, seed: int = 42) -> dict:
     """**纯计算**：跑滚动样本外验证。
 
     Args:
@@ -68,11 +73,15 @@ def evaluate_windows(nav_cache: dict, ends: list, info_map: dict, *,
         ends:      月末日期（升序），窗口的候选切点
         info_map:  `{code: fund_type}`（用于分桶）
         window_months/step_months: 选择期长度 / 验证期长度
-        top_k:     每期持有基金数
+        top_k:     每期持有基金数；给了 `top_pct` 时以 `top_pct` 为准
+        top_pct:   按候选池比例选取（如 0.1 = **十分位**）——
+                   mf-alpha 用 top-decile，比固定只数更稳（池子大小可变时不会忽多忽少）
         min_picks: 选择期内至少被选中几次才算"高频"（S1 的入选条件）
+        market_series: 市场指数序列 `[(date, close), ...]`（如沪深300）——
+                   给了就做**因子中性 alpha**（剥离市场 beta），否则只报原始收益差
 
     Returns:
-        `{windows: [...], summary: {...}, verdict: str}`
+        `{windows: [...], summary: {...}, verdict: str}`；`summary.alpha` 是因子中性回归结果。
     """
     from .historical_recommender import HistoricalRecommender as HR
     score = HR._score_from_tuples
@@ -80,6 +89,9 @@ def evaluate_windows(nav_cache: dict, ends: list, info_map: dict, *,
 
     codes = sorted(nav_cache)
     hold_days = step_months * TRADING_DAYS_PER_MONTH
+    # 每期持有只数：优先 top_pct（按候选池比例 = **top-decile**，mf-alpha 的做法），否则用 top_k。
+    # 在循环外定一次 → 各窗口持有只数一致，可比。
+    k = top_k if top_k else max(1, int(round(len(codes) * (top_pct if top_pct else 0.1))))
     rng = random.Random(seed)
     windows = []
 
@@ -111,7 +123,7 @@ def evaluate_windows(nav_cache: dict, ends: list, info_map: dict, *,
 
         # S1 = proven_winners 口径（高频 + 选择期末分数）
         s1 = sorted([c for c, n in picked.items() if n >= min_picks],
-                    key=lambda c: (-picked[c], -last_score.get(c, 0.0), c))[:top_k]
+                    key=lambda c: (-picked[c], -last_score.get(c, 0.0), c))[:k]
 
         # S2 = 选择期最后一个月的打分 TopK（跨桶按分数排序 —— 它代表"打分法当期最看好"）
         last_m = sel[-1]
@@ -120,7 +132,7 @@ def evaluate_windows(nav_cache: dict, ends: list, info_map: dict, *,
             s = score(nav_cache.get(c) or [], last_m)
             if s is not None:
                 sc_last[c] = s
-        s2 = sorted(sc_last, key=lambda c: (-sc_last[c], c))[:top_k]
+        s2 = sorted(sc_last, key=lambda c: (-sc_last[c], c))[:k]
 
         # ── 验证期：真实持有收益 ──
         def _ret(c):
@@ -136,23 +148,97 @@ def evaluate_windows(nav_cache: dict, ends: list, info_map: dict, *,
 
         s1_r, s1_n = _avg(s1)
         s2_r, s2_n = _avg(s2)
-        c1_r = statistics.median(all_rets.values())
+        # C1 = 全池**等权平均**（与 S1/S2/C2 同为"等权组合"口径，才可比）。
+        # ⚠️ 2026-09-27 修正：原先用**中位数**当对照 —— 收益分布右偏（均值 1.9% vs 中位 1.4%），
+        # 中位数会**系统性低估**"随机持有"的期望收益，让 S1 看起来没那么差。中位数另存作参考。
+        c1_r = statistics.mean(all_rets.values())
+        c1_med = statistics.median(all_rets.values())
+        # 随机对照：**重复 c2_repeats 次取中位** —— 单次抽样方差极大
+        # （实测：中位 +0.15% 而均值 +1.85%，差一个数量级），单次结果没有可比性。
         pool = sorted(all_rets)
-        c2_codes = rng.sample(pool, min(top_k, len(pool)))
-        c2_r, _ = _avg(c2_codes)
+        c2_vals = []
+        for _ in range(max(1, int(c2_repeats))):
+            r_, _n = _avg(rng.sample(pool, min(k, len(pool))))
+            if r_ is not None:
+                c2_vals.append(r_)
+        c2_r = statistics.median(c2_vals) if c2_vals else None
+        # 市场同期收益（因子中性检验用；无 index 数据时为 None，此时不报 alpha）
+        mkt_r = fwd(market_series, t, hold_days) if market_series else None
 
         windows.append({
             "as_of": t, "sel_start": sel[0], "sel_months": len(sel),
             "hold_days": hold_days, "n_pool": len(all_rets),
-            "s1_n": s1_n, "s2_n": s2_n,
+            "s1_n": s1_n, "s2_n": s2_n, "c2_n": len(c2_vals), "k": k,
             "s1_codes": s1, "s2_codes": s2,
-            "s1": s1_r, "s2": s2_r, "c1_median": c1_r, "c2_random": c2_r,
+            "s1": s1_r, "s2": s2_r, "c1_pool": c1_r, "c1_pool_ref": c1_med,
+            "c2_random": c2_r, "mkt": mkt_r,
             "s1_minus_c1": (None if (s1_r is None or c1_r is None) else s1_r - c1_r),
             "s1_minus_c2": (None if (s1_r is None or c2_r is None) else s1_r - c2_r),
         })
 
     return {"windows": windows, "summary": _summarize(windows),
             "verdict": _verdict(windows)}
+
+
+def _binom_p(k: int, n: int) -> float:
+    """单尾二项检验 `P(X ≥ k | p=0.5)`：逐窗胜率是否显著高于掷硬币。
+
+    用非参数检验的理由：窗口收益分布明显非正态（实测中位与均值差一个数量级），
+    t 检验不适用；而"逐窗赢/输"是干净的伯努利序列。
+    """
+    from math import comb
+    if n <= 0:
+        return 1.0
+    return min(1.0, sum(comb(n, i) for i in range(k, n + 1)) / (2.0 ** n))
+
+
+def _bh_adjust(pvals: list) -> list:
+    """Benjamini-Hochberg FDR 校正。
+
+    为什么要校正：我们一次跑 **4 个比较**（S1/S2 × 全池中位/随机）。
+    只挑最小的那个 p 报"显著"，本身就是数据窥探 —— 这正是 betalens 的
+    `Robust / Lucky Factors` 模块要防的事。
+    """
+    m = len(pvals)
+    if m == 0:
+        return []
+    order = sorted(range(m), key=lambda i: pvals[i])
+    adj = [1.0] * m
+    prev = 1.0
+    for pos in range(m - 1, -1, -1):
+        i = order[pos]
+        val = min(prev, pvals[i] * m / (pos + 1))
+        adj[i] = val
+        prev = val
+    return adj
+
+
+def _ols_alpha(y: list, x: list) -> dict:
+    """一元 OLS：`y = α + β·x`。返回 `{alpha, beta, t_alpha, r2, n}`（n<3 → None）。
+
+    用于**因子中性检验**：把策略超额收益对市场超额收益回归，取 **α** ——
+    回答"跑赢的那部分，是不是只因为承担了更多市场 beta"。
+    这是 mf-alpha 的 `factor-neutral alpha verification` 的最小可用形态。
+    """
+    n = len(y)
+    if n < 3 or len(x) != n:
+        return None
+    mx, my = sum(x) / n, sum(y) / n
+    sxx = sum((xi - mx) ** 2 for xi in x)
+    if sxx <= 0:
+        return None
+    beta = sum((xi - mx) * (yi - my) for xi, yi in zip(x, y)) / sxx
+    alpha = my - beta * mx
+    resid = [yi - alpha - beta * xi for xi, yi in zip(x, y)]
+    ss_res = sum(r * r for r in resid)
+    ss_tot = sum((yi - my) ** 2 for yi in y)
+    r2 = (1 - ss_res / ss_tot) if ss_tot > 0 else 0.0
+    dof = n - 2
+    if dof <= 0 or ss_res <= 0:
+        return {"alpha": alpha, "beta": beta, "t_alpha": None, "r2": r2, "n": n}
+    se = (ss_res / dof * (1.0 / n + mx * mx / sxx)) ** 0.5
+    return {"alpha": alpha, "beta": beta,
+            "t_alpha": (alpha / se) if se > 0 else None, "r2": r2, "n": n}
 
 
 def _dist(vals):
@@ -168,25 +254,55 @@ def _summarize(windows: list) -> dict:
     if not windows:
         return {"n_windows": 0}
     s1 = [w["s1"] for w in windows]
-    c1 = [w["c1_median"] for w in windows]
+    c1 = [w["c1_pool"] for w in windows]
     c2 = [w["c2_random"] for w in windows]
     s2 = [w["s2"] for w in windows]
     dif = [w["s1_minus_c1"] for w in windows if w["s1_minus_c1"] is not None]
     dif2 = [w["s1_minus_c2"] for w in windows if w["s1_minus_c2"] is not None]
+    # S2 的两条对照差（window 里没预存，这里现算）
+    s2m1 = [w["s2"] - w["c1_pool"] for w in windows
+            if w["s2"] is not None and w["c1_pool"] is not None]
+    s2m2 = [w["s2"] - w["c2_random"] for w in windows
+            if w["s2"] is not None and w["c2_random"] is not None]
+
+    # ── 多重检验：4 个比较（S1/S2 × 中位/随机）都算 p，再做 BH 校正 ──
+    labels = ["s1_vs_c1", "s1_vs_c2", "s2_vs_c1", "s2_vs_c2"]
+    groups = [dif, dif2, s2m1, s2m2]
+    p_raw = [_binom_p(sum(1 for x in g if x > 0), len(g)) for g in groups]
+    p_adj = _bh_adjust(p_raw)
+    win_counts = {lb: {"win": sum(1 for x in g if x > 0), "n": len(g)}
+                  for lb, g in zip(labels, groups)}
+
+    # ── 因子中性 alpha：**相对对照**的超额（S1 − C1）对市场同期收益回归，取截距 ──
+    # ⚠️ 2026-09-27 修正：y 必须用**相对**超额，不能用 S1 的绝对收益。
+    # 用绝对值测的是"基金组合 vs 沪深300"（实测 α=+1.31%、t=22.3 高度显著）——
+    # 但那只是"基金池整体（含债基、且是存续基金）跑赢股指"，与"打分法能不能跑赢随机持有"无关。
+    # 换成相对超额后，α 才回答我们真正关心的问题：剥离市场 beta 后还剩多少。
+    trip = [(w["s1"] - w["c1_pool"], w["mkt"]) for w in windows
+            if w["s1"] is not None and w["c1_pool"] is not None and w.get("mkt") is not None]
+    alpha = _ols_alpha([a for a, _ in trip], [b for _, b in trip]) if len(trip) >= 3 else None
+
     return {
         "n_windows": len(windows),
         "span": "%s ~ %s" % (windows[0]["as_of"], windows[-1]["as_of"]),
         "s1_frequent_pick": _dist(s1),
         "s2_top_score": _dist(s2),
-        "c1_pool_median": _dist(c1),
+        "c1_pool": _dist(c1),
         "c2_random": _dist(c2),
         "s1_minus_c1": _dist(dif),
         "s1_minus_c2": _dist(dif2),
-        # 逐窗胜率：S1 跑赢全池中位/随机 的窗口占比
         "win_rate_vs_c1": (round(100.0 * sum(1 for x in dif if x > 0) / len(dif), 1)
                            if dif else None),
         "win_rate_vs_c2": (round(100.0 * sum(1 for x in dif2 if x > 0) / len(dif2), 1)
                            if dif2 else None),
+        # 显著性（**校正后**才是可引用的那个）
+        "p_raw": [round(p, 5) for p in p_raw],
+        "p_adjusted": [round(p, 5) for p in p_adj],
+        "p_labels": labels,
+        "win_counts": win_counts,
+        "alpha": alpha,          # {alpha, beta, t_alpha, r2, n} 或 None
+        "market_windows": len(trip),
+        "bh_alpha": BH_ALPHA,
     }
 
 
@@ -196,14 +312,23 @@ def _verdict(windows: list) -> str:
         return "窗口不足 3 个，无法判定（样本太少，任何结论都是运气）"
     s = _summarize(windows)
     d, c = s["s1_minus_c1"], s["s1_minus_c2"]
-    parts = []
-    parts.append("S1 超额（vs 全池中位）中位 %s pp，逐窗胜率 %s%%"
-                 % (d["median"] if d else "n/a", s["win_rate_vs_c1"]))
-    parts.append("S1 超额（vs 随机）中位 %s pp，逐窗胜率 %s%%"
-                 % (c["median"] if c else "n/a", s["win_rate_vs_c2"]))
-    # 判据：逐窗胜率 >70% 且超额中位 >0 才算"有迹象"；否则如实说"看不出能力"
-    ok = (s["win_rate_vs_c1"] or 0) >= 70 and (d and d["median"] > 0)
-    parts.append("判定：%s" % ("有超出对照的迹象（仍需更大样本/多参数校正）"
+    parts = ["S1 超额（vs 全池中位）中位 %s pp，逐窗胜率 %s%%"
+             % (d["median"] if d else "n/a", s["win_rate_vs_c1"]),
+             "S1 超额（vs 随机）中位 %s pp，逐窗胜率 %s%%"
+             % (c["median"] if c else "n/a", s["win_rate_vs_c2"])]
+    # 判据：超额中位 > 0 **且** BH 校正后 p < 0.05 才算"有迹象"（单看未校正的 p 会误导）
+    p_adj = s.get("p_adjusted") or [1.0]
+    ok = bool(d and d["median"] > 0) and (p_adj[0] is not None and p_adj[0] < s.get("bh_alpha", 0.05))
+    parts.append("BH 校正后最小 p = %s（4 个比较）" % (min(p_adj) if p_adj else "n/a"))
+    a = s.get("alpha")
+    if a:
+        parts.append("因子中性 α（相对）= %+.2f%%（β=%.2f，t(α)=%s，R²=%.2f，n=%d）"
+                     % (a["alpha"], a["beta"],
+                        ("%.2f" % a["t_alpha"]) if a["t_alpha"] is not None else "n/a",
+                        a["r2"], a["n"]))
+    else:
+        parts.append("因子中性 α：未计算（缺市场序列）")
+    parts.append("判定：%s" % ("有超出对照的迹象（仍需更大样本/更多窗口）"
                               if ok else "**看不出优于对照的选基能力**"))
     return "；".join(parts)
 
@@ -213,11 +338,14 @@ def _verdict(windows: list) -> str:
 # =====================================================================
 
 def run(db, *, lookback_years: float = 5.0, window_months: int = 18, step_months: int = 6,
-        top_k: int = 10, min_picks: int = 3, per_group: int = 60, seed: int = 42) -> dict:
+        top_k: int = None, top_pct: float = 0.1, min_picks: int = 3, per_group: int = 60,
+        market_code: str = "000300", seed: int = 42) -> dict:
     """从库里取数并跑滚动样本外验证（只读）。
 
     候选池复用 `HistoricalRecommender._get_candidates`（分层随机抽样、固定种子）
     以保证与既有 in-sample 引擎**同一池子**，差别只在时间窗切分。
+    市场序列取本地 `index_daily`（默认沪深300），供**因子中性 alpha** 使用；
+    取不到就不报 alpha（不编造）。
     """
     from datetime import date, timedelta
 
@@ -241,12 +369,25 @@ def run(db, *, lookback_years: float = 5.0, window_months: int = 18, step_months
     nav_cache = {c: v for c, v in nav_cache.items() if v}
     info_map = {f["fund_code"]: (f.get("fund_type") or "") for f in db.get_all_funds()}
 
+    # 市场序列（沪深300，本地 index_daily）——供因子中性 alpha；取不到就不报 alpha
+    market_series, market_note = [], "缺 index_daily 数据"
+    try:
+        rows = db.get_index_daily(market_code)
+        market_series = [(str(r["trade_date"]), float(r["close"]))
+                         for r in (rows or []) if r.get("close")]
+        if market_series:
+            market_note = "%s（%d 个交易日）" % (market_code, len(market_series))
+    except Exception as e:                                   # noqa: BLE001
+        market_note = "读取失败：%s" % str(e)[:60]
+
     out = evaluate_windows(nav_cache, ends, info_map, window_months=window_months,
-                           step_months=step_months, top_k=top_k, min_picks=min_picks,
-                           seed=seed)
+                           step_months=step_months, top_k=top_k, top_pct=top_pct,
+                           min_picks=min_picks, market_series=market_series or None, seed=seed)
     out["meta"] = {"codes": len(codes), "nav_loaded": len(nav_cache),
                    "pool": "%d 只（分层随机，seed=%d）" % (len(codes), seed),
                    "window_months": window_months, "step_months": step_months,
-                   "top_k": top_k, "min_picks": min_picks,
+                   "top_k": (out["windows"][0]["k"] if out["windows"] else top_k),
+                   "top_pct": top_pct, "min_picks": min_picks, "market": market_note,
+                   "c2_repeats": C2_REPEATS,
                    "methodology": "out-of-sample (walk-forward, 选择期与验证期不重叠)"}
     return out
