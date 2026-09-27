@@ -1205,7 +1205,10 @@ def api_recommend():
             "proven_winners": result.get("proven_winners", [])[:15],
             "current_picks": kept,
             "constraint_review": constraint_review,
-        }, "purpose": "历史回测验证（样本内）——辅助参考，不是主推荐",
+        }, "purpose": "历史回测验证（样本内）——辅助参考，不是主推荐。"
+                      "批次 4.3 已做滚动样本外验证（`oos` 命令，51 个不重叠窗口）："
+                      "该口径超额中位仅 +0.11pp、逐窗胜率 51.0%，看不出选基能力，"
+                      "`proven_winners` 宜读作「打分法偏好的类型分布」。",
            "methodology_note": ("以下为**样本内**历史表现：用已实现的前向收益筛选"
                                 "“赢家”存在同义反复，不构成样本外的选基能力证据。"
                                 "主推荐请看温度驱动的实时筛选。")})
