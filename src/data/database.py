@@ -15,6 +15,10 @@ from typing import Optional
 class Database:
     """SQLite 数据库管理类"""
 
+    # 建连重试：见 `_open_writable` 的 readonly 说明（勿删，否则并发建连会随机只读）
+    _OPEN_TRIES = 4
+    _OPEN_BACKOFF_MS = (0, 2, 5, 10)
+
     def __init__(self, db_path: str = "data/fund_quant.db"):
         """
         初始化数据库连接。
@@ -29,21 +33,80 @@ class Database:
         if db_dir and not os.path.exists(db_dir):
             os.makedirs(db_dir, exist_ok=True)
 
-        # isolation_level=None → 自动提交：事务边界由我们显式控制。
-        # 原因：sqlite3 默认会在 DML 前隐式 BEGIN，与显式 "BEGIN IMMEDIATE" 冲突
-        # （报 "cannot start a transaction within a transaction"）。
-        # 单条写各自成事务；多步读改写用 immediate() 包成一个原子事务。
-        self.conn = sqlite3.connect(db_path, isolation_level=None)
-        self.conn.row_factory = sqlite3.Row  # 让查询结果可以通过列名访问
-        # WAL：读不阻塞写、写不阻塞读，降低 Flask threaded=True 下并发写报 "database is locked" 的概率。
-        # 放在建表之前设置，随后的 CREATE/ALTER 都走 WAL。
-        try:
-            self.conn.execute("PRAGMA journal_mode=WAL")
-            self.conn.execute("PRAGMA synchronous=NORMAL")
-            self.conn.execute("PRAGMA busy_timeout=5000")
-        except Exception:
-            pass
+        # 建连 + PRAGMA + **写探针**（含 readonly 重试）——见 `_open_writable`
+        self.journal_mode = None
+        self.conn = self._open_writable()
         self._create_tables()
+
+    # ========== 连接建立 ==========
+
+    def _connect_raw(self):
+        """原始建连（单独抽出来，便于测试替换它构造 readonly 场景）。
+
+        isolation_level=None → 自动提交：事务边界由我们显式控制。
+        原因：sqlite3 默认会在 DML 前隐式 BEGIN，与显式 "BEGIN IMMEDIATE" 冲突
+        （报 "cannot start a transaction within a transaction"）。
+        单条写各自成事务；多步读改写用 immediate() 包成一个原子事务。
+        """
+        conn = sqlite3.connect(self.db_path, isolation_level=None)
+        conn.row_factory = sqlite3.Row   # 让查询结果可以通过列名访问
+        return conn
+
+    def _open_writable(self):
+        """建连 → 设 PRAGMA → **写探针**；readonly/locked 则关掉重开（最多 `_OPEN_TRIES` 次）。
+
+        为什么必须探针（2026-09-27 实测根因，勿删）
+        ------------------------------------------
+        WAL 模式下，**多个连接同时首次打开**一个刚建好（或刚被最后一个连接关闭、
+        连带删掉 `-wal`/`-shm`）的库时，SQLite 存在竞态：部分连接会以**只读**状态建成。
+        而这时有两个"看不出问题"的假象：
+          · `PRAGMA journal_mode` 仍返回 `'wal'`；
+          · `CREATE TABLE IF NOT EXISTS`（表已存在）**不需要真正写盘**，也不报错。
+        → 直到第一次真正写（`BEGIN IMMEDIATE`）才抛
+          `OperationalError: attempt to write a readonly database`，
+        表现为"随机 500 / 随机对账失败"，极难归因。
+
+        实测（`tests/test_web_api.py::test_concurrent_reconcile_settles_once` 的形态：
+        8 连接并发建连、每轮新建库）：**不加探针 29~30/30 轮复现**；**加探针 0/30**。
+        真实长驻库（早已是 WAL）不易触发，但 Flask `threaded=True` 下"多请求并发建连"
+        同样会踩到 —— 所以修在 Database 层，而不是改测试绕过。
+
+        重试为什么有效：第一次建连已把库切成 WAL（`-wal`/`-shm` 落盘），
+        后续连接重新打开就是正常的可写连接。
+        """
+        last = None
+        for i in range(self._OPEN_TRIES):
+            if i:
+                wait = self._OPEN_BACKOFF_MS[min(i, len(self._OPEN_BACKOFF_MS) - 1)]
+                time.sleep(wait / 1000.0)
+            conn = self._connect_raw()
+            try:
+                # WAL：读不阻塞写、写不阻塞读，降低 Flask threaded=True 下并发写
+                # 报 "database is locked" 的概率。放在建表之前，随后的 CREATE/ALTER 都走 WAL。
+                for pragma in ("PRAGMA journal_mode=WAL", "PRAGMA synchronous=NORMAL",
+                               "PRAGMA busy_timeout=5000"):
+                    try:
+                        conn.execute(pragma)
+                    except Exception:
+                        # 单条 PRAGMA 失败不致命（真正的判据是下面的写探针）；
+                        # 但也**不静默** —— 探针后会把实际 journal_mode 读回存到
+                        # `self.journal_mode`，供诊断。
+                        pass
+                conn.execute("BEGIN IMMEDIATE")   # 写探针：readonly 连接在此暴露
+                conn.execute("ROLLBACK")
+            except Exception as e:
+                last = e
+                try:
+                    conn.close()
+                except Exception:
+                    pass
+                continue
+            try:
+                self.journal_mode = conn.execute("PRAGMA journal_mode").fetchone()[0]
+            except Exception:
+                self.journal_mode = None
+            return conn
+        raise last
 
     # ========== 删除前自动备份（防误删） ==========
 
