@@ -838,6 +838,28 @@ def api_portfolio_curve():
     return jsonify({"ok": True, "data": _portfolio_curve()})
 
 
+@app.route("/api/market/live")
+def api_market_live():
+    """指数盘中快照 + 本地净值时滞（数据源扩展计划书 阶段 5「补实时行情时滞」）。
+
+    为什么需要：`fund_nav`/`index_daily` 是 T+1，双源校验实测本地落后 4~6 天，
+    界面上看到的"市场位置"可能是几天前的。这里给一个**当下**的大盘读数。
+
+    降级策略：出网失败**不报 500** —— 返回 `ok=True` + `available=False` + `reason`，
+    由前端如实展示"盘中行情不可用"，而不是让整个页面挂掉或拿旧值冒充实时。
+    """
+    from src.data import live_quote
+    db = get_db()
+    try:
+        latest = db.get_latest_nav_date()
+    finally:
+        db.close()
+    out = live_quote.fetch()
+    out["local_nav_latest"] = latest
+    out["lag_note"] = live_quote.lag_note(latest) if latest else "本地无净值记录"
+    return jsonify({"ok": True, "data": out})
+
+
 def _overview_stats(port: dict, plan: dict) -> dict:
     """总览增强指标：总资产 / 累计收益 / 收益率 / 持仓分布 / 行业占比
 

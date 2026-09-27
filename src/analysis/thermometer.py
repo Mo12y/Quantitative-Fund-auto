@@ -26,6 +26,19 @@ def _live_default() -> bool:
     return os.environ.get("QFA_MARKET_LIVE", "1") not in ("0", "false", "False", "no")
 
 
+# 市场温度的**适用范围**（数据源扩展计划书 §8.6）。
+#
+# 温度只由 **A 股权益估值**（沪深300/中证500/上证50 的 PE/PB 分位 + ERP）+ 成交量 + 情绪构成，
+# 因此它回答的是"A 股权益现在贵不贵"，**不是**"债基/QDII/黄金该不该买"。
+# 上层（策略引擎的仓位建议、前端、报告）对非 A 股权益标的**不得**据此给仓位结论。
+TEMPERATURE_SCOPE = {
+    "applies_to": ["A 股权益（股票型 / 混合型 / 指数型及其联接）"],
+    "not_applicable_to": ["债券型", "货币型", "QDII-海外", "商品/黄金", "Reits"],
+    "note": ("温度 = A 股权益估值分位。用它决定债券/QDII/黄金的仓位在逻辑上不成立 —— "
+             "那几类需要各自的口径：10Y 国债收益率分位 / 海外指数估值+汇率 / 实际利率。"),
+}
+
+
 class MarketThermometer:
     """市场温度计 v2.0"""
 
@@ -140,6 +153,8 @@ class MarketThermometer:
             "divergence": divergence,
             "market_style": style,
             "target_equity_pct": (round(base_equity * 100, 1) if base_equity is not None else None),
+            # 适用范围（§8.6）：上层对非 A 股权益标的不得据此给仓位结论。
+            "scope": dict(TEMPERATURE_SCOPE),
         }
 
 

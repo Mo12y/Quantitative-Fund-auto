@@ -447,6 +447,8 @@ function renderApp(){
   if(document.getElementById('dca-wrap'))loadDca();
   // 存疑除息日提示（设计稿 §7 第 6 步）：数据来自 /api/reconcile，重渲染后要补挂回去
   renderDividendNote(STATE.dividend);
+  // 指数盘中快照（阶段 5）：重渲染后要重新拉（DOM 被替换掉了）
+  if(document.getElementById('live-quote'))loadLiveQuote();
 }
 
 function kpi(lb,vv,su,color,vid,sid){
@@ -610,7 +612,32 @@ function ovTempCard(T){
     inner+=`<div class="divergence" style="border-left:3px solid ${dCol}">${esc(T.divergence.level)}：${esc(T.divergence.message||'')}</div>`;
   }
   if(T.market_style&&T.market_style.dominant!=='unknown')inner+=`<div class="style-info"><b>${esc(T.market_style.dominant)}</b> · ${esc(T.market_style.detail||'')}</div>`;
-  return card('市场温度','本地快照',inner);
+  // 指数盘中快照（阶段 5「补实时行情时滞」）：本卡标题写着"本地快照"，
+  // 而本地净值实测落后 4~9 天 —— 这里补一个**当下**的大盘读数。
+  inner+=`<div id="live-quote"><div class="qtag u-mt8">指数盘中行情加载中…</div></div>`;
+  return card('市场温度','本地快照 · 指数盘中',inner);
+}
+
+// 指数盘中快照：出网失败/接口形状变化 → **如实降级**，绝不把旧值伪装成实时。
+async function loadLiveQuote(){
+  const host=document.getElementById('live-quote');
+  if(!host)return;
+  try{
+    const j=await (await fetch('/api/market/live')).json();
+    const d=(j&&j.data)||{};
+    if(!d.available){
+      host.innerHTML=`<div class="qtag u-mt8">指数盘中行情不可用：${esc(d.reason||'未知原因')}${d.lag_note?` · ${esc(d.lag_note)}`:''}</div>`;
+      return;
+    }
+    const st=d.trading?'盘中':'非交易时段（为最近收盘）';
+    const items=(d.quotes||[]).map(q=>{
+      const c=(q.pct==null)?'var(--dim)':(q.pct>=0?'var(--up)':'var(--down)');
+      const p=(q.pct==null)?'—':((q.pct>=0?'+':'')+Number(q.pct).toFixed(2)+'%');
+      return `<span class="qtag">${esc(q.name)} <b style="color:${c}">${p}</b> ${fmt(q.price)}</span>`;
+    }).join(' ');
+    host.innerHTML=`<div class="qtag u-mt8" style="line-height:2">指数 ${esc(st)} · 截至 ${esc(d.asof||'—')}<br>${items}</div>
+      <div class="qtag">${esc(d.lag_note||'')}</div>`;
+  }catch(e){ host.innerHTML='<div class="qtag u-mt8">指数盘中行情请求失败</div>'; }
 }
 
 function ovAllocCard(T,P,PL){
@@ -1319,6 +1346,7 @@ async function loadOverviewFast(fresh){
     document.getElementById('app').innerHTML=overviewViewHTML(j.data.temp||{},j.data.portfolio||{},j.data.plan||{},j.data.stats||{},j.data.curve||{});
     showView('overview');
     const sc=document.getElementById('sentiment-card'); if(sc&&!sc.dataset.done)loadSentiment();
+    if(document.getElementById('live-quote'))loadLiveQuote();
     return true;
   }catch(e){ return false; }
 }

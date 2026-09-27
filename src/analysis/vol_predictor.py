@@ -102,7 +102,11 @@ REFIT_FREQ_MONTHS = 3          # 季度重训（控速）
 MIN_HISTORY_DAYS = 756         # 3 年最低历史
 TRADING_DAYS_YEAR = 252
 TARGET_VOL = 0.15              # vol-targeting 目标年化波动率 15%
-ONE_WAY_COST = 0.005           # 单边成本 0.5%（场外C类/ETF联接口径）
+# 单边成本 0.5% —— **保守缓冲，不是实测成本**（§8.5）：实测前端申购费中位
+# 指数 0.03% / 债券 0.05% / 混合 0.10% / 股票与 QDII 0.15%、C 类 0.000%
+# → 本常数对**所有类型都高估**（3~17×）。不改数值（会翻动全部历史报告）；
+# 需精确成本用 `trading_cost.one_way_cost_pct`。
+ONE_WAY_COST = 0.005           # 单边成本 0.5%（保守缓冲，非实测；场外 C 类口径）
 N_PORTFOLIO_FUNDS = 30         # 组合模拟基金数
 RF_ANNUAL = 0.02               # 无风险利率（与 backtest.compute_metrics 统一）
 
