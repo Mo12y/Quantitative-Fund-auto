@@ -747,6 +747,74 @@ class PortfolioTracker:
             out.append(round((c / base - 1) * 100, 4) if base else None)
         return out
 
+    def get_xirr(self, market_value: float = None) -> dict:
+        """组合整体的 **XIRR（资金加权年化收益）**（批次 3 统一评价口径）。
+
+        为什么不用"盈亏 ÷ 投入成本"：那个指标**没有时间维度** —— 定投的资金平均占用
+        时间短，会被系统性低估。XIRR 把每笔现金流按**实际持有天数**折现，
+        因此**不同投入节奏的方案可以直接比较**（这正是批次 3 卡住的那个问题：
+        "点位分档 83.60% vs 固定 38.51%" 是少投钱造成的，不可直接比）。
+
+        口径：
+          · 买入流水 → **负**（现金流出），卖出流水 → **正**（现金流入）
+          · 期末按**最新净值日的当前市值**（含现金分红余额）追加一笔"清算"流入
+          · 只算 `confirmed` 的流水 —— 待确认的钱还没真正出去
+          · 无解（现金流不足 / 全同号）→ `xirr=None`，**不编造**
+
+        Args:
+            market_value: 期末市值；不传则自行遍历持仓按最新净值估算（含 `cash_balance`）。
+
+        Returns:
+            dict: `{xirr, xirr_pct, n_flows, first_date, last_date, invested, settled_value, ...}`
+        """
+        from .xirr import money_weighted_note
+        from .xirr import xirr as _xirr
+
+        flows = []
+        # ⚠️ 两个坑（2026-09-27 实测）：
+        # ① 不能用 `transactions` **不存在**的列 `buy_date`（只有 apply_date / confirm_date）；
+        # ② **卖出流水的 `amount` 列是 NULL**（实测 32 笔全为 NULL）——
+        #    金额必须自行换算 `shares × confirm_nav`，与 `get_realized_pnl` 同一算法。
+        # 这里也不吞异常：曾经用 try/except → rows=[]，把"SQL 写错"伪装成"没有流水"。
+        rows = self.db.conn.execute(
+            "SELECT kind, COALESCE(confirm_date, apply_date) d, amount, shares, confirm_nav, status"
+            " FROM transactions WHERE kind IN ('buy','sell')").fetchall()
+        for r in rows:
+            k, d = r["kind"], r["d"]
+            amt = float(r["amount"] or 0)
+            if k == "sell" and amt <= 0:
+                amt = float(r["shares"] or 0) * float(r["confirm_nav"] or 0)
+            if r["status"] not in (None, "confirmed") or not d or amt <= 0:
+                continue
+            flows.append((str(d), -amt if k == "buy" else amt))
+
+        if market_value is None:
+            mv = 0.0
+            for h in self.db.get_current_holdings():
+                nav = self._get_latest_nav(h["fund_code"])
+                sh = float(h.get("shares") or 0)
+                cash = float(h.get("cash_balance") or 0)
+                if nav is not None and sh > 0:
+                    mv += sh * nav + cash
+            market_value = mv
+        latest = self.db.get_latest_nav_date()
+        if market_value and market_value > 0 and latest:
+            flows.append((str(latest), float(market_value)))
+
+        r = _xirr(flows)
+        flows.sort(key=lambda x: x[0])
+        return {
+            "xirr": (round(r, 6) if r is not None else None),
+            "xirr_pct": (round(r * 100, 2) if r is not None else None),
+            "n_flows": len(flows),
+            "first_date": flows[0][0] if flows else None,
+            "last_date": flows[-1][0] if flows else None,
+            "invested": round(-sum(a for _, a in flows if a < 0), 2),
+            "settled_value": round(sum(a for _, a in flows if a > 0), 2),
+            "note": money_weighted_note(),
+            "methodology": "XIRR（每笔现金流按实际天数折现，365 天/年）",
+        }
+
     def get_performance_history(self) -> pd.DataFrame:
         """
         计算组合历史绩效（每周一个数据点）。
