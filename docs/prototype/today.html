@@ -1,0 +1,284 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>量化基金 · 今天要做什么（视觉稿 v1）</title>
+<style>
+/* ==========================================================================
+   设计 token（视觉稿 v1 · 2026-09-27）
+   依据：18 个开源项目的调研 + fintech 暗色规范
+   规则来源（见 docs/前端重构调研.md）：
+     · 底色不用纯黑（#000 造成 eye strain）→ 用带蓝调的深灰
+     · 暗色下强调色降饱和 15~25%（饱和色在暗背景上会 "vibrate"）
+     · 三级明度阶梯建立卡片层级（canvas < card < inset）
+     · 涨红跌绿（同花顺/中国惯例）+ ▲▼ 符号（色盲硬约束：不可只靠颜色）
+     · 颜色只出现在「数据与状态」上；骨架（标题/边框/按钮）全中性灰
+   ========================================================================== */
+:root{
+  --canvas:#0e1117;        /* 画布：深灰带蓝（同花顺/FenshiChart 同款量级） */
+  --card:#161b22;          /* 卡片 */
+  --inset:#1c2128;         /* 卡片内嵌区（表头、行 hover） */
+  --line:#262c36;          /* 分隔线（比背景亮 ~10%，不是白色） */
+  --line-strong:#30363d;
+
+  --text:#e6edf3;          /* 主文本（对 canvas 约 13.5:1，远超金融行业 6:1 要求） */
+  --text-2:#9ba7b4;        /* 次级 */
+  --text-3:#6e7681;        /* 弱化：标签、单位 */
+  --text-4:#4d545e;        /* 最弱：脚注 */
+
+  --accent:#4a9eff;        /* 降饱和的蓝（原 #0055FF 一类的饱和蓝在暗底上对比 <3:1） */
+  --accent-dim:#1f3a5f;
+
+  /* 涨跌：中国惯例 —— 涨红 / 跌绿。命名用 rise/fall，不要用 up/down（易与欧美色混淆） */
+  --rise:#f4614d;          /* 涨 = 红 */
+  --fall:#3fb950;          /* 跌 = 绿 */
+  --warn:#d29922;
+  --flat:#8b949e;
+
+  --r-sm:6px; --r-md:10px; --r-lg:14px;
+  --mono:ui-monospace,SFMono-Regular,"SF Mono",Consolas,monospace;
+  --sans:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",system-ui,sans-serif;
+}
+*{margin:0;padding:0;box-sizing:border-box}
+body{
+  background:var(--canvas); color:var(--text); font-family:var(--sans);
+  font-size:14px; line-height:1.55; padding:20px 16px 48px;
+  font-variant-numeric:tabular-nums;   /* 数字等宽：金融界面的底线 */
+  -webkit-font-smoothing:antialiased;
+}
+.wrap{max-width:1080px;margin:0 auto}
+
+/* ---------- 顶栏 ---------- */
+.top{display:flex;align-items:baseline;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:18px}
+.top h1{font-size:17px;font-weight:500;letter-spacing:.2px}
+.top h1 span{color:var(--text-3);font-weight:400;font-size:13px;margin-left:6px}
+.fresh{display:flex;align-items:center;gap:8px;font-size:12.5px;color:var(--text-3)}
+.tag{display:inline-block;padding:1px 7px;border-radius:20px;background:var(--inset);color:var(--text-2);font-size:11.5px;border:1px solid var(--line)}
+.tag.warn{color:var(--warn);border-color:#3d3117}
+
+/* ---------- 卡片三级 ---------- */
+.card{background:var(--card);border:1px solid var(--line);border-radius:var(--r-lg);padding:18px 20px;margin-bottom:14px}
+/* 结论卡：最高层级 —— 加左侧强调条 + 更大字号 */
+.card.lead{border-left:2px solid var(--accent);padding:20px 22px}
+.card h2{font-size:12px;font-weight:500;color:var(--text-3);letter-spacing:.06em;margin-bottom:12px}
+.card h2 .n{color:var(--text-4);font-weight:400;letter-spacing:0;margin-left:6px}
+
+/* ---------- 结论 ---------- */
+.verdict{font-size:22px;font-weight:500;line-height:1.35;margin-bottom:6px}
+.verdict .ok{color:var(--text)}
+.reason{color:var(--text-2);font-size:13.5px;margin-bottom:16px}
+.acts{display:grid;gap:8px}
+.act{display:flex;gap:10px;align-items:flex-start;padding:9px 12px;background:var(--inset);border-radius:var(--r-md);font-size:13.5px}
+.act .k{flex:0 0 auto;font-size:12px;padding:1px 8px;border-radius:20px;border:1px solid var(--line-strong);color:var(--text-2)}
+.act .k.hold{color:var(--text-3)}
+.act .k.buy{color:var(--rise);border-color:#4a2620}
+.act .k.watch{color:var(--accent);border-color:#1f3a5f}
+.act .d{color:var(--text-2)}
+
+/* ---------- KPI ---------- */
+.kpis{display:grid;grid-template-columns:repeat(4,1fr);gap:1px;background:var(--line);border:1px solid var(--line);border-radius:var(--r-lg);overflow:hidden}
+.kpi{background:var(--card);padding:14px 16px}
+.kpi .l{font-size:11.5px;color:var(--text-3);margin-bottom:5px}
+.kpi .v{font-size:21px;font-weight:500;letter-spacing:-.2px}
+.kpi .s{font-size:11.5px;color:var(--text-3);margin-top:3px}
+.rise{color:var(--rise)} .fall{color:var(--fall)} .flat{color:var(--flat)}
+
+/* ---------- 收益曲线 ---------- */
+.chead{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap;margin-bottom:8px}
+.cval{font-size:25px;font-weight:500;letter-spacing:-.3px}
+.cval .vs{font-size:12.5px;font-weight:400;color:var(--text-3);margin-left:9px}
+.tf{display:flex;gap:2px;background:var(--inset);padding:2px;border-radius:8px}
+.tf button{background:none;border:none;color:var(--text-3);font-size:12px;padding:4px 11px;border-radius:6px;cursor:pointer;font-family:inherit}
+.tf button.on{background:var(--card);color:var(--text)}
+.chart{display:block;width:100%;height:auto;margin:2px 0 6px}
+.cxn{font-size:11.5px;color:var(--text-4);line-height:1.7}
+.legend{display:flex;gap:16px;font-size:11.5px;color:var(--text-3);margin-bottom:4px}
+.legend em{font-style:normal}
+.legend i{display:inline-block;width:13px;height:0;border-top:2px solid;vertical-align:middle;margin-right:5px}
+
+/* ---------- 两列 ---------- */
+.cols{display:grid;grid-template-columns:1.35fr 1fr;gap:14px;align-items:start}
+
+/* ---------- 持仓表 ---------- */
+table{width:100%;border-collapse:collapse}
+th{font-size:11px;color:var(--text-3);font-weight:400;text-align:right;padding:0 0 8px;white-space:nowrap}
+th:first-child{text-align:left}
+td{padding:9px 0;border-top:1px solid var(--line);font-size:13.5px;text-align:right;white-space:nowrap}
+td:first-child{text-align:left}
+td .nm{color:var(--text)}
+td .cd{color:var(--text-4);font-family:var(--mono);font-size:11.5px;margin-left:7px}
+.sep{border-top:1px solid var(--line)}
+.sum{display:flex;justify-content:space-between;padding-top:10px;font-size:12.5px;color:var(--text-3)}
+
+/* ---------- 市场 ---------- */
+.mrow{display:flex;justify-content:space-between;align-items:baseline;padding:9px 0;border-top:1px solid var(--line);font-size:13.5px}
+.mrow:first-of-type{border-top:none}
+.mrow .nm{color:var(--text-2)}
+.mrow .px{font-family:var(--mono);font-size:13px;color:var(--text)}
+.mrow .ch{min-width:74px;text-align:right}
+.bar{height:5px;border-radius:3px;background:var(--inset);overflow:hidden;margin:10px 0 6px}
+.bar > i{display:block;height:100%;background:var(--warn);width:68%}
+.note{font-size:11.5px;color:var(--text-4);line-height:1.7}
+
+/* 符号：色盲硬约束 —— 涨跌不能只靠颜色 */
+.sym{font-size:10px;margin-right:3px}
+
+/* ---------- 响应式：手机 ---------- */
+@media (max-width:760px){
+  body{padding:14px 12px 40px}
+  .kpis{grid-template-columns:repeat(2,1fr)}
+  .cols{grid-template-columns:1fr}
+  .verdict{font-size:19px}
+  .kpi .v{font-size:18px}
+  th:nth-child(3),td:nth-child(3){display:none}
+}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <div class="top">
+    <h1>今天要做什么<span>量化基金 · 个人账本</span></h1>
+    <div class="fresh">
+      <span class="tag warn">净值截至 09-24 · 落后 3 天</span>
+      <span class="tag">更新</span>
+    </div>
+  </div>
+
+  <!-- 结论卡：整屏最重要的东西放最上面 -->
+  <div class="card lead">
+    <h2>今天<span class="n">· 结论</span></h2>
+    <div class="verdict">不需要操作。仓位已达标，等温度回落。</div>
+    <div class="reason">
+      温度 <b>68°</b>（偏热）→ 建议权益仓位 <b>62%</b>，你当前 <b>61%</b>，差 1 个百分点，在容差内。
+      唯一接近触发的是中证500 联接——距你的加仓线还差 0.4pp。
+    </div>
+    <div class="acts">
+      <div class="act"><span class="k hold">不动</span><span class="d">不加仓：温度偏热（68°），加仓性价比低</span></div>
+      <div class="act"><span class="k hold">不动</span><span class="d">不减仓：无持仓触发止损线，最差的一只仅 −2.66%</span></div>
+      <div class="act"><span class="k watch">留意</span><span class="d">易方达中证500 联接回撤 −1.62%，若再跌 0.4pp 进入你的加仓区间</span></div>
+    </div>
+  </div>
+
+  <!-- KPI：只放四个，其余下沉到明细 -->
+  <div class="kpis">
+    <div class="kpi"><div class="l">总资产</div><div class="v">¥854.51</div><div class="s">在持 9 只 · 在途 ¥10</div></div>
+    <div class="kpi"><div class="l">累计收益</div><div class="v rise">+¥1.62</div><div class="s">+0.19%（未实现）</div></div>
+    <div class="kpi"><div class="l">已实现</div><div class="v fall">−¥30.71</div><div class="s">34 笔 · 含赎回费 ¥7.21</div></div>
+    <div class="kpi"><div class="l">年化 XIRR</div><div class="v fall">−24.69%</div><div class="s">资金加权 · 投入 ¥2,715.67</div></div>
+  </div>
+  <div class="note" style="margin:8px 2px 14px">
+    XIRR 是<b>年化</b>口径：账面净亏 ¥21.89（−0.8%），年化数字大是因为大部分资金是近一个月才投入的。
+  </div>
+
+  <!-- 收益曲线：核心视图 —— 回答「我跑赢了吗」 -->
+  <div class="card">
+    <div class="chead">
+      <div>
+        <h2>组合收益<span class="n">· 资金加权（pnl ÷ 累计成本）</span></h2>
+        <div class="cval"><span class="rise"><span class="sym">▲</span>+0.20%</span>
+          <span class="vs">跑赢沪深300 <b class="rise">3.50pp</b></span></div>
+      </div>
+      <!-- 时间框架切换：抄 Ghostfolio（Today/WTD/MTD/YTD/1Y/5Y/Max） -->
+      <div class="tf">
+        <button>1M</button><button class="on">3M</button><button>YTD</button><button>全部</button>
+      </div>
+    </div>
+
+    <div class="legend">
+      <span><i style="border-color:var(--rise)"></i><em>本组合</em></span>
+      <span><i style="border-color:#5c6673;border-top-style:dashed"></i><em>沪深300（同期、同起点归一）</em></span>
+    </div>
+
+    <!-- 真实数据：2026-08-26 ~ 2026-09-24，22 个交易日 -->
+    <svg class="chart" viewBox="0 0 1000 190" preserveAspectRatio="none" role="img">
+      <title>组合与沪深300 的累计收益率曲线</title>
+      <!-- 零轴：盈亏分界 -->
+      <line x1="0" y1="77.7" x2="1000" y2="77.7" stroke="#30363d" stroke-width="1" stroke-dasharray="3 4"/>
+      <!-- 组合曲线下面积（低透明度填充，不喧宾夺主） -->
+      <path d="M0.0 79.9 L47.6 21.7 L95.2 42.6 L142.9 29.7 L190.5 64.5 L238.1 92.2 L285.7 61.5 L333.3 73.0 L381.0 65.6 L428.6 64.0 L476.2 68.3 L523.8 84.5 L571.4 102.4 L619.0 118.8 L666.7 130.6 L714.3 107.6 L761.9 97.7 L809.5 62.6 L857.1 25.3 L904.8 21.7 L952.4 35.4 L1000.0 72.2 L1000.0 77.7 L0.0 77.7 Z"
+            fill="#f4614d" opacity="0.09" stroke="none"/>
+      <!-- 沪深300：虚线中性灰（基准是参照，不抢主角） -->
+      <path d="M0.0 77.7 L47.6 54.1 L95.2 66.7 L142.9 57.2 L190.5 65.3 L238.1 103.3 L285.7 100.5 L333.3 103.2 L381.0 87.1 L428.6 96.8 L476.2 88.5 L523.8 103.0 L571.4 125.8 L619.0 143.8 L666.7 161.8 L714.3 143.7 L761.9 155.7 L809.5 127.5 L857.1 108.3 L904.8 105.3 L952.4 121.6 L1000.0 168.3"
+            fill="none" stroke="#5c6673" stroke-width="1.5" stroke-dasharray="5 4" stroke-linejoin="round"/>
+      <!-- 本组合：涨红（终值为正，中国惯例） -->
+      <path d="M0.0 79.9 L47.6 21.7 L95.2 42.6 L142.9 29.7 L190.5 64.5 L238.1 92.2 L285.7 61.5 L333.3 73.0 L381.0 65.6 L428.6 64.0 L476.2 68.3 L523.8 84.5 L571.4 102.4 L619.0 118.8 L666.7 130.6 L714.3 107.6 L761.9 97.7 L809.5 62.6 L857.1 25.3 L904.8 21.7 L952.4 35.4 L1000.0 72.2"
+            fill="none" stroke="#f4614d" stroke-width="1.8" stroke-linejoin="round" stroke-linecap="round"/>
+    </svg>
+
+    <div class="cxn">
+      08-26 ~ 09-24 · 22 个交易日 · 起止 0.00%<br>
+      ⚠️ 口径：<b>资金加权</b>（pnl ÷ 累计成本），不是「基金净值涨跌」——后者不含份额舍入，两者约差 0.1%。<br>
+      ⚠️ 可绘区间受限于<b>当前在仓的起点</b>（08-22 首笔建仓）；已了结的 6~8 月交易未计入本曲线。
+    </div>
+  </div>
+
+
+  <div class="cols">
+    <!-- 明细卡：可折叠层级 -->
+    <div class="card">
+      <h2>持仓<span class="n">· 按市值 · 共 9 只</span></h2>
+      <table>
+        <thead><tr><th>基金</th><th>市值</th><th>份额</th><th>收益</th></tr></thead>
+        <tbody>
+          <tr><td><span class="nm">易方达中证500ETF联接C</span><span class="cd">007029</span></td>
+              <td>¥122.97</td><td>66.88</td>
+              <td class="fall"><span class="sym">▼</span>−1.62%</td></tr>
+          <tr><td><span class="nm">富国创业板人工智能ETF联接C</span><span class="cd">024663</span></td>
+              <td>¥101.80</td><td>52.47</td>
+              <td class="rise"><span class="sym">▲</span>+1.34%</td></tr>
+          <tr><td><span class="nm">嘉实上证科创板芯片ETF联接C</span><span class="cd">017470</span></td>
+              <td>¥100.51</td><td>35.60</td>
+              <td class="rise"><span class="sym">▲</span>+1.03%</td></tr>
+          <tr><td><span class="nm">南方亚太精选ETF联接(QDII)C</span><span class="cd">021190</span></td>
+              <td>¥100.37</td><td>68.23</td>
+              <td class="rise"><span class="sym">▲</span>+0.37%</td></tr>
+          <tr><td><span class="nm">南方上海金ETF联接C</span><span class="cd">018392</span></td>
+              <td>¥153.94</td><td>82.27</td>
+              <td class="fall"><span class="sym">▼</span>−2.05%</td></tr>
+          <tr><td><span class="nm">信澳业绩驱动混合C</span><span class="cd">016371</span></td>
+              <td>¥48.68</td><td>16.95</td>
+              <td class="fall"><span class="sym">▼</span>−3.92%</td></tr>
+          <tr><td><span class="nm">南方纳斯达克100指数(QDII)C</span><span class="cd">016453</span></td>
+              <td>¥114.30</td><td>48.75</td>
+              <td class="rise"><span class="sym">▲</span>+3.65%</td></tr>
+        </tbody>
+      </table>
+      <div class="sum"><span>另有 2 只持仓金额 &lt; ¥60</span><span>展开全部 ›</span></div>
+    </div>
+
+    <!-- 市场卡 -->
+    <div>
+      <div class="card">
+        <h2>市场<span class="n">· 09-24 收盘</span></h2>
+        <div class="mrow"><span class="nm">沪深300</span><span class="px">4,439.14</span>
+          <span class="ch fall"><span class="sym">▼</span>−1.73%</span></div>
+        <div class="mrow"><span class="nm">中证500</span><span class="px">7,624.07</span>
+          <span class="ch fall"><span class="sym">▼</span>−2.15%</span></div>
+        <div class="mrow"><span class="nm">上证50</span><span class="px">2,842.74</span>
+          <span class="ch fall"><span class="sym">▼</span>−1.42%</span></div>
+      </div>
+
+      <div class="card">
+        <h2>温度<span class="n">· A 股权益估值分位</span></h2>
+        <div style="display:flex;align-items:baseline;gap:10px">
+          <span style="font-size:30px;font-weight:500;color:var(--warn)">68°</span>
+          <span style="color:var(--text-2);font-size:13.5px">偏热 · 减少买入</span>
+        </div>
+        <div class="bar"><i></i></div>
+        <div class="note">
+          PE 分位 72° · PB 分位 61° · 性价比 58°<br>
+          <span style="color:var(--warn)">⚠ 本温度仅适用 A 股权益</span>，对债券/QDII/黄金不适用。
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="note" style="margin-top:6px">
+    视觉稿 v1 · 配色与结构待确认。图中数字取自 2026-09-27 真实账本，结论文案为示意。
+  </div>
+
+</div>
+</body>
+</html>
