@@ -124,6 +124,32 @@ td .cd{color:var(--text-4);font-family:var(--mono);font-size:11.5px;margin-left:
 /* 符号：色盲硬约束 —— 涨跌不能只靠颜色 */
 .sym{font-size:10px;margin-right:3px}
 
+/* ---------- 数据链路（结论卡内折叠） ---------- */
+.chain{margin-top:14px;border-top:1px solid var(--line);padding-top:12px}
+.chain > summary{cursor:pointer;font-size:12.5px;color:var(--text-2);list-style:none}
+.chain > summary::-webkit-details-marker{display:none}
+.chain > summary::before{content:"› ";color:var(--text-3)}
+.chain[open] > summary::before{content:"⌄ "}
+.steps{display:grid;grid-template-columns:repeat(5,1fr);gap:1px;background:var(--line);
+       border:1px solid var(--line);border-radius:var(--r-md);overflow:hidden;margin-top:10px}
+.step{background:var(--card);padding:10px 12px}
+.step b{display:block;font-size:12px;color:var(--accent);font-weight:500;margin-bottom:4px}
+.step span{font-size:11.5px;color:var(--text-3);line-height:1.6;display:block}
+
+/* ---------- 持仓卡工具栏（筛选 + 排序） ---------- */
+.toolbar{display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;margin:-2px 0 10px}
+.seg{display:flex;gap:2px;background:var(--inset);padding:2px;border-radius:8px}
+.seg button{background:none;border:none;color:var(--text-3);font-size:12px;padding:4px 10px;
+            border-radius:6px;cursor:pointer;font-family:inherit}
+.seg button.on{background:var(--card);color:var(--text)}
+.seg button:hover{color:var(--text-2)}
+tr.hide{display:none}
+
+/* ---------- 市场分组 ---------- */
+.grp{font-size:11px;color:var(--text-4);letter-spacing:.06em;margin:12px 0 2px}
+.grp:first-of-type{margin-top:2px}
+.mrow .rel{font-size:11px;color:var(--text-4);margin-left:6px;font-weight:400}
+
 /* ---------- 响应式：手机 ---------- */
 @media (max-width:760px){
   body{padding:14px 12px 40px}
@@ -149,16 +175,28 @@ td .cd{color:var(--text-4);font-family:var(--mono);font-size:11.5px;margin-left:
   <!-- 结论卡：整屏最重要的东西放最上面 -->
   <div class="card lead">
     <h2>今天<span class="n">· 结论</span></h2>
-    <div class="verdict">不需要操作。仓位已达标，等温度回落。</div>
-    <div class="reason">
-      温度 <b>68°</b>（偏热）→ 建议权益仓位 <b>62%</b>，你当前 <b>61%</b>，差 1 个百分点，在容差内。
-      唯一接近触发的是中证500 联接——距你的加仓线还差 0.4pp。
-    </div>
+    <div class="verdict">不需要操作</div>
     <div class="acts">
-      <div class="act"><span class="k hold">不动</span><span class="d">不加仓：温度偏热（68°），加仓性价比低</span></div>
-      <div class="act"><span class="k hold">不动</span><span class="d">不减仓：无持仓触发止损线，最差的一只仅 −2.66%</span></div>
-      <div class="act"><span class="k watch">留意</span><span class="d">易方达中证500 联接回撤 −1.62%，若再跌 0.4pp 进入你的加仓区间</span></div>
+      <div class="act"><span class="k hold">不动</span><span class="d">不加仓：权益 61% 已在目标区间（62%±5pp）内，且温度偏热</span></div>
+      <div class="act"><span class="k hold">不动</span><span class="d">不减仓：无持仓触及止损线，最差的一只 −3.92%</span></div>
+      <div class="act"><span class="k watch">留意</span><span class="d">易方达中证500 联接距你的加仓线还差 0.4pp</span></div>
     </div>
+
+    <!-- 这条结论是怎么算出来的：对齐毕设要求「采集→清洗→特征→建模→评估」 -->
+    <details class="chain">
+      <summary>这条结论是怎么算出来的 · 数据链路</summary>
+      <div class="steps">
+        <div class="step"><b>采集</b><span>净值 2,290 万行 / 24,061 只<br>＋行情·估值·持仓·消息面</span></div>
+        <div class="step"><b>清洗</b><span>双源校验（严重差 0）<br>单位口径统一 · 样本不足剔除</span></div>
+        <div class="step"><b>特征</b><span>同类分位 6 组（n=644~3,544）<br>夏普/回撤/波动/索提诺/卡玛</span></div>
+        <div class="step"><b>建模</b><span>温度→目标仓位<br>＋用户约束 4 类 · ML 三模型 · GARCH 基线</span></div>
+        <div class="step"><b>评估</b><span>51 窗口样本外对打<br>α t=−1.26（不显著）· BH p=0.61</span></div>
+      </div>
+      <div class="note" style="margin-top:10px">
+        <b>如实声明</b>：这条链路目前<b>没有</b>证据能选出未来赢家（三次实证一致为负）。
+        所以今日结论以「温度 + 硬约束」给出，机器学习只承担<b>风险提示与分位定位</b>，不冒充预测。
+      </div>
+    </details>
   </div>
 
   <!-- KPI：只放四个，其余下沉到明细 -->
@@ -168,15 +206,11 @@ td .cd{color:var(--text-4);font-family:var(--mono);font-size:11.5px;margin-left:
     <div class="kpi"><div class="l">已实现</div><div class="v fall">−¥30.71</div><div class="s">34 笔 · 含赎回费 ¥7.21</div></div>
     <div class="kpi"><div class="l">年化 XIRR</div><div class="v fall">−24.69%</div><div class="s">资金加权 · 投入 ¥2,715.67</div></div>
   </div>
-  <div class="note" style="margin:8px 2px 14px">
-    XIRR 是<b>年化</b>口径：账面净亏 ¥21.89（−0.8%），年化数字大是因为大部分资金是近一个月才投入的。
-  </div>
-
   <!-- 收益曲线：核心视图 —— 回答「我跑赢了吗」 -->
   <div class="card">
     <div class="chead">
       <div>
-        <h2>组合收益<span class="n">· 资金加权（pnl ÷ 累计成本）</span></h2>
+        <h2>组合收益<span class="n">· 资金加权</span></h2>
         <div class="cval"><span class="rise"><span class="sym">▲</span>+0.20%</span>
           <span class="vs">跑赢沪深300 <b class="rise">3.50pp</b></span></div>
       </div>
@@ -188,7 +222,7 @@ td .cd{color:var(--text-4);font-family:var(--mono);font-size:11.5px;margin-left:
 
     <div class="legend">
       <span><i style="border-color:var(--rise)"></i><em>本组合</em></span>
-      <span><i style="border-color:#5c6673;border-top-style:dashed"></i><em>沪深300（同期、同起点归一）</em></span>
+      <span><i style="border-color:#9ba7b4;border-top-style:dashed;border-top-width:2px"></i><em>沪深300</em></span>
     </div>
 
     <!-- 真实数据：2026-08-26 ~ 2026-09-24，22 个交易日 -->
@@ -201,16 +235,14 @@ td .cd{color:var(--text-4);font-family:var(--mono);font-size:11.5px;margin-left:
             fill="#f4614d" opacity="0.09" stroke="none"/>
       <!-- 沪深300：虚线中性灰（基准是参照，不抢主角） -->
       <path d="M0.0 77.7 L47.6 54.1 L95.2 66.7 L142.9 57.2 L190.5 65.3 L238.1 103.3 L285.7 100.5 L333.3 103.2 L381.0 87.1 L428.6 96.8 L476.2 88.5 L523.8 103.0 L571.4 125.8 L619.0 143.8 L666.7 161.8 L714.3 143.7 L761.9 155.7 L809.5 127.5 L857.1 108.3 L904.8 105.3 L952.4 121.6 L1000.0 168.3"
-            fill="none" stroke="#5c6673" stroke-width="1.5" stroke-dasharray="5 4" stroke-linejoin="round"/>
+            fill="none" stroke="#9ba7b4" stroke-width="2" stroke-dasharray="6 4" stroke-linejoin="round"/>
       <!-- 本组合：涨红（终值为正，中国惯例） -->
       <path d="M0.0 79.9 L47.6 21.7 L95.2 42.6 L142.9 29.7 L190.5 64.5 L238.1 92.2 L285.7 61.5 L333.3 73.0 L381.0 65.6 L428.6 64.0 L476.2 68.3 L523.8 84.5 L571.4 102.4 L619.0 118.8 L666.7 130.6 L714.3 107.6 L761.9 97.7 L809.5 62.6 L857.1 25.3 L904.8 21.7 L952.4 35.4 L1000.0 72.2"
-            fill="none" stroke="#f4614d" stroke-width="1.8" stroke-linejoin="round" stroke-linecap="round"/>
+            fill="none" stroke="#f4614d" stroke-width="2.6" stroke-linejoin="round" stroke-linecap="round"/>
     </svg>
 
     <div class="cxn">
-      08-26 ~ 09-24 · 22 个交易日 · 起止 0.00%<br>
-      ⚠️ 口径：<b>资金加权</b>（pnl ÷ 累计成本），不是「基金净值涨跌」——后者不含份额舍入，两者约差 0.1%。<br>
-      ⚠️ 可绘区间受限于<b>当前在仓的起点</b>（08-22 首笔建仓）；已了结的 6~8 月交易未计入本曲线。
+      08-26 ~ 09-24 · 22 个交易日 · 起止 0.00%
     </div>
   </div>
 
@@ -218,29 +250,40 @@ td .cd{color:var(--text-4);font-family:var(--mono);font-size:11.5px;margin-left:
   <div class="cols">
     <!-- 明细卡：可折叠层级 -->
     <div class="card">
-      <h2>持仓<span class="n">· 按市值 · 共 9 只</span></h2>
+      <h2>持仓<span class="n" id="holdCount">· 共 9 只</span></h2>
+      <div class="toolbar">
+        <div class="seg" id="holdFilter">
+          <button class="on" data-f="all">全部</button>
+          <button data-f="win">盈利</button>
+          <button data-f="loss">亏损</button>
+        </div>
+        <div class="seg" id="holdSort">
+          <button class="on" data-s="mv">按市值</button>
+          <button data-s="ret">按收益率</button>
+        </div>
+      </div>
       <table>
         <thead><tr><th>基金</th><th>市值</th><th>份额</th><th>收益</th></tr></thead>
-        <tbody>
-          <tr><td><span class="nm">易方达中证500ETF联接C</span><span class="cd">007029</span></td>
+        <tbody id="holdBody">
+          <tr data-mv="122.97" data-ret="-1.62"><td><span class="nm">易方达中证500ETF联接C</span><span class="cd">007029</span></td>
               <td>¥122.97</td><td>66.88</td>
               <td class="fall"><span class="sym">▼</span>−1.62%</td></tr>
-          <tr><td><span class="nm">富国创业板人工智能ETF联接C</span><span class="cd">024663</span></td>
+          <tr data-mv="101.80" data-ret="1.34"><td><span class="nm">富国创业板人工智能ETF联接C</span><span class="cd">024663</span></td>
               <td>¥101.80</td><td>52.47</td>
               <td class="rise"><span class="sym">▲</span>+1.34%</td></tr>
-          <tr><td><span class="nm">嘉实上证科创板芯片ETF联接C</span><span class="cd">017470</span></td>
+          <tr data-mv="100.51" data-ret="1.03"><td><span class="nm">嘉实上证科创板芯片ETF联接C</span><span class="cd">017470</span></td>
               <td>¥100.51</td><td>35.60</td>
               <td class="rise"><span class="sym">▲</span>+1.03%</td></tr>
-          <tr><td><span class="nm">南方亚太精选ETF联接(QDII)C</span><span class="cd">021190</span></td>
+          <tr data-mv="100.37" data-ret="0.37"><td><span class="nm">南方亚太精选ETF联接(QDII)C</span><span class="cd">021190</span></td>
               <td>¥100.37</td><td>68.23</td>
               <td class="rise"><span class="sym">▲</span>+0.37%</td></tr>
-          <tr><td><span class="nm">南方上海金ETF联接C</span><span class="cd">018392</span></td>
+          <tr data-mv="153.94" data-ret="-2.05"><td><span class="nm">南方上海金ETF联接C</span><span class="cd">018392</span></td>
               <td>¥153.94</td><td>82.27</td>
               <td class="fall"><span class="sym">▼</span>−2.05%</td></tr>
-          <tr><td><span class="nm">信澳业绩驱动混合C</span><span class="cd">016371</span></td>
+          <tr data-mv="48.68" data-ret="-3.92"><td><span class="nm">信澳业绩驱动混合C</span><span class="cd">016371</span></td>
               <td>¥48.68</td><td>16.95</td>
               <td class="fall"><span class="sym">▼</span>−3.92%</td></tr>
-          <tr><td><span class="nm">南方纳斯达克100指数(QDII)C</span><span class="cd">016453</span></td>
+          <tr data-mv="114.30" data-ret="3.65"><td><span class="nm">南方纳斯达克100指数(QDII)C</span><span class="cd">016453</span></td>
               <td>¥114.30</td><td>48.75</td>
               <td class="rise"><span class="sym">▲</span>+3.65%</td></tr>
         </tbody>
@@ -251,13 +294,35 @@ td .cd{color:var(--text-4);font-family:var(--mono);font-size:11.5px;margin-left:
     <!-- 市场卡 -->
     <div>
       <div class="card">
-        <h2>市场<span class="n">· 09-24 收盘</span></h2>
-        <div class="mrow"><span class="nm">沪深300</span><span class="px">4,439.14</span>
-          <span class="ch fall"><span class="sym">▼</span>−1.73%</span></div>
-        <div class="mrow"><span class="nm">中证500</span><span class="px">7,624.07</span>
+        <h2>市场<span class="n">· 实时 · 东财</span></h2>
+        <div class="grp">A 股</div>
+        <div class="mrow"><span class="nm">沪深300</span><span class="px">4,343.63</span>
           <span class="ch fall"><span class="sym">▼</span>−2.15%</span></div>
-        <div class="mrow"><span class="nm">上证50</span><span class="px">2,842.74</span>
-          <span class="ch fall"><span class="sym">▼</span>−1.42%</span></div>
+        <div class="mrow"><span class="nm">中证500<span class="rel">持仓基准</span></span><span class="px">7,388.57</span>
+          <span class="ch fall"><span class="sym">▼</span>−3.09%</span></div>
+        <div class="mrow"><span class="nm">上证50</span><span class="px">2,804.45</span>
+          <span class="ch fall"><span class="sym">▼</span>−1.35%</span></div>
+        <div class="mrow"><span class="nm">创业板指<span class="rel">024663</span></span><span class="px">3,146.90</span>
+          <span class="ch fall"><span class="sym">▼</span>−4.32%</span></div>
+        <div class="mrow"><span class="nm">科创50<span class="rel">017470</span></span><span class="px">1,557.07</span>
+          <span class="ch fall"><span class="sym">▼</span>−4.00%</span></div>
+
+        <div class="grp">海外 · 商品</div>
+        <div class="mrow"><span class="nm">恒生指数<span class="rel">021190</span></span><span class="px">24,669.50</span>
+          <span class="ch rise"><span class="sym">▲</span>+0.65%</span></div>
+        <div class="mrow"><span class="nm">纳斯达克<span class="rel">016453</span></span><span class="px">27,068.72</span>
+          <span class="ch rise"><span class="sym">▲</span>+0.48%</span></div>
+        <div class="mrow"><span class="nm">标普500</span><span class="px">7,743.41</span>
+          <span class="ch rise"><span class="sym">▲</span>+0.51%</span></div>
+        <div class="mrow"><span class="nm">COMEX黄金<span class="rel">018392</span></span><span class="px">4,225.10</span>
+          <span class="ch fall"><span class="sym">▼</span>−2.22%</span></div>
+        <div class="mrow"><span class="nm">美元指数</span><span class="px">101.12</span>
+          <span class="ch rise"><span class="sym">▲</span>+0.09%</span></div>
+
+        <div class="note" style="margin-top:10px">
+          实测东财可抓 <b>16 个</b>标的（另有日经225 / 中证1000 / 上证指数 / 深证成指 / 北证50 / 黄金美元素价）。
+          这里<b>只放与你持仓相关的</b>，不放装饰性行情。数值为 09-28 盘中快照。
+        </div>
       </div>
 
       <div class="card">
@@ -276,9 +341,49 @@ td .cd{color:var(--text-4);font-family:var(--mono);font-size:11.5px;margin-left:
   </div>
 
   <div class="note" style="margin-top:6px">
-    视觉稿 v1 · 配色与结构待确认。图中数字取自 2026-09-27 真实账本，结论文案为示意。
+    视觉稿 v2 · 按 09-28 反馈改：市场块扩到 16 个标的可选、持仓加筛选/排序、
+    删掉 XIRR 与曲线口径说明、曲线加粗、结论卡改为展示「数据链路」。
   </div>
 
 </div>
+
+<script>
+/* 持仓卡：筛选（全部/盈利/亏损）＋ 排序（市值/收益率）—— 视觉稿内联实现，真前端会走组件 */
+(function () {
+  var body = document.getElementById('holdBody');
+  if (!body) return;
+  var rows = [].slice.call(body.querySelectorAll('tr'));
+  var f = 'all', s = 'mv';
+  var asc = false;                                  // 默认降序（大→小）
+  function apply() {
+    rows.forEach(function (tr) {
+      var ret = parseFloat(tr.dataset.ret || '0');
+      var show = (f === 'all') || (f === 'win' && ret > 0) || (f === 'loss' && ret < 0);
+      tr.classList.toggle('hide', !show);
+    });
+    var key = (s === 'mv') ? 'mv' : 'ret';
+    rows.slice().sort(function (a, b) {
+      var d = parseFloat(b.dataset[key]) - parseFloat(a.dataset[key]);
+      return asc ? -d : d;
+    }).forEach(function (tr) { body.appendChild(tr); });
+    var n = rows.filter(function (tr) { return !tr.classList.contains('hide'); }).length;
+    document.getElementById('holdCount').textContent = '· 显示 ' + n + ' / 共 9 只';
+  }
+  function bind(id, attr, set) {
+    var el = document.getElementById(id);
+    if (!el) return;
+    el.addEventListener('click', function (e) {
+      var b = e.target.closest('button');
+      if (!b) return;
+      set(b.dataset[attr]);
+      [].forEach.call(el.querySelectorAll('button'), function (x) { x.classList.toggle('on', x === b); });
+      apply();
+    });
+  }
+  bind('holdFilter', 'f', function (v) { f = v; });
+  bind('holdSort', 's', function (v) { s = v; });
+  apply();
+})();
+</script>
 </body>
 </html>
