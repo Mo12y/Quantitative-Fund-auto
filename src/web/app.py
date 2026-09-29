@@ -11,7 +11,7 @@ os.environ.setdefault("QFA_MARKET_LIVE", "0")
 from flask import Flask, jsonify, render_template, request
 from flask.json.provider import DefaultJSONProvider
 from src.data.database import Database
-from src.analysis.fund_scorer import FundScreener
+from src.analysis.fund_scorer import FundScreener, type_bucket
 from src.analysis.thermometer import MarketThermometer
 from src.analysis.portfolio import PortfolioTracker
 from src.analysis.dca import DcaManager
@@ -23,6 +23,7 @@ from src.analysis.investment_plan import get_plan, get_progress, ensure_seed
 from src.analysis import fund_boards
 from src.analysis import peer_percentile
 from src.analysis import user_constraint, user_profile
+from src.analysis import nav_series, nav_metrics
 from src.analysis import portfolio_overlap
 
 app = Flask(__name__)
@@ -471,6 +472,220 @@ def _with_board_constraints(data):
     boards = [dict(b, funds=[by_code.get(str(f.get("code")), f) for f in (b.get("funds") or [])])
               for b in data["boards"]]
     return dict(data, boards=boards, constraint_review=review)
+
+
+# ══════════════════════════════════════════════════════════════════════
+# 数据链路下钻（/api/explain）—— 结论卡那五格，点开每一格都是**真实产物**
+#
+# 为什么要有这个端点：用户是**真金白银在实盘**，不是拿虚拟样本做演示 —— 所以
+# 「采集 → 清洗 → 特征 → 建模 → 评估」不能只是文案，每一格都必须能指回
+# **账户/库里的具体数字或文件**（哪张表多少行、哪只基金哪一天、哪个脚本哪份报告）。
+#
+# 纪律：本端点**业务只读**（不写账本/行情等业务表、不联网）—— 唯一例外是
+# `_cached_get` 的缓存层会**回填 SQLite 快照**（那是 cache 机制，不是业务写）；
+# 联网类核验（如双源校验）如实标 `available=False` + 原因，**不拿旧值冒充新值**；
+# 策略层的负结论**如实引用文档口径**并写明来源，不与账户的真实收益混为一谈。
+# ══════════════════════════════════════════════════════════════════════
+EXPLAIN_TTL = 1800.0
+
+
+def _explain_holdings(db, summary) -> list:
+    """持仓（按市值降序、**按基金去重**）—— 结构以 `get_portfolio_summary()` 实际返回为准：
+    `holdings_detail`（**不是** `holdings`：那是 `_portfolio_payload` 归一化后的键）。
+    同一只基金可能有多条**批次记录**（小额定投/补仓），这里把多批次的市值**合并**成一行
+    （smoke 实测 018392 出现两次 → 会误导"你有两只黄金"）。"""
+    agg: dict = {}
+    for h in ((summary or {}).get("holdings_detail") or []):
+        code = str(h.get("fund_code") or "")
+        v = h.get("current_value")
+        if v is None and h.get("shares"):
+            nav = db.get_latest_fund_nav(h.get("fund_code")) or {}
+            v = float(h.get("shares") or 0) * float(nav.get("unit_nav") or 0)
+        agg[code] = agg.get(code, {"code": code, "name": h.get("fund_name") or "", "value": 0.0})
+        agg[code]["value"] += float(v or 0)
+    out = sorted(agg.values(), key=lambda x: -x["value"])
+    return [{"code": x["code"], "name": x["name"], "value": round(x["value"], 2)} for x in out]
+
+
+def _explain_collect(db, holds) -> dict:
+    """采集：这一格回答「你的数据是哪来的、新到什么程度」"""
+    c = db.conn.cursor()
+    total = c.execute("SELECT COUNT(*) FROM fund_nav").fetchone()[0]
+    funds = c.execute("SELECT COUNT(DISTINCT fund_code) FROM fund_nav").fetchone()[0]
+    last = c.execute("SELECT MAX(nav_date) FROM fund_nav").fetchone()[0]
+    rows = []
+    for h in holds[:8]:
+        r = c.execute("SELECT COUNT(*), MIN(nav_date), MAX(nav_date) FROM fund_nav WHERE fund_code=?",
+                      (h["code"],)).fetchone()
+        rows.append({"label": "%s %s" % (h["code"], h["name"]),
+                     "value": "%s 行 · %s ~ %s" % (f"{r[0]:,}", r[1], r[2]),
+                     "tone": "flat"})
+    val_at = c.execute("SELECT MAX(updated_at) FROM index_valuation").fetchone()[0]
+    hl = c.execute("SELECT COUNT(*) FROM holdings").fetchone()[0]
+    tx = c.execute("SELECT COUNT(*) FROM transactions").fetchone()[0]
+    return {"key": "collect", "title": "采集",
+            "headline": "净值 %s 行 · %s 只 · 最新 %s" % (f"{total:,}", f"{funds:,}", last),
+            "rows": rows,
+            "artifacts": [{"name": "fund_nav", "detail": "本库主表 · 逐只如上"},
+                          {"name": "index_valuation", "detail": "估值快照 · 截至 %s" % val_at},
+                          {"name": "holdings / transactions",
+                           "detail": "你的账本 %d 笔持仓 · %d 笔流水" % (hl, tx)}]}
+
+
+def _explain_clean(db, holds) -> dict:
+    """清洗：这一格回答「数据可信度」——做**本地可验证**的自检（联网双源校验按需另跑）"""
+    c = db.conn.cursor()
+    rows = []
+    for h in holds[:8]:
+        r = c.execute("""SELECT COUNT(*),
+                                SUM(CASE WHEN unit_nav IS NULL AND acc_nav IS NULL THEN 1 ELSE 0 END),
+                                SUM(CASE WHEN COALESCE(acc_nav, unit_nav) <= 0 THEN 1 ELSE 0 END),
+                                COUNT(DISTINCT nav_date)
+                         FROM fund_nav WHERE fund_code=?""", (h["code"],)).fetchone()
+        n, nulls, zeros, distinct = r[0], r[1] or 0, r[2] or 0, r[3] or 0
+        dup = n - distinct
+        bad = nulls + zeros + dup
+        rows.append({"label": "%s %s" % (h["code"], h["name"]),
+                     "value": ("干净（%s 天）" % f"{n:,}") if bad == 0
+                              else "异常 %d 处（空 %d · 非正 %d · 重复日期 %d）" % (bad, nulls, zeros, dup),
+                     "tone": "flat" if bad == 0 else "fall"})
+    big = c.execute("SELECT COUNT(*) FROM fund_info WHERE fund_size > 1000").fetchone()[0]
+    return {"key": "clean", "title": "清洗",
+            "headline": "本地自检：口径与完整性 · 巨值异常 %d 条（万元/亿元事故后应为 0）" % big,
+            "rows": rows,
+            "artifacts": [{"name": "scripts/verify_nav_dual_source.py",
+                           "detail": "双源校验（联网·按需跑）—— 上次实测 016453/007029 严重差 0"},
+                          {"name": "scripts/check_fund_size_scale.py",
+                           "detail": "规模单位自检 · 当前 >1000 亿 = %d 条" % big}]}
+
+
+def _explain_feature(db, holds) -> dict:
+    """特征：这一格回答「你的每只基金在同类里排第几」"""
+    cache = peer_percentile.load_cache()
+    spans = _nav_spans([h["code"] for h in holds])
+    rows = []
+    for h in holds[:8]:
+        info = db.get_fund_info(h["code"]) or {}
+        ft = info.get("fund_type") or ""
+        rec = db.conn.execute(
+            "SELECT nav_date, %s AS v FROM fund_nav WHERE fund_code=? "
+            "AND nav_date >= date('now','localtime','-1095 days') ORDER BY nav_date"
+            % nav_series.valuation_nav_sql(), (h["code"],)).fetchall()
+        vals = [float(x[1]) for x in rec if x[1] is not None]
+        dates = [str(x[0]) for x in rec if x[1] is not None]
+        if not vals:
+            rows.append({"label": "%s %s" % (h["code"], h["name"]), "value": "无净值 → 不评估", "tone": "flat"})
+            continue
+        m = nav_metrics.compute(vals, dates)
+        pb = _peer_block(cache, h["code"], ft, m, spans.get(h["code"]) or {})
+        p = (pb or {}).get("percentiles") or {}
+        seg = " · ".join("%s P%s" % (k, round(v)) for k, v in
+                         (("夏普", p.get("sharpe")), ("回撤", p.get("max_drawdown_1y")),
+                          ("年化", p.get("annual_return"))) if v is not None)
+        rows.append({"label": "%s %s" % (h["code"], h["name"]),
+                     "value": "%s · 组内 %s 只 · %s" % ((pb or {}).get("group") or ft or "—",
+                                                        f"{(pb or {}).get('group_n') or 0:,}", seg or "样本不足"),
+                     "tone": "flat"})
+    return {"key": "feature", "title": "特征",
+            "headline": "同类分位（不是全市场排名）· 6 组 · 组内 n=644~3,544",
+            "rows": rows,
+            "artifacts": [{"name": "data/peer_distributions.json",
+                           "detail": "参照系分位网格（as_of 见文件）"},
+                          {"name": "src/analysis/nav_metrics.py",
+                           "detail": "夏普/回撤/波动/索提诺/卡玛（3 年窗口 · 口径见模块 docstring）"}]}
+
+
+def _explain_model(db, holds, temp) -> dict:
+    """建模：这一格回答「今天这条结论由什么规则触发」——键名以 thermometer 实际返回为准"""
+    t = temp or {}
+    rows = []
+    if t.get("temperature") is not None:
+        rows.append({"label": "温度", "value": "%s°（%s）→ 目标权益仓位 %s%%"
+                     % (round(t.get("temperature")), t.get("level_desc") or t.get("level") or "—",
+                        round(t.get("target_equity_pct")) if t.get("target_equity_pct") is not None else "—"),
+                     "tone": "flat"})
+        if t.get("scope"):
+            rows.append({"label": "适用边界", "value": str(t.get("scope"))[:80], "tone": "flat"})
+    try:
+        summary = PortfolioTracker(db).get_portfolio_summary()
+        alloc = summary.get("asset_allocation") or {}
+        # 权益占比按**口径 SSOT**（fund_scorer.type_bucket）归类，不自己写关键词
+        eq = sum(float(v or 0) for k, v in alloc.items() if type_bucket(k) == "equity")
+        if alloc:
+            rows.append({"label": "你当前权益",
+                         "value": "%.1f%%（SSOT 口径 `type_bucket`：QDII海外/指数型-其他[含黄金]按权益归类；"
+                                  "分类型 %s）"
+                                  % (eq, "、".join("%s %.1f%%" % (k, v) for k, v in alloc.items())),
+                         "tone": "flat"})
+    except Exception as e:
+        rows.append({"label": "你当前权益", "value": "算不了：%s" % str(e)[:60], "tone": "flat"})
+    kept, review = _apply_user_constraints(db, [{"code": h["code"], "name": h["name"]} for h in holds])
+    cr = review or {}
+    rows.append({"label": "用户约束", "value": "%d 条生效：%s" % (
+        len(cr.get("applied") or []),
+        "；".join(a.get("description") or "" for a in (cr.get("applied") or [])) or "无（画像为空）"),
+        "tone": "flat"})
+    return {"key": "model", "title": "建模",
+            "headline": "温度 → 目标仓位；用户约束 4 类；ML 三模型 + GARCH 基线（仅作风险提示）",
+            "rows": rows,
+            "artifacts": [{"name": "src/analysis/thermometer.py",
+                           "detail": "三因子温度（PE/PB/ERP 分位，读 index_valuation）"},
+                          {"name": "src/analysis/user_constraint.py",
+                           "detail": "B 层约束（持仓重叠/类型/风险/相关性）"},
+                          {"name": "config/user_profile.local.yaml", "detail": "你的画像（本地·不进版本库）"}]}
+
+
+def _explain_eval(db, summary, holds) -> dict:
+    """评估：这一格分两半 —— **你的真实战绩** + **策略的诚实结论**（不许混在一起）"""
+    rows = []
+    s = summary or {}
+    r = s.get("realized") or {}
+    # 已实现 = 买卖价差 + 分红（设计稿 §6/§7：两者分开存，展示相加才是总已实现）
+    realized_total = float(r.get("total_pnl") or 0) + float(r.get("dividend_total") or 0)
+    xirr = None
+    try:
+        xirr = (PortfolioTracker(db).get_xirr() or {}).get("xirr")
+    except Exception:
+        pass
+    rows.append({"label": "你的账面（真金白银）",
+                 "value": "市值 ¥%s · 投入 ¥%s · 未实现 %+.2f · 已实现 %+.2f（%d 笔卖出）"
+                          % (f"{float(s.get('total_market_value') or 0):,.2f}",
+                             f"{float(s.get('total_invested') or 0):,.2f}",
+                             float(s.get("total_pnl") or 0), realized_total,
+                             int(r.get("count") or 0)),
+                 "tone": "flat"})
+    if xirr is not None:
+        rows.append({"label": "资金加权年化", "value": "XIRR %+.2f%%" % (float(xirr) * 100),
+                     "tone": "fall" if float(xirr) < 0 else "rise"})
+    rows.append({"label": "策略样本外（51 窗口）",
+                 "value": "S1 − 等权 = −0.09pp · α t=−1.26（不显著）· BH p=0.61 → 无证据优于等权持有",
+                 "tone": "flat"})
+    return {"key": "eval", "title": "评估",
+            "headline": "结论：没有证据能选出未来赢家 —— 所以上面给的是「温度+硬约束」，不是预测",
+            "rows": rows,
+            "artifacts": [{"name": "docs/基金推荐系统_ML可行性研究.md",
+                           "detail": "§2.1b 三次实证与局限（幸存者偏差/多重检验）"},
+                          {"name": "src/analysis/oos_validate.py",
+                           "detail": "CLI: python src/main.py oos（可复现）"}]}
+
+
+def _all_explain() -> dict:
+    """数据链路下钻（缓存 30 分钟；只读）"""
+    try:
+        db = get_db()
+        try:
+            summary = PortfolioTracker(db).get_portfolio_summary()
+            holds = _explain_holdings(db, summary)
+            temp, _ = _cached_get("temp", _all_temp)
+            stages = [_explain_collect(db, holds), _explain_clean(db, holds),
+                      _explain_feature(db, holds), _explain_model(db, holds, temp),
+                      _explain_eval(db, summary, holds)]
+        finally:
+            db.close()
+        return {"asof": _today(), "holdings_n": len(holds),
+                "account": _portfolio_payload(summary), "stages": stages}
+    except Exception as e:
+        return {"error": "链路下钻失败：%s" % str(e)[:120], "stages": []}
 
 
 def _slot_ready(key: str) -> bool:
@@ -1647,6 +1862,14 @@ def api_funds_board():
     data, source = _cached_get(key, lambda: _compute_board_pool(size, limit),
                                ttl=600.0, fresh=fresh)
     return jsonify({"ok": True, "data": _with_board_constraints(data), "source": source})
+
+
+@app.route("/api/explain")
+def api_explain():
+    """数据链路下钻：结论卡那五格 → 每格指回账户/库里的**真实产物**（只读，缓存 30 分钟）"""
+    fresh = request.args.get("fresh") == "1"
+    data, source = _cached_get("explain", _all_explain, ttl=EXPLAIN_TTL, fresh=fresh)
+    return jsonify({"ok": True, "data": data, "source": source})
 
 
 def _compute_board_pool(size: int, limit: int) -> dict:
