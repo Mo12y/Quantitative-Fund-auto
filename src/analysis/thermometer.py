@@ -38,6 +38,38 @@ TEMPERATURE_SCOPE = {
              "那几类需要各自的口径：10Y 国债收益率分位 / 海外指数估值+汇率 / 实际利率。"),
 }
 
+#: 判断 `fund_type` 是否落在温度适用范围时的**排除词**（与 `TEMPERATURE_SCOPE.not_applicable_to` 对应）。
+#: 判定顺序是「**先排除、再看权益**」—— 因为 `指数型-海外股票` 同时含「指数」（权益词）
+#: 与「海外」（排除词），顺序反了就会把 QDII 当成 A 股权益。
+#:
+#: ⚠️ `其他` / `固收` / `偏债` 也在排除列：这些类型**没有可判定为 A 股权益的依据**，
+#: 按本项目一贯做法「算不了就不算」（宁可分到"本信号不覆盖"，也不猜）。
+TEMP_NOT_APPLICABLE_KEYWORDS = (
+    "QDII", "海外", "REITs", "Reits", "商品", "黄金",
+    "固收", "其他", "偏债", "债券", "货币", "FOF",
+)
+
+#: 权益候选词（与 `fund_scorer.type_bucket` 同源，但**只在通过排除检查后才使用**）
+TEMP_EQUITY_KEYWORDS = ("股票", "混合", "指数")
+
+
+def is_temp_applicable(fund_type: str) -> bool:
+    """该 `fund_type` 是否属于温度**适用**范围（A 股权益）？
+
+    ⚠️ **不要用 `type_bucket` 代替它**（2026-09-28 实测踩到）：
+    `type_bucket` 是**资产类别** SSOT，它把 `指数型-海外股票`（QDII 联接）与
+    `指数型-其他`（上海金 ETF 联接）都归入 equity —— 那对「同类分位 / 回撤对比」是对的，
+    但温度是 **A 股估值**信号，`TEMPERATURE_SCOPE` 明确声明对 QDII-海外 / 商品-黄金**不适用**。
+    拿"含 QDII+黄金的权益占比"去比"温度给的目标仓位"是**两个不同源的数相比**：
+    实测同一账户 99.9%（含 QDII/黄金）vs 45.0%（仅 A 股权益）→ 减仓金额差 6.5 倍。
+    """
+    t = str(fund_type or "")
+    if not t:
+        return False                       # 类型未知 → 不猜成适用
+    if any(kw in t for kw in TEMP_NOT_APPLICABLE_KEYWORDS):
+        return False
+    return any(kw in t for kw in TEMP_EQUITY_KEYWORDS)
+
 
 class MarketThermometer:
     """市场温度计 v2.0"""

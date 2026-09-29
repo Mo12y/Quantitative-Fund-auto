@@ -15,7 +15,7 @@ import pandas as pd
 from dataclasses import dataclass
 
 from ..data.database import Database
-from .thermometer import MarketThermometer
+from .thermometer import MarketThermometer, is_temp_applicable
 from .fund_scorer import FundScreener, type_bucket
 
 
@@ -83,17 +83,30 @@ class RebalanceAdvisor:
             total_capital = portfolio_value + float(cash_reserve or 0)
         cash = max(0.0, total_capital - portfolio_value)
 
-        # 权益占比用**市值**（与持仓卡口径统一；旧版用成本 buy_amount，浮盈浮亏不进判断）
-        # 口径走 SSOT `type_bucket`：它与 `reporter` 的"当前权益占比"、`strategy_engine`
-        # 的权益仓位是**同一件事**，全项目只此一个定义（§8.4，2026-09-27 统一；
-        # 原实现内联了 `{"股票型","混合型","指数型","QDII"}` + 冗余的 `or "股票" in ftype`）。
-        equity_mv = 0.0
+        # 权益占比用**市值**，且**只算温度适用范围之内的 A 股权益**。
+        #
+        # 为什么不是 `type_bucket`（2026-09-28 实测踩到；用户选「改成同类相比」）：
+        #   `type_bucket` 是**资产类别** SSOT，它把 `指数型-海外股票`（QDII 联接）与
+        #   `指数型-其他`（上海金 ETF 联接）也算 equity —— 用于同类分位/回撤对比是对的；
+        #   但 `target_equity_pct` 来自**温度**，而 `TEMPERATURE_SCOPE` 明确声明温度对
+        #   「QDII-海外 / 商品-黄金 / 债券 / 货币 / Reits」**不适用**。
+        #   拿含 QDII+黄金的占比去比温度目标 = 两个不同源的数相比，实测该账户
+        #   99.9%（含 QDII/黄金）vs 45.0%（仅 A 股权益）→ 减仓金额 ¥555 vs ¥85（差 6.5 倍），
+        #   而且是"拿 A 股估值信号去卖纳指和黄金"。
+        equity_mv = non_applicable_mv = 0.0
         for h in holdings:
             info = self._get_fund_info(h["fund_code"])
             ftype = info.get("fund_type", "") if info else ""
-            if type_bucket(ftype) == "equity":
-                equity_mv += self._holding_value(h)
+            v = self._holding_value(h)
+            if is_temp_applicable(ftype):
+                equity_mv += v
+            elif type_bucket(ftype) == "equity":
+                non_applicable_mv += v      # 权益类但温度不覆盖（QDII / 黄金 / 其他）
         current_equity_pct = (equity_mv / total_capital * 100) if total_capital > 0 else 0
+        non_applicable_pct = (non_applicable_mv / total_capital * 100) if total_capital > 0 else 0
+        scope_note = ("口径：权益占比只算温度**适用**的 A 股权益（股票/混合/境内指数及其联接）；"
+                      "另有 %.1f%% 属 QDII-海外 / 商品 / 其他，温度对它们不适用，**不参与**本次判断。"
+                      % non_applicable_pct)
 
         target_equity_pct = temp["target_equity_pct"]
 
@@ -104,6 +117,8 @@ class RebalanceAdvisor:
             return {
                 "current_equity_pct": round(current_equity_pct, 1),
                 "target_equity_pct": None,
+                "non_applicable_pct": round(non_applicable_pct, 1),
+                "scope_note": scope_note,
                 "total_capital": round(total_capital, 2),
                 "portfolio_value": round(portfolio_value, 2),
                 "cash_available": round(cash, 2),
@@ -132,6 +147,8 @@ class RebalanceAdvisor:
         return {
             "current_equity_pct": round(current_equity_pct, 1),
             "target_equity_pct": target_equity_pct,
+            "non_applicable_pct": round(non_applicable_pct, 1),
+            "scope_note": scope_note,
             "total_capital": total_capital,
             "portfolio_value": portfolio_value,
             "cash_available": cash,
@@ -184,6 +201,9 @@ class RebalanceAdvisor:
                 "current_value": e["current_value"],
                 "pnl_pct": (e["current_value"] - bought) / bought * 100 if bought else 0,
                 "lots": e["lots"],
+                # 温度是否覆盖该标的：`_build_reduce_instructions` 只从**覆盖**的标的减仓 ——
+                # 否则就变成"拿 A 股估值信号去卖纳指/黄金"（见 analyze() 里的口径注释）
+                "temp_applicable": is_temp_applicable((info or {}).get("fund_type", "")),
             })
 
         risk_order = {"🔴 高风险": 0, "🟡 注意": 1, "🟢 稳健": 2, "未知": 3}
@@ -216,6 +236,11 @@ class RebalanceAdvisor:
         for fr in fund_risks:
             if sell_needed <= 5:  # 少于5元就不调了
                 break
+
+            # 只从温度**覆盖**的标的减仓（QDII-海外 / 商品-黄金 / 债券等不参与）——
+            # 目标仓位是温度给的，它只对 A 股权益有效（见 analyze() 口径注释）
+            if not fr.get("temp_applicable", True):
+                continue
 
             h = fr["holding"]
             risk_label = fr["risk"].get("risk_label", "未知")
@@ -273,7 +298,8 @@ class RebalanceAdvisor:
                 amount=round(sell_needed, 0),
                 current_pct=round(current_eq, 1),
                 target_pct=target_eq,
-                reason=f"还需减仓约{sell_needed:.0f}元以达到目标权益仓位{target_eq}%",
+                reason=(f"还需减仓约{sell_needed:.0f}元以达到目标权益仓位{target_eq}%（**仅 A 股权益**口径）；"
+                        "温度不覆盖的标的（QDII-海外/黄金等）不在此列——如仍想减，需自行决定减哪只"),
                 priority=3,
             ))
 
@@ -335,6 +361,10 @@ class RebalanceAdvisor:
         for r in rows:
             label = r.get("risk_label") or r.get("risk") or ""
             if "稳健" not in str(label):            # 只挑 🟢 稳健（"稳健"二字足够稳）
+                continue
+            # 温度口径一致性：加仓的目标是「A 股权益仓位」，就只能买温度**覆盖**的标的
+            # （否则会"用 A 股估值信号提示你加仓 QDII/黄金"，与减仓侧的过滤自相矛盾）
+            if not is_temp_applicable(r.get("type") or r.get("fund_type") or ""):
                 continue
             code = r.get("fund_code") or r.get("code")
             if not code:

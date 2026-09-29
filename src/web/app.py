@@ -934,6 +934,11 @@ def _all_rebalance():
             "degraded": degraded,
             "constraint_review": constraint_review,
             "constraint_blocked_buy": blocked,
+            # 口径透明化：权益占比只算温度**适用**的 A 股权益，另有 non_applicable_pct
+            # 属 QDII/黄金等（温度不覆盖、不参与判断）—— 前端必须能说出这一点，
+            # 否则用户看到 45% 会以为漏算了纳指和黄金。
+            "non_applicable_pct": rb.get("non_applicable_pct"),
+            "scope_note": rb.get("scope_note"),
         }
     except Exception as e:
         return {"error": str(e), "instructions": [], "summary": {"verdict": "分析失败"}}

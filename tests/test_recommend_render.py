@@ -79,3 +79,16 @@ def test_rebalance_states_blocked_buy_explicitly():
     assert "rbConstraintBlock(RB)" in body, "买入候选的约束明细要可见（可折叠）"
     blk = _fn_body("rbConstraintBlock")
     assert "constraintReviewHTML(cr)" in blk, "复用同一套三问渲染（口径一致）"
+
+
+def test_rebalance_shows_scope_note():
+    """权益占比口径必须写在界面上（2026-09-28）：只算温度适用的 A 股权益，
+    QDII/黄金不计入 —— 不写清，用户会以为漏算了纳指和黄金（实测占 55%）。"""
+    assert "RB.scope_note" in _fn_body("rebalanceHTML"), "调仓卡要显示口径说明"
+
+
+def test_alloc_card_declares_a_share_scope():
+    """总览「仓位建议」卡的「权益 %」不是"全部资产的权益比例"，必须注明口径。"""
+    body = _fn_body("ovAllocCard")
+    assert "A 股权益" in body, "仓位建议卡必须说明权益指 A 股权益"
+    assert "温度对 QDII" in body or "不适用" in body, "要点明温度不覆盖哪几类"

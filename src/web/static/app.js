@@ -659,6 +659,10 @@ function ovAllocCard(T,P,PL){
   }else{
     inner+=`<div class="stat-line u-mt12">暂无持仓 · 金额按投资计划总本金测算</div>`;
   }
+  // 口径透明（2026-09-28）：这个「权益 %」是**温度适用**的 A 股权益目标，
+  // 不是"全部资产的权益比例" —— QDII-海外/黄金/债券各自另有口径（§8.6）
+  inner+=`<div class="qtag u-mt8">口径：本建议的「权益」指 <b>A 股权益</b>（股票/混合/境内指数及其联接）。
+    温度对 QDII-海外、商品/黄金、债券、货币不适用 —— 那几类需各用其口径（10Y 国债分位 / 海外估值+汇率 / 实际利率），本卡不覆盖。</div>`;
   return card('仓位建议','',inner);
 }
 function allocChips(alloc){
@@ -895,6 +899,11 @@ function rebalanceHTML(RB,P){
   const col=RB.need_rebalance?'var(--yellow)':'var(--green)';
   let h=`<div style="font-size:15px;font-weight:700;margin-bottom:6px;color:${col}">${esc(summary.verdict||'')}</div>
     <div class="stat-line">${esc(summary.detail||'')}</div>`;
+  // 口径透明（2026-09-28）：权益占比**只算温度适用的 A 股权益**，QDII/黄金等不计入 ——
+  // 不写清这一点，用户会以为系统漏算了纳指和黄金（实测这两部分占 55%）
+  if(RB.scope_note){
+    h+=`<div class="qtag u-mt8">${esc(RB.scope_note)}</div>`;
+  }
   // 总资金口径缺现金弹药 → 仓位被高估，必须显式提示（不静默填 0）
   if((RB.degraded||[]).includes('cash_reserve')){
     h+=`<div class="alert alert-info" style="border-left-color:var(--warn)">

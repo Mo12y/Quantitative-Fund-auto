@@ -99,9 +99,9 @@ class TestPoolInjection:
                 return None
 
         a.screener = _S()
-        a._pool = [{"code": "000001", "name": "甲稳健", "risk": "🟢 稳健"},
-                   {"code": "000002", "name": "乙高风险", "risk": "🔴 高风险"},
-                   {"code": "000003", "name": "丙稳健", "risk": "🟢 稳健"}]
+        a._pool = [{"code": "000001", "name": "甲稳健", "risk": "🟢 稳健", "type": "混合型-偏股"},
+                   {"code": "000002", "name": "乙高风险", "risk": "🔴 高风险", "type": "股票型"},
+                   {"code": "000003", "name": "丙稳健", "risk": "🟢 稳健", "type": "指数型-股票"}]
         out = a._pick_steady_candidates(10)
         assert [x["fund_code"] for x in out] == ["000001", "000003"], out
         assert out[0]["fund_name"] == "甲稳健"
@@ -111,10 +111,21 @@ class TestPoolInjection:
         """取前 n 条再过滤 —— 与旧代码 `screen_funds(max_results=n)` 后过滤等价。"""
         a = self._advisor_without_init()
         a.screener = None
-        a._pool = [{"code": "C%02d" % i, "name": "x", "risk": "🔴 高风险"} for i in range(5)] \
-                  + [{"code": "GOOD", "name": "y", "risk": "🟢 稳健"}]
+        a._pool = [{"code": "C%02d" % i, "name": "x", "risk": "🔴 高风险", "type": "股票型"}
+                   for i in range(5)] \
+                  + [{"code": "GOOD", "name": "y", "risk": "🟢 稳健", "type": "股票型"}]
         assert a._pick_steady_candidates(5) == []          # 前 5 条里没有稳健 → 空
         assert [x["fund_code"] for x in a._pick_steady_candidates(10)] == ["GOOD"]
+
+    def test_pool_candidate_outside_temp_scope_is_skipped(self):
+        """温度不覆盖的标的（QDII-海外/黄金）**不得**成为加仓候选 ——
+        否则就是"用 A 股估值信号提示你加仓纳指/黄金"，与减仓侧过滤自相矛盾。"""
+        a = self._advisor_without_init()
+        a.screener = None
+        a._pool = [{"code": "QDII1", "name": "纳指联接", "risk": "🟢 稳健", "type": "指数型-海外股票"},
+                   {"code": "GOLD1", "name": "上海金联接", "risk": "🟢 稳健", "type": "指数型-其他"},
+                   {"code": "A500", "name": "境内指数", "risk": "🟢 稳健", "type": "指数型-股票"}]
+        assert [x["fund_code"] for x in a._pick_steady_candidates(10)] == ["A500"]
 
     def test_fallback_without_pool_still_calls_screener(self):
         """pool=None（CLI / 单测）→ 保留旧路径，不得回归。"""
@@ -126,7 +137,7 @@ class TestPoolInjection:
             def screen_funds(self, max_results=10):
                 calls.append(max_results)
                 return pd.DataFrame([{"fund_code": "000009", "fund_name": "丙",
-                                      "risk_label": "🟢 稳健"}])
+                                      "risk_label": "🟢 稳健", "fund_type": "股票型"}])
 
         a.screener = _S()
         a._pool = None
@@ -146,7 +157,8 @@ class TestPoolInjection:
                 return None
 
         a.screener = _S()
-        a._pool = [{"code": "016371", "name": "信澳业绩驱动混合C", "risk": "🟢 稳健"}]
+        a._pool = [{"code": "016371", "name": "信澳业绩驱动混合C", "risk": "🟢 稳健",
+                    "type": "混合型-偏股"}]
         ins = a._build_increase_instructions(gap_amount=200.0, total_cap=1000.0,
                                             temp={"temperature": 56.3},
                                             current_eq=28.8, target_eq=40.0)
