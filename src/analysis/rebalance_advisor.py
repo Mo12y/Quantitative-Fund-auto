@@ -9,6 +9,8 @@
   - 调仓后的预期风险变化
 """
 
+import math
+
 import pandas as pd
 from dataclasses import dataclass
 
@@ -145,24 +147,43 @@ class RebalanceAdvisor:
     # =================================================================
 
     def _assess_holdings(self, holdings: list) -> list:
-        """逐只持仓做风险评估并排序：高风险+亏损优先处理"""
-        fund_risks = []
+        """逐只**基金**做风险评估并排序：高风险+亏损优先处理 —— **按基金聚合，不按批次**。
+
+        ⚠️ 为什么必须聚合（2026-09-28 实测踩到）：`get_current_holdings()` 返回的是
+        **批次**行，不是基金行 —— 用户 7 只基金有 **29 个批次**（016453 一只就有 21 个
+        小额定投批次）。旧实现把每个批次当独立持仓，后果是：
+          ① 同一只基金输出 21 条「卖出 ¥10」，指令噪声淹没结论；
+          ② 叠加起卖下限 `max(sell_amount, 10)` 后**单批次被要求卖出超过自身市值的金额**
+             （实测 2 个批次：市值 9.99 / 9.92 → 指令 ¥10.00）；
+          ③ 30 条指令合计 **¥1108 > 账户总市值 ¥854.51**（卖出额超过整个账户）。
+        聚合后：`current_value` = 该基金各批次市值之和，`pnl_pct` = 基金级盈亏率。
+
+        同时保留每个批次的 `{days_held, value}`（`lots`），供赎回费的**先进先出**判定
+        （见 `_sell_reaches_young_lots`）—— 聚合掉批次但**不丢**批次信息。
+        """
+        by_fund: dict = {}
         for h in holdings:
-            info = self._get_fund_info(h["fund_code"])
-            result = self.screener._screen_single_fund(h["fund_code"], info) if info else None
+            code = h["fund_code"]
+            v = self._holding_value(h)
+            e = by_fund.setdefault(code, {"holding": h, "lots": [],
+                                          "current_value": 0.0, "bought": 0.0})
+            e["lots"].append({"days_held": self._days_held(h["buy_date"]), "value": v})
+            e["current_value"] += v
+            e["bought"] += float(h["buy_amount"] or 0)
+
+        fund_risks = []
+        for code, e in by_fund.items():
+            info = self._get_fund_info(code)
+            result = self.screener._screen_single_fund(code, info) if info else None
             risk = result if result else {"risk_label": "未知", "risk_reasons": [], "metrics": {}}
-
-            bought = h["buy_amount"]
-            current_value = self._holding_value(h)
-            pnl_pct = (current_value - bought) / bought * 100 if bought else 0
-
+            bought = e["bought"]
             fund_risks.append({
-                "holding": h,
+                "holding": e["holding"],
                 "info": info,
                 "risk": risk,
-                "current_value": current_value,
-                "pnl_pct": pnl_pct,
-                "days_held": self._days_held(h["buy_date"]),
+                "current_value": e["current_value"],
+                "pnl_pct": (e["current_value"] - bought) / bought * 100 if bought else 0,
+                "lots": e["lots"],
             })
 
         risk_order = {"🔴 高风险": 0, "🟡 注意": 1, "🟢 稳健": 2, "未知": 3}
@@ -171,6 +192,20 @@ class RebalanceAdvisor:
             x["pnl_pct"],
         ))
         return fund_risks
+
+    @staticmethod
+    def _sell_reaches_young_lots(lots: list, sell_amount: float, min_days: int = 7) -> bool:
+        """这次卖出是否会触及「持有 < `min_days` 天」的批次（决定有没有 1.5% 惩罚性赎回费）。
+
+        判据按公募基金**先进先出**（FIFO）惯例：赎回先卖持有最久的份额 —— 所以只要
+        「持有 ≥`min_days` 天的批次市值之和」能覆盖本次卖出额，就不产生惩罚费；
+        覆盖不了的部分才落到年轻批次上。
+
+        ⚠️ FIFO 是**行业惯例而非合同条款**（个别产品另有约定）→ 措辞用「将触及」，
+        不给用户"一定免费"的错觉。
+        """
+        old_value = sum(l["value"] for l in lots if l["days_held"] >= min_days)
+        return sell_amount > old_value + 0.005
 
     def _build_reduce_instructions(self, fund_risks: list, gap_amount: float,
                                    total_cap: float, current_eq: float, target_eq: float) -> list:
@@ -196,7 +231,15 @@ class RebalanceAdvisor:
                 sell_ratio = 0.3
 
             sell_amount = min(fr["current_value"] * sell_ratio, sell_needed)
-            sell_amount = min(max(sell_amount, 10), sell_needed)  # ≥¥10起卖但不超过仍需卖出额
+            # 起卖下限 ¥10，但**必须同时不超过该基金自身市值** —— 否则会给出
+            # "卖出 > 你持有"的指令（旧实现按批次聚合前实测踩到：批次市值 9.99 → 指令 10.00）
+            sell_amount = min(max(sell_amount, 10), sell_needed, fr["current_value"])
+            # ⚠️ **向下取整到元**（不是 round）：金额在此处还能是 9.99，但序列化时
+            # `round(9.99, 0) == 10` 会把"卖超"重新引回来（本用例测试抓到的）。
+            # 少卖一点点是保守方向（不会超卖、不会卖到手头没有的份额）。
+            sell_amount = math.floor(sell_amount)
+            if sell_amount < 1:      # 不足 ¥1 的"卖出"没有意义，跳过该基金（不消耗 sell_needed）
+                continue
 
             reason_parts = []
             if risk_label in ("🔴 高风险", "🟡 注意"):
@@ -205,8 +248,9 @@ class RebalanceAdvisor:
                 reason_parts.append(reasons[0])
             if fr["pnl_pct"] < -5:
                 reason_parts.append(f"已亏损{fr['pnl_pct']:.0f}%, 减仓控制风险")
-            if fr["days_held"] < 7:
-                reason_parts.append("持有<7天, 赎回费1.5%——如果不急, 建议等满7天再卖")
+            # 赎回费提示按 FIFO 判定（不是看单一 buy_date —— 用户是定投型，批次很多）
+            if self._sell_reaches_young_lots(fr.get("lots") or [], sell_amount):
+                reason_parts.append("本次卖出将触及持有<7天的批次, 有1.5%惩罚性赎回费——如果不急, 建议等满7天再卖")
 
             instructions.append(RebalanceInstruction(
                 action="卖出",

@@ -152,3 +152,118 @@ class TestPoolInjection:
                                             current_eq=28.8, target_eq=40.0)
         assert len(ins) == 1 and ins[0].fund_code == "016371"
         assert calls == []
+
+
+# =====================================================================
+# 2026-09-28：多批次聚合（真实账户实测事故）
+#
+# `get_current_holdings()` 返回的是**批次**行，不是基金行 —— 真实账户 7 只基金
+# 有 29 个批次（016453 一只就有 21 个小额定投批次）。旧实现把每个批次当独立持仓：
+#   ① 同一只基金输出 21 条重复「卖出 ¥10」；
+#   ② 叠加起卖下限 `max(sell_amount, 10)` → 单批次被要求卖出**超过自身市值**
+#      （实测批次 9.99 / 9.92 → 指令 ¥10.00）；
+#   ③ 30 条指令合计 ¥1108 **> 账户总市值 ¥854.51**（卖出额超过整个账户）。
+# =====================================================================
+
+class TestMultiLotAggregation:
+    def _advisor(self, holdings, infos, navs, target_eq):
+        a = RebalanceAdvisor(_FakeDB(holdings, infos, navs))
+        a.thermometer = _FixedTemp(target_eq)
+        a.screener = _StubScreener()
+        return a
+
+    @staticmethod
+    def _lots(code, n, shares, amount, buy_date="2026-01-01"):
+        return [{"id": i, "fund_code": code, "fund_name": code, "shares": shares,
+                 "buy_amount": amount, "buy_date": buy_date, "status": "holding"}
+                for i in range(1, n + 1)]
+
+    def test_multi_lot_same_fund_yields_one_sell_instruction(self):
+        """21 个批次 → 1 条卖出指令（复现真实账户 016453 的场景）。"""
+        holdings = self._lots("A", 21, shares=10, amount=10.0)      # 市值 21×10×1.0 = 210
+        a = self._advisor(holdings, {"A": {"fund_type": "混合型"}}, {"A": 1.0}, target_eq=10.0)
+        r = a.analyze()
+        sells = [i for i in r["instructions"] if i["action"] == "卖出" and i["fund_code"] == "A"]
+        assert len(sells) == 1, "21 个批次应合成 1 条指令，实际 %d 条" % len(sells)
+        assert sells[0]["amount"] <= 210.0
+
+    def test_sell_amount_never_exceeds_fund_value(self):
+        """基金市值 ¥9.99 → 卖出额不得超过 ¥9.99（旧实现给 ¥10.00）。
+
+        ⚠️ 必须让 `sell_needed` **大于** 起卖下限 ¥10 才能复现 —— 真实事故就是
+        "还需卖出几百元"时，每个小额批次都被强推 ¥10，超过批次自身市值。
+        （若 sell_needed < 10，旧代码也会因 `min(…, sell_needed)` 而恰好不超卖，
+        这样的用例复现不出 bug。）"""
+        holdings = (self._lots("SMALL", 1, shares=9.99, amount=9.99)
+                    + self._lots("BIG", 1, shares=1000, amount=1000.0))
+        a = self._advisor(holdings, {"SMALL": {"fund_type": "混合型"},
+                                     "BIG": {"fund_type": "股票型"}},
+                          {"SMALL": 1.0, "BIG": 1.0}, target_eq=10.0)   # 需卖出约 90% ≈ ¥909
+        r = a.analyze()
+        small = [i for i in r["instructions"] if i["fund_code"] == "SMALL"]
+        for i in small:
+            assert i["amount"] <= 9.99 + 1e-6, "卖超了：%s" % i
+        assert [i for i in r["instructions"] if i["fund_code"] == "BIG"], "大额那只应承担主要减仓"
+
+    def test_total_sell_stays_within_portfolio_value(self):
+        """端到端：卖出合计不得超过账户总市值（旧实现 ¥1108 > ¥854.51）。"""
+        holdings = (self._lots("A", 21, shares=10, amount=10.0)
+                    + self._lots("B", 2, shares=10, amount=10.0))
+        a = self._advisor(holdings, {"A": {"fund_type": "混合型"}, "B": {"fund_type": "股票型"}},
+                          {"A": 1.0, "B": 1.0}, target_eq=15.0)      # 市值 AA 210 + B 20 = 230
+        r = a.analyze()
+        total_sell = sum(i["amount"] for i in r["instructions"] if i["action"] == "卖出")
+        assert total_sell <= r["portfolio_value"] + 1e-6, \
+            "卖出合计 ¥%.0f 超过总市值 ¥%.2f" % (total_sell, r["portfolio_value"])
+
+    def test_pnl_pct_is_fund_level_not_lot_level(self):
+        """盈亏率按基金（合计市值 vs 合计成本）—— 批次的成本/市值不可比。"""
+        holdings = self._lots("A", 2, shares=10, amount=10.0)         # 两批：成本各 10，市值各 10×1.5
+        a = self._advisor(holdings, {"A": {"fund_type": "混合型"}}, {"A": 1.5}, target_eq=10.0)
+        fr = a._assess_holdings(holdings)
+        assert len(fr) == 1
+        assert abs(fr[0]["current_value"] - 30.0) < 1e-6              # 2×10×1.5
+        assert abs(fr[0]["pnl_pct"] - 50.0) < 1e-6                    # (30-20)/20
+        assert len(fr[0]["lots"]) == 2, "聚合掉批次但**不丢**批次信息（赎回费判定要用）"
+
+    def test_hold_instructions_are_per_fund(self):
+        """持有分支同样按基金（旧实现会给 21 条「持有」）。"""
+        holdings = self._lots("A", 21, shares=10, amount=10.0)
+        a = self._advisor(holdings, {"A": {"fund_type": "混合型"}}, {"A": 1.0}, target_eq=100.0)
+        r = a.analyze()
+        assert [i["action"] for i in r["instructions"]] == ["持有"]
+        assert len(r["instructions"]) == 1
+
+
+class TestFifoRedemptionFeeCheck:
+    """赎回费提示按**先进先出**判定（FIFO 是行业惯例，非合同条款 → 措辞用「将触及」）。"""
+
+    def test_covered_by_old_lots_no_warning(self):
+        lots = [{"days_held": 30, "value": 100.0}, {"days_held": 2, "value": 10.0}]
+        assert RebalanceAdvisor._sell_reaches_young_lots(lots, 50.0) is False
+
+    def test_reaches_young_lot_warns(self):
+        lots = [{"days_held": 30, "value": 30.0}, {"days_held": 2, "value": 100.0}]
+        assert RebalanceAdvisor._sell_reaches_young_lots(lots, 50.0) is True
+
+    def test_exactly_consumes_old_lots_is_free(self):
+        lots = [{"days_held": 30, "value": 50.0}, {"days_held": 1, "value": 90.0}]
+        assert RebalanceAdvisor._sell_reaches_young_lots(lots, 50.0) is False
+
+    def test_missing_lots_is_conservative(self):
+        """批次信息缺失 → 无法保证免费 → 提示（宁可多提醒一次）"""
+        assert RebalanceAdvisor._sell_reaches_young_lots([], 50.0) is True
+
+    def test_reason_mentions_fifo_when_needed(self):
+        """端到端：卖出触及年轻批次时，理由里出现赎回费提示。"""
+        a = RebalanceAdvisor.__new__(RebalanceAdvisor)
+        a.screener = _StubScreener()
+        a._get_latest_nav = lambda code: 1.0
+        a._days_held = lambda d: 1                       # 全部批次都是「昨天买的」
+        a._get_fund_info = lambda code: {"fund_type": "混合型"}
+        a._holding_value = lambda h: float(h["buy_amount"])
+        fr = a._assess_holdings([{"id": 1, "fund_code": "A", "fund_name": "A", "shares": 100,
+                                  "buy_amount": 100.0, "buy_date": "2026-09-27"}])
+        ins = a._build_reduce_instructions(fr, gap_amount=200.0, total_cap=1000.0,
+                                           current_eq=90.0, target_eq=20.0)
+        assert ins and "赎回费" in ins[0].reason, ins[0].reason if ins else "无指令"
