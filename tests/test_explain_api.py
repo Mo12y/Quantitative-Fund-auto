@@ -154,6 +154,32 @@ class TestAccountAndStrategySeparated:
         eq = next(r for r in m["rows"] if r["label"] == "你当前权益")
         assert "type_bucket" in eq["value"], "必须注明口径出处"
 
+    def test_model_scope_row_is_readable(self, client):
+        """「适用边界」**不得**把 Python 字面量直接上屏（计划书 §9.2）。
+
+        回归点：原实现是 `str(t.get("scope"))[:80]` → 界面上出现
+        `{'applies_to': ['A 股权益'], ...}`，既是内部结构泄漏，又被 80 字截断。
+        """
+        m = next(s for s in _data(client[0])["stages"] if s["key"] == "model")
+        row = next(r for r in m["rows"] if r["label"] == "适用边界")
+        v = row["value"]
+        assert "{" not in v and "[" not in v and "'" not in v, "泄漏了 Python 字面量：%s" % v
+        assert "适用" in v, "应是人话（'适用 …'）：%s" % v
+
+
+def test_scope_text_renders_both_sides_and_is_not_truncated():
+    """`_scope_text` 用**真实** TEMPERATURE_SCOPE：两侧都要渲染，且一个字都不许截断。"""
+    from src.analysis.thermometer import TEMPERATURE_SCOPE
+
+    s = webapp._scope_text(TEMPERATURE_SCOPE)
+    assert "适用" in s and "不适用" in s, s
+    assert "{" not in s and "[" not in s and "'" not in s, s
+    for cat in TEMPERATURE_SCOPE["not_applicable_to"]:
+        assert cat in s, "「不适用」名单被截断了，缺 %s：%s" % (cat, s)
+    # 非 dict 输入不炸（degraded 时 scope 可能是 None/字符串）
+    assert webapp._scope_text(None) == "—"
+    assert webapp._scope_text("随便一个串") == "随便一个串"
+
 
 class TestBusinessReadOnly:
     def test_ledger_and_nav_untouched(self, client):

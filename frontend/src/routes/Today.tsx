@@ -106,7 +106,12 @@ export default function Today() {
 
       {ov && (
         <>
-          <VerdictCard rebalance={rebalance.data} explain={explain.data} loading={rebalance.loading} />
+          <VerdictCard
+            rebalance={rebalance.data}
+            explain={explain.data}
+            loading={rebalance.loading}
+            error={rebalance.error}
+          />
 
           <KpiRow stats={ov.stats} rebalance={rebalance.data} holdingFunds={fundCount} />
 

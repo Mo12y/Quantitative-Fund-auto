@@ -18,15 +18,27 @@ export function VerdictCard({
   rebalance,
   explain,
   loading,
+  error,
 }: {
   rebalance: Rebalance | null
   explain: Explain | null
   loading: boolean
+  /**
+   * 调仓端点失败时后端给的**中文原因**。
+   *
+   * ⚠️ 阶段 2 边界态实测（2026-09-30）：只让「今天」页处理 `overview.error` 是不够的 ——
+   * `/api/rebalance` 单独失败时这里只剩一句「调仓结论暂不可用」，用户既不知道**为什么**，
+   * 也不知道**该不该重试**。而本项目的既定约定是「失败要带后端给的中文原因，
+   * 而不是『网络错误』这种无信息量的话」（见 `src/api/client.ts` 顶部）。
+   */
+  error?: string | null
 }) {
   if (!rebalance) {
     return (
       <Card lead title="今天" note="· 结论">
-        <div className="text-sm text-fg-3">{loading ? '正在计算调仓结论…' : '调仓结论暂不可用'}</div>
+        <div className="text-sm text-fg-3">
+          {loading ? '正在计算调仓结论…' : error ? `调仓结论不可用：${error}` : '调仓结论暂不可用'}
+        </div>
       </Card>
     )
   }

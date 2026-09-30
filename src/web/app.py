@@ -617,6 +617,30 @@ def _explain_feature(db, holds) -> dict:
                            "detail": "夏普/回撤/波动/索提诺/卡玛（3 年窗口 · 口径见模块 docstring）"}]}
 
 
+def _scope_text(scope) -> str:
+    """把温度适用边界（thermometer.TEMPERATURE_SCOPE 的结构）渲染成**中文短句**。
+
+    ⚠️ 原来这里写的是 `str(t.get("scope"))[:80]`，于是界面上出现
+    `适用边界 = {'applies_to': ['A 股权益（股票型 / 混合型 / 指数型及其联接）'], 'not_applicable_to': ['债券型', '货币型…`
+    —— 既是 **Python 字面量直接上屏**（把内部结构泄漏给用户），又被 80 字**截断**
+    （`not_applicable_to` 后半段直接丢掉）。这正是 `docs/前端重构计划书.md` §9.2 记的缺口。
+    """
+    if not isinstance(scope, dict):
+        return str(scope or "—")
+
+    def _cat(v):
+        if isinstance(v, (list, tuple)):
+            return " / ".join(str(x) for x in v if x)
+        return str(v or "")
+
+    parts = []
+    if _cat(scope.get("applies_to")):
+        parts.append("适用 %s" % _cat(scope.get("applies_to")))
+    if _cat(scope.get("not_applicable_to")):
+        parts.append("不适用 %s" % _cat(scope.get("not_applicable_to")))
+    return "；".join(parts) or "—"
+
+
 def _explain_model(db, holds, temp) -> dict:
     """建模：这一格回答「今天这条结论由什么规则触发」——键名以 thermometer 实际返回为准"""
     t = temp or {}
@@ -627,7 +651,7 @@ def _explain_model(db, holds, temp) -> dict:
                         round(t.get("target_equity_pct")) if t.get("target_equity_pct") is not None else "—"),
                      "tone": "flat"})
         if t.get("scope"):
-            rows.append({"label": "适用边界", "value": str(t.get("scope"))[:80], "tone": "flat"})
+            rows.append({"label": "适用边界", "value": _scope_text(t.get("scope")), "tone": "flat"})
     try:
         summary = PortfolioTracker(db).get_portfolio_summary()
         alloc = summary.get("asset_allocation") or {}
