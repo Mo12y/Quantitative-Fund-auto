@@ -47,15 +47,23 @@ def test_zero_line_bold_and_area_split_by_sign():
     zero = re.search(r'<line[^>]*stroke-width="1\.4"[^>]*/>', body)
     assert zero and 'y1="${y0}"' in zero.group(0) and 'y2="${y0}"' in zero.group(0), \
         "零轴须是横贯 y0 的加粗线（stroke-width 1.4）"
-    # 零上绿 / 零下红：同一份面积被两个 clipPath 分别裁剪着色
-    assert 'fill="url(#cgUp)" clip-path="url(#cpUp)"' in body, "零轴上方应裁剪为绿色面积"
-    assert 'fill="url(#cgDn)" clip-path="url(#cpDn)"' in body, "零轴下方应裁剪为红色面积"
+    # 零上红 / 零下绿 —— **中国 A 股惯例（涨红跌绿）**。
+    #
+    # ⚠️ 2026-09-30 更正：本测试原先断言的是**欧美惯例**（零上绿/零下红，
+    #    即 `var(--up)` 绿 / `var(--down)` 红）。那不是"钉死了 token"那么简单 ——
+    #    它把错误惯例**当成了预期行为**，于是任何修正都会被它报成"回归"。
+    #    定性依据见 docs/前端重构计划书.md §1.2：旧前端满屏"涨了显示绿、跌了显示红"，
+    #    被判定为**功能性错误**（不是审美问题）；新前端的 token 也据此定为
+    #    rise=红 / fall=绿。故此处随之改为 rise/fall。
+    #    回归守卫：scripts/check_rise_fall.py
+    assert 'fill="url(#cgUp)" clip-path="url(#cpUp)"' in body, "零轴上方应裁剪为涨色面积"
+    assert 'fill="url(#cgDn)" clip-path="url(#cpDn)"' in body, "零轴下方应裁剪为跌色面积"
     assert re.search(r'<clipPath id="cpUp"><rect [^/]*y="0"', body), "上裁剪区从顶部起"
     assert re.search(r'<clipPath id="cpDn"><rect [^/]*y="\$\{y0\}"', body), "下裁剪区从零轴起"
     cg_up = re.search(r'<linearGradient id="cgUp".*?</linearGradient>', body, re.S)
     cg_dn = re.search(r'<linearGradient id="cgDn".*?</linearGradient>', body, re.S)
-    assert cg_up and "var(--up)" in cg_up.group(0), "零上面积用绿色（涨）"
-    assert cg_dn and "var(--down)" in cg_dn.group(0), "零下面积用红色（跌）"
+    assert cg_up and "var(--rise)" in cg_up.group(0), "零上面积用 --rise（涨=红，中国惯例）"
+    assert cg_dn and "var(--fall)" in cg_dn.group(0), "零下面积用 --fall（跌=绿，中国惯例）"
 
 
 def test_curve_card_keeps_top_text_and_annotates_methodology():

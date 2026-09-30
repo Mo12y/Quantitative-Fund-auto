@@ -4,6 +4,22 @@
     --ink:#f7f8f8; --ink-muted:#d0d6e0; --ink-subtle:#8a8f98; --ink-tertiary:#62666d;
     --primary:#5e6ad2; --primary-hover:#828fff;
     --up:#27a644; --down:#e5484d; --warn:#d9a441;
+    /* ── 方向色（涨跌）与中国 A 股惯例一致：涨=红、跌=绿 ──
+       ⚠️ 2026-09-30 修复：本文件原先只有 up/down 一对色，同时承担了两种互相冲突的语义——
+         (a) **方向**：P&L / 收益率 / 累计收益（中国惯例要 涨红跌绿）
+         (b) **状态**：危险 / 成功 / 预警 / 风险等级（红色=危险是普适的，不能反）
+       而 up/down 的取色是**欧美惯例**（绿=涨/红=跌），于是 (a) 全反了：
+       界面上「盈利显示绿色、亏损显示红色」，用户会把赚的读成亏的。
+       （这正是新前端 docs/前端重构计划书.md §1.2 记录的那个功能性错误。）
+
+       修法：**不复用 up/down**（它们的名字在两种惯例下颜色相反，本身就是事故词源，
+       新前端也因此改用 rise/fall），而是新增一对**只表示方向**的 token：
+         --rise = 涨（红） ← 对应旧 --down 的色值
+         --fall = 跌（绿） ← 对应旧 --up 的色值
+       状态类（.alert-* / .btn.danger / .toast.* / .b-green / .b-red / .u-tdown 等）
+       **继续用 --up/--down**，语义不变。
+       取色点清单与校验脚本：scripts/check_rise_fall.py */
+    --rise:#e5484d; --fall:#27a644;
     --font-sans:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",system-ui,sans-serif;
     --font-mono:ui-monospace,SFMono-Regular,"SF Mono",Consolas,"Liberation Mono",monospace;
     --radius-sm:6px; --radius-md:8px; --radius-lg:12px;
@@ -13,6 +29,9 @@
     /* --muted 由 --ink-tertiary(#62666d, ≈3.6:1 不达 AA) 改为 --ink-subtle(#8a8f98, ≈6.5:1)，
        它被用在 10.5~11.5px 的小字上。--bg2 之前被引用 8 次却未定义 → 侧边栏/分组框背景透明。 */
     --text:var(--ink); --dim:var(--ink-subtle); --muted:var(--ink-subtle);
+    /* ⚠️ 别名：--green/--red 名字说的是"颜色"，用法里既有状态也有方向。
+       状态场景继续用它们；**方向（P&L/收益）一律不要用**，改用 --rise/--fall
+       （否则盈利又会变成绿色）。详见上方 --rise 的说明与 scripts/check_rise_fall.py。 */
     --green:var(--up); --red:var(--down); --yellow:var(--warn);
     --blue:var(--primary);;
   }
@@ -88,7 +107,7 @@
   .alert-red{background:var(--surface-2);border-left:3px solid var(--down)}
   .alert-yellow{background:var(--surface-2);border-left:3px solid var(--warn)}
   .alert-info{background:var(--surface-2);border-left:3px solid var(--primary)}
-  .pnl-pos{color:var(--green)} .pnl-neg{color:var(--red)}
+  .pnl-pos{color:var(--rise)} .pnl-neg{color:var(--fall)}
   .dot{width:8px;height:8px;border-radius:50%;display:inline-block}
   .dot-green{background:var(--green)}
   .empty{color:var(--muted);font-size:13px;padding:22px 0;text-align:center}
@@ -168,7 +187,7 @@
   .tbl tr.best td:first-child{box-shadow:inset 2px 0 0 var(--green)}
   .tbl .sig{color:var(--green);font-weight:700}
   .tbl .nsig{color:var(--muted)}
-  .pos{color:var(--green)} .neg{color:var(--red)}
+  .pos{color:var(--rise)} .neg{color:var(--fall)}
   .qchart{margin-top:12px;width:100%}
   .qchart svg{width:100%;height:auto;display:block}
   .qlegend{display:flex;gap:16px;font-size:11px;color:var(--dim);margin-top:6px;flex-wrap:wrap;align-items:center}
@@ -259,7 +278,9 @@
   .u-tdim{color:var(--dim);font-size:12px}
   .u-tmuted{color:var(--muted)}
   .u-twarn{color:var(--warn)}
-  .u-tgreen{color:var(--green)}
+  /* ⚠️ 名字里的 green/red 已与语义不符（修涨跌色后 rise=红/fall=绿），
+     故更名为 u-trise/u-tfall —— 旧名保留为别名以免漏改处静默失效。 */
+  .u-trise,.u-tgreen{color:var(--rise)}
   .u-tink{color:var(--ink)}
   .u-pillwarn{background:var(--surface-2);color:var(--warn)}
   .u-sub{font-size:13px;margin-bottom:4px}
@@ -268,11 +289,15 @@
 
   .u-ttext{color:var(--text)}
   .u-tdown{color:var(--down)}
-  .u-tred{color:var(--red)}
+  .u-tfall,.u-tred{color:var(--fall)}
   .u-tblue{color:var(--blue)}
   .u-tyellow{color:var(--yellow)}
-  .u-bgup{background:var(--up)}
-  .u-bgdown{background:var(--down)}
+  /* 曲线图例色块：零轴上方=盈利区间 / 下方=亏损区间 → **方向语义**，必须与曲线渐变同色。
+     ⚠️ 差点漏掉：本行没有「与 0 比较」的条件，第一版启发式守卫扫不出来，
+     靠人工复核 app.js 的图例文案（"零轴上方（盈利区间）"）才发现。
+     守卫已加强为「已知方向选择器清单」硬断言，见 scripts/check_rise_fall.py。 */
+  .u-bgup{background:var(--rise)}
+  .u-bgdown{background:var(--fall)}
   .u-bgprimary{background:var(--primary)}
   .u-bgsub{background:var(--ink-subtle)}
   .u-bgdim{background:var(--card2);color:var(--dim)}
