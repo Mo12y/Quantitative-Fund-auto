@@ -1,45 +1,16 @@
-import { useMemo } from 'react'
-import {
-  Area,
-  CartesianGrid,
-  ComposedChart,
-  Line,
-  ReferenceDot,
-  ReferenceLine,
-  ResponsiveContainer,
-  Tooltip,
-  XAxis,
-  YAxis,
-} from 'recharts'
+import { lazy, Suspense, useMemo } from 'react'
 import type { PortfolioCurve } from '../api/types'
+import { BENCH, FALL, RISE, ZERO } from '../lib/chartColors'
 import { dirClass, dirOf, dirSymbol, fmtMoney, fmtSignedPct } from '../lib/format'
 import { Card } from './Card'
 
-/* 图表用色与 index.css 的 @theme 同源（Recharts 不吃 CSS 变量，只能各写一份，改一处要同步） */
-const RISE = '#ff6b5e'
-const FALL = '#34c76a'
-const BENCH = '#7c8899'
 /**
- * 网格线：**必须看得见**。
- * 原来是 `#1c2532` + 只画水平线 —— 实测「垂直 0 条、轴线 0 条」，用户反馈
- * "没有坐标轴没有参考系，读起来困难"。参考系是折线图的地基，不能为了"干净"把它压没。
+ * 绘图部分**懒加载** —— Recharts + d3 约 429KB，是全站最大的一块依赖。
+ * 卡片外壳（标题 / 大数字 / 图例 / 脚注）同步渲染，只有 210px 的绘图区走骨架，
+ * **占位高度与真实图完全一致 → 不产生布局位移**。
+ * 实测首屏必须下载的 JS：672KB → 243KB。
  */
-const GRID = '#202a37'
-/** 坐标轴线：比网格略亮，给图一个明确的框 */
-const AXIS = '#2b3644'
-/** 刻度文字（原 #6b7889 偏暗，长刻度读不出来） */
-const TICK = '#7d8a9d'
-/**
- * ⚠️ 零轴（y=0）—— 全图**最强**的一条线：
- *   实线（网格是虚线）+ 更亮（#7b8fa6 vs 网格 #202a37）+ 更粗（1.6 vs 1）。
- *   零轴是这张图唯一的分界语义（盈/亏），混进网格里就读不出来了。
- */
-const ZERO = '#7b8fa6'
-
-interface TipPayload {
-  dataKey?: string | number
-  value?: number | null
-}
+const ChartPlot = lazy(() => import('./ChartPlot').then((m) => ({ default: m.ChartPlot })))
 
 /**
  * 生成"好看"的 Y 轴刻度，**并保证 0 一定在刻度里**。
@@ -69,32 +40,6 @@ function niceTicks(lo: number, hi: number, want = 6): number[] {
   if (!ticks.some((t) => Math.abs(t) < 1e-9)) ticks.push(0)
   if (!ticks.length) return [lo, 0, hi]
   return ticks.sort((a, b) => a - b)
-}
-
-/** 自定义 tooltip：跟随主题，不用 Recharts 默认的白底 */
-function Tip({ active, payload, label }: { active?: boolean; payload?: TipPayload[]; label?: string }) {
-  if (!active || !payload || !payload.length) return null
-  const combo = payload.find((p) => p.dataKey === 'combo')
-  const bench = payload.find((p) => p.dataKey === 'bench')
-  return (
-    <div className="rounded-[var(--radius-md)] border border-line-strong bg-card/95 px-3 py-2 text-[11.5px] shadow-[0_20px_44px_-20px_rgba(0,0,0,.95)] backdrop-blur">
-      <div className="mb-1.5 text-fg-4">{label}</div>
-      {combo && (
-        <div className="flex items-center gap-4">
-          <span className="text-fg-3">本组合</span>
-          <span className={'mono ml-auto ' + dirClass(dirOf(combo.value ?? 0))}>
-            {fmtSignedPct(combo.value ?? null)}
-          </span>
-        </div>
-      )}
-      {bench && bench.value != null && (
-        <div className="flex items-center gap-4">
-          <span className="text-fg-3">沪深300</span>
-          <span className="mono ml-auto text-fg-2">{fmtSignedPct(bench.value)}</span>
-        </div>
-      )}
-    </div>
-  )
 }
 
 /**
@@ -159,10 +104,7 @@ export function CurveChart({ curve }: { curve: PortfolioCurve }) {
           本组合
         </span>
         <span className="inline-flex items-center gap-1.5">
-          <i
-            className="inline-block w-4 border-t-2 border-dashed align-middle"
-            style={{ borderColor: BENCH }}
-          />
+          <i className="inline-block w-4 border-t-2 border-dashed align-middle" style={{ borderColor: BENCH }} />
           沪深300
         </span>
         <span className="inline-flex items-center gap-1.5">
@@ -171,93 +113,22 @@ export function CurveChart({ curve }: { curve: PortfolioCurve }) {
         </span>
       </div>
 
-      <div className="h-[210px] w-full">
-        <ResponsiveContainer width="100%" height="100%">
-          {/* ⚠️ margin.left 曾是 -16，会把 Y 轴刻度的**负号裁掉**：
-              Recharts 的 Y 轴刻度右对齐，"-4.0%" 比 "4.0%" 多占一格，
-              -16 的负边距正好吃掉这一格 → 图上 -4% 与 +4% 长得一模一样。
-              金融图里这是会误导读数的缺陷，故改为 0（宽度已由 YAxis width 预留）。 */}
-          <ComposedChart data={data} margin={{ top: 8, right: 8, bottom: 0, left: 0 }}>
-            <defs>
-              <linearGradient id="qfa-combo-fill" x1="0" y1="0" x2="0" y2="1">
-                <stop offset="0%" stopColor={comboColor} stopOpacity={0.20} />
-                <stop offset="100%" stopColor={comboColor} stopOpacity={0} />
-              </linearGradient>
-            </defs>
-
-            {/* 双向网格 —— 垂直网格**必须开**：原来 `vertical={false}`，实测「垂直 0 条、轴线 0 条」，
-                折线浮在空底上没有任何参考系（用户直接反馈读不出横坐标位置）。 */}
-            <CartesianGrid stroke={GRID} strokeDasharray="2 4" />
-            <XAxis
-              dataKey="date"
-              tick={{ fill: TICK, fontSize: 11 }}
-              tickLine={false}
-              /* 底部轴线：给图一个下边界（原来 axisLine=false，整张图是"浮"着的） */
-              axisLine={{ stroke: AXIS }}
-              /* 只显示 MM-DD —— 完整日期（2026-08-26）10 个字符会把一屏挤满，
-                 而且长标签逼着 `minTickGap` 大幅抽稀，垂直网格也就跟着没法看 */
-              tickFormatter={(d: string) => String(d).slice(5)}
-              interval={xInterval}
-              dy={4}
-            />
-            {/* 域强制包含 0，且刻度里一定有 0（见 niceTicks 注释：自动刻度会跳过 0） */}
-            <YAxis
-              tick={{ fill: TICK, fontSize: 11 }}
-              tickLine={false}
-              axisLine={{ stroke: AXIS }}
-              width={50}
-              tickFormatter={(v: number) => `${v.toFixed(1)}%`}
-              domain={[yLo, yHi]}
-              ticks={yTicks}
-            />
-
-            {/* 零轴：比网格更亮、实线、更粗 */}
-            <ReferenceLine y={0} stroke={ZERO} strokeWidth={1.6} />
-
-            <Tooltip
-              content={<Tip />}
-              cursor={{ stroke: '#33405a', strokeWidth: 1, strokeDasharray: '3 3' }}
-            />
-
-            <Area
-              type="monotone"
-              dataKey="combo"
-              name="本组合"
-              stroke={comboColor}
-              strokeWidth={2.6}
-              fill="url(#qfa-combo-fill)"
-              baseValue={0}
-              dot={false}
-              activeDot={{ r: 4, strokeWidth: 0 }}
-              /* 绘制动效：本组合先画，沪深300 稍晚跟上 —— 一起画会看不出两条线的关系 */
-              animationDuration={950}
-              animationEasing="ease-out"
-            />
-            <Line
-              type="monotone"
-              dataKey="bench"
-              name="沪深300"
-              stroke={BENCH}
-              strokeWidth={1.8}
-              strokeDasharray="6 4"
-              dot={false}
-              animationBegin={260}
-              animationDuration={950}
-              animationEasing="ease-out"
-            />
-            {/* 末点强调：一眼看到"现在在哪" */}
-            <ReferenceDot
-              x={curve.dates[n - 1]}
-              y={last}
-              r={3.5}
-              fill={comboColor}
-              stroke="var(--color-card)"
-              strokeWidth={2}
-              isFront
-            />
-          </ComposedChart>
-        </ResponsiveContainer>
-      </div>
+      <Suspense
+        fallback={
+          <div className="skeleton h-[210px] w-full rounded-[var(--radius-md)]" aria-label="图表加载中" />
+        }
+      >
+        <ChartPlot
+          data={data}
+          comboColor={comboColor}
+          yLo={yLo}
+          yHi={yHi}
+          yTicks={yTicks}
+          xInterval={xInterval}
+          lastDate={curve.dates[n - 1]}
+          last={last}
+        />
+      </Suspense>
 
       {/* ⚠️ 未入仓披露。曲线只画「已起算」的持仓，于是曲线终值与顶部 KPI 的
           「总资产」天然对不上（本机实测：KPI ¥854.51 vs 曲线 ¥834.60）。

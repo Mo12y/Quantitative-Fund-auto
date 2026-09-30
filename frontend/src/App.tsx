@@ -7,13 +7,35 @@
  * 与旧仪表盘（Flask `/` 上的 app.js）的关系：两者**并存**，新前端挂在 `/v2` 下，
  * 不改旧的、不推倒线上可用界面；对照跑一段时间、确认无新回归后再决定退役旧界面。
  */
+import { lazy, Suspense } from 'react'
+import { Card } from './components/Card'
 import { Nav } from './components/Nav'
 import { Sidebar } from './components/Sidebar'
+import { Skeleton } from './components/Skeleton'
 import { useEntry } from './lib/router'
-import Position from './routes/Position'
-import Research from './routes/Research'
-import Settings from './routes/Settings'
 import Today from './routes/Today'
+
+/**
+ * 「今天」**同步**引入，其余三个入口**按需**引入。
+ * 理由：Today 是默认落地页，把它也懒加载会让首屏多等一跳（Suspense 闪一下）；
+ * 而 Position / Research / Settings 各自带着表格与面板，多数访问根本不会打开。
+ *
+ * ⚠️ 本应用由 Flask 从**本机**托管、没有网络延迟，所以拆包对"首屏变快"帮助很小 ——
+ * 它的实际价值是"消掉 Vite 的 500KB 警告 + 依赖 chunk 的缓存复用"
+ * （详见 `vite.config.ts` 里 `manualChunks` 的注释）。
+ */
+const Position = lazy(() => import('./routes/Position'))
+const Research = lazy(() => import('./routes/Research'))
+const Settings = lazy(() => import('./routes/Settings'))
+
+/** 懒加载入口的兜底：给骨架而不是空白，避免切页时"闪一下白" */
+function RouteFallback() {
+  return (
+    <Card>
+      <Skeleton lines={4} />
+    </Card>
+  )
+}
 
 export default function App() {
   const [entry, go] = useEntry()
@@ -37,10 +59,12 @@ export default function App() {
           否则"卡片之间的关系"会散落在各处、改不齐。
         */}
         <main className="mx-auto flex w-full max-w-[1240px] flex-col gap-4 px-5 pb-16 pt-6 2xl:max-w-[1360px] lg:pt-9">
-          {entry === 'today' && <Today />}
-          {entry === 'position' && <Position />}
-          {entry === 'research' && <Research />}
-          {entry === 'settings' && <Settings />}
+          <Suspense fallback={<RouteFallback />}>
+            {entry === 'today' && <Today />}
+            {entry === 'position' && <Position />}
+            {entry === 'research' && <Research />}
+            {entry === 'settings' && <Settings />}
+          </Suspense>
         </main>
       </div>
     </div>
