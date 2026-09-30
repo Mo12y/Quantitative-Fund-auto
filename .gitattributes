@@ -1,0 +1,34 @@
+# 统一行尾：仓库内文本一律 LF。
+#
+# 背景：本仓库此前**没有** .gitattributes，而 Windows 端 `core.autocrlf=true` ——
+# 于是每次 `git add` 都刷一屏 "LF will be replaced by CRLF in the working copy" 警告。
+# 噪声会淹没真实改动（这个项目靠 `git log` 当跨智能体工作日志），故显式锁死行尾。
+#
+# 依据：作者毕设 `D:\大学\new` 的同名文件 —— 它在 2026-09-10 因一次"整篇全文重写式"
+# 的噪声 diff（79 删 / 110 增，实际只加了约 30 行）之后加上的。同因同治。
+#
+# 注：加这一行**不产生 renormalize diff** —— 本仓库索引里存的本来就是 LF
+# （警告原文是"working copy 会被换成 CRLF"，说明索引侧已是 LF）。
+
+* text=auto eol=lf
+
+# Windows 批处理必须 CRLF（没有则无影响）
+*.bat text eol=crlf
+*.cmd text eol=crlf
+
+# 二进制不做转换
+*.db binary
+*.db-wal binary
+*.db-shm binary
+*.sqlite binary
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.pdf binary
+*.docx binary
+*.xlsx binary
+*.parquet binary
+*.zip binary
+*.gz binary
