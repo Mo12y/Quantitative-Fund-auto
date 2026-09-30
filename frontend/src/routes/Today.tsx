@@ -96,18 +96,24 @@ export default function Today() {
 
       {ov && (
         <>
-          <VerdictCard
-            rebalance={rebalance.data}
-            explain={explain.data}
-            loading={rebalance.loading}
-            error={rebalance.error}
-          />
-
-          <KpiRow stats={ov.stats} rebalance={rebalance.data} holdingFunds={fundCount} />
+          {/* ── 概览区 ────────────────────────────────────────────────
+              结论 + KPI 是**一个整体**（父级只给 10px 间距），与后面的图表、持仓
+              用标准的 16px 分开 —— **间距本身就是层级**：
+              靠得近 = 从属关系，分得开 = 并列关系。
+              这也是对"卡片与卡片之间的关系有问题"的直接回应。 */}
+          <div className="flex flex-col gap-2.5">
+            <VerdictCard
+              rebalance={rebalance.data}
+              explain={explain.data}
+              loading={rebalance.loading}
+              error={rebalance.error}
+            />
+            <KpiRow stats={ov.stats} rebalance={rebalance.data} holdingFunds={fundCount} />
+          </div>
 
           <CurveChart curve={ov.curve} />
 
-          <div className="grid items-start gap-3.5 md:grid-cols-[1.35fr_1fr]">
+          <div className="grid items-start gap-4 md:grid-cols-[1.4fr_1fr]">
             <HoldingsTable holdings={ov.portfolio.holdings} />
 
             <Card title="温度" note="· A 股权益估值分位">

@@ -12,10 +12,14 @@ interface KpiItem {
 }
 
 /**
- * 四格 KPI —— 只放四个，其余下沉到明细卡。
+ * 四格 KPI —— **统计条**（不是独立卡片）。
  *
- * 视觉：**字段名弱、数字强**（金融数据的层级惯例）。数字 26/30px 半粗 + 负字距，
- * 副行用 11px 弱色。四格之间用 1px 分隔线（`gap-px + bg-line` 的经典做法）。
+ * ⚠️ 形态说明（2026-09-30 版式调整）：它刻意用**更轻**的表面（内嵌色 + 细边、无投影），
+ * 因为它在「今天」页里与结论卡**同属一个概览区**（父级只给 10px 间距）。
+ * 如果它也做成一张等重的卡，读者会把"结论"和"结论的支撑数字"看成两个并列的东西 ——
+ * 这正是用户反馈的"卡片与卡片之间的关系有问题"。
+ *
+ * 视觉：**字段名弱、数字强**（金融数据的层级惯例）。数字 26/30px 半粗 + 负字距。
  *
  * 「权益占比」用**温度适用的 A 股口径**（rebalance.current_equity_pct），
  * 与 SSOT 的资产类别占比（含 QDII/黄金）不是一回事，所以标签写明口径。
@@ -121,7 +125,7 @@ export function KpiRow({
   }
 
   return (
-    <div className="rise-in glass mb-4 grid grid-cols-2 overflow-hidden rounded-[var(--radius-lg)] border border-line shadow-[0_22px_48px_-30px_rgba(0,0,0,.92)] sm:grid-cols-4">
+    <div className="rise-in grid grid-cols-2 overflow-hidden rounded-[var(--radius-lg)] border border-line bg-inset/35 backdrop-blur-md sm:grid-cols-4">
       {items.map((it, i) => (
         <div key={it.label} className={'tint-aurora px-4 py-4 ' + sep(i)}>
           <div className="field mb-1.5">{it.label}</div>

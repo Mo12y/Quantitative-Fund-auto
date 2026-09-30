@@ -184,7 +184,7 @@ export default function Position() {
             error={rebalance.error}
           />
 
-          <div className="grid items-start gap-3.5 md:grid-cols-[1.35fr_1fr]">
+          <div className="grid items-start gap-4 md:grid-cols-[1.4fr_1fr]">
             <HoldingsTable holdings={ov.portfolio.holdings} />
             <PlanProgress plan={plan.data?.plan ?? ov.plan} />
           </div>

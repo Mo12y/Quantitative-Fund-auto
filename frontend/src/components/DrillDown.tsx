@@ -9,6 +9,13 @@ const TONE: Record<string, string> = {
   flat: 'text-fg-2',
 }
 
+/** 把明细行均分成两栏（奇数时上栏多一行）；栏数只影响排版，不改变顺序语义。 */
+function splitCols<T>(rows: T[]): T[][] {
+  if (rows.length < 2) return [rows]
+  const half = Math.ceil(rows.length / 2)
+  return [rows.slice(0, half), rows.slice(half)]
+}
+
 /**
  * 数据链路下钻 —— 对齐「采集 → 清洗 → 特征 → 建模 → 评估」五段。
  * 五格只放 headline；点某格展开该格的明细行与**真实产物**（落库表 / 脚本 / 报告），
@@ -44,27 +51,40 @@ export function DrillDown({ explain }: { explain: Explain }) {
       </div>
 
       {stage && (
-        <div className="mt-2 rounded-md border border-line bg-inset px-3 py-2.5">
+        /* 明细行是"标签 —— 数值"的对照：
+           ⚠️ 早先按 `justify-between` 单列铺满 —— 卡片放宽到 1300px 后两端相距太远、
+           眼睛无法跟踪（行长问题），右侧还空出一大块。改为**两栏**：
+           每栏 ~600px，既收住行长又把宽度用满；分栏线用 per-column 的 divide-y，
+           不会出现 2 栏网格里"右栏第一行多一条上边线"的破绽。 */
+        <div className="mt-2 rounded-[var(--radius-md)] border border-line bg-inset px-3.5 py-2.5">
           <div className="mb-1.5 text-xs text-fg-3">{stage.title} · 这个数字从哪来</div>
-          {stage.rows.map((r, i) => (
-            <div
-              key={i}
-              className="flex flex-wrap items-baseline justify-between gap-x-5 gap-y-0.5 border-t border-line py-1.5 first:border-t-0 first:pt-0"
-            >
-              <span className="text-[12.5px] text-fg-3">{plainText(r.label)}</span>
-              <span className={'text-right text-[12.5px] ' + (TONE[r.tone ?? 'flat'] ?? 'text-fg-2')}>
-                {plainText(r.value)}
-              </span>
-            </div>
-          ))}
-          <div className="mt-2 border-t border-line pt-2 text-[11.5px] leading-relaxed text-fg-4">
-            <div className="mb-0.5">真实产物</div>
-            {stage.artifacts.map((a, i) => (
-              <div key={i} className="flex flex-wrap gap-x-3">
-                <span className="mono text-fg-3">{a.name}</span>
-                <span>{plainText(a.detail)}</span>
+          <div className="grid gap-x-10 sm:grid-cols-2">
+            {splitCols(stage.rows).map((col, ci) => (
+              <div key={ci} className="divide-y divide-line">
+                {col.map((r, i) => (
+                  <div
+                    key={i}
+                    className="flex flex-wrap items-baseline justify-between gap-x-5 gap-y-0.5 py-1.5"
+                  >
+                    <span className="text-[12.5px] text-fg-3">{plainText(r.label)}</span>
+                    <span className={'text-right text-[12.5px] ' + (TONE[r.tone ?? 'flat'] ?? 'text-fg-2')}>
+                      {plainText(r.value)}
+                    </span>
+                  </div>
+                ))}
               </div>
             ))}
+          </div>
+          <div className="mt-2 border-t border-line pt-2 text-[11.5px] leading-relaxed text-fg-4">
+            <div className="mb-0.5">真实产物</div>
+            <div className="grid gap-x-10 sm:grid-cols-2">
+              {stage.artifacts.map((a, i) => (
+                <div key={i} className="flex flex-wrap gap-x-3">
+                  <span className="mono text-fg-3">{a.name}</span>
+                  <span>{plainText(a.detail)}</span>
+                </div>
+              ))}
+            </div>
           </div>
         </div>
       )}

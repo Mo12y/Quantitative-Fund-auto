@@ -6,6 +6,9 @@ import type { ReactNode } from 'react'
  *
  * 视觉：标题下方压一团低透明度的极光，让首屏顶端有"光从上面来"的感觉；
  * 纯文字页头在一屏暗色里会显得像文档而不是产品。
+ *
+ * ⚠️ `mb-2` 是**额外**的下边距：父级 `main` 的 `gap-4` 才是块间标准间距，
+ * 页头额外多 8px，让"标题 → 第一张卡"比"卡 → 卡"松一点（层级的第一个信号）。
  */
 export function PageHead({
   title,
@@ -17,7 +20,7 @@ export function PageHead({
   children?: ReactNode
 }) {
   return (
-    <div className="relative mb-6 flex flex-wrap items-end justify-between gap-x-4 gap-y-3">
+    <div className="relative mb-2 flex flex-wrap items-end justify-between gap-x-4 gap-y-3">
       <i
         className="pointer-events-none absolute -left-8 -top-14 h-36 w-72 rounded-full opacity-40 blur-2xl"
         style={{ background: 'radial-gradient(closest-side, rgba(90,162,255,.42), transparent)' }}

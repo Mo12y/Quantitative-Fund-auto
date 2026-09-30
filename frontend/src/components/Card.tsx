@@ -19,13 +19,15 @@ interface CardProps {
  * 表面处理收在 `index.css` 的 `.surface` / `.surface-lead` 里（顶部内高光 + 柔阴影 +
  * 极窄边框），组件只负责内边距与标题层级。这样换皮肤只改一处。
  *
- * ⚠️ 不加 `overflow-hidden` —— 图表 tooltip / 下拉会溢出卡面被裁掉。
+ * ⚠️ **不带下外边距**：块间距由父级（`App` 的 `main`，`flex flex-col gap-4`）统一给。
+ * 卡片自己带 margin 会让"卡片之间的关系"散落在各处，改不齐。
+ * ⚠️ 也不加 `overflow-hidden` —— 图表 tooltip / 下拉会溢出卡面被裁掉。
  */
 export function Card({ title, note, lead = false, action, className = '', children }: CardProps) {
   return (
     <section
       className={
-        'rise-in mb-4 rounded-[var(--radius-lg)] ' +
+        'rise-in rounded-[var(--radius-lg)] ' +
         (lead ? 'surface-lead px-6 py-5' : 'surface px-5 py-[18px]') +
         (className ? ' ' + className : '')
       }
