@@ -40,13 +40,14 @@ function Num({ v, digits = 1 }: { v: number | null | undefined; digits?: number 
  * 这边是按基金名称关键词归的主题桶。故两者不联动 —— 不给出「点行业就筛基金」的错误暗示。
  * 也说清了池子的性质：**不推荐"买哪只"，只排除有坑的**。
  */
-export function PoolBoard({ data }: { data: BoardPool }) {
+export function PoolBoard({ data, className = '' }: { data: BoardPool; className?: string }) {
   const [active, setActive] = useState('')
   const cur = data.boards.find((b) => b.board === active) ?? data.boards[0]
   if (!cur) return null
 
   return (
     <Card
+      className={className}
       title="筛选池 · 按主题板块"
       note={`· 共 ${data.total_funds} 只进池 · 每板块前 ${data.size}`}
     >

@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react'
 import { endpoints } from '../api/endpoints'
 import type { GetOptions } from '../api/client'
+import { Bento, span } from '../components/Bento'
 import { Card } from '../components/Card'
 import { PageHead } from '../components/PageHead'
 import { PoolBoard } from '../components/PoolBoard'
@@ -17,10 +18,10 @@ import { useApi } from '../lib/useApi'
  */
 const loadBoard = (o?: GetOptions) => endpoints.fundsBoard(8, 300, o)
 
-/** 分区块的兜底：失败说原因、等待给骨架（都不许白屏） */
-function fallback(title: string, st: { error: string | null }): ReactNode {
+/** 分区块的兜底：失败说原因、等待给骨架（都不许白屏）。`className` 用于 Bento 占宽。 */
+function fallback(title: string, st: { error: string | null }, className = ''): ReactNode {
   return (
-    <Card title={title}>
+    <Card className={className} title={title}>
       {st.error ? (
         <div className="text-sm text-fg-2">读取失败：{st.error}</div>
       ) : (
@@ -63,8 +64,19 @@ export default function Research() {
 
       <Warming seconds={busy ? wait : 0} note="筛选池首次计算较慢，之后命中缓存" />
 
-      {sectors.data ? <SectorTable data={sectors.data} /> : fallback('行业板块', sectors)}
-      {board.data ? <PoolBoard data={board.data} /> : fallback('筛选池', board)}
+      {/* 宽屏并排：池子是主体（7 栏），板块是参照（5 栏）—— 面积即重要性 */}
+      <Bento>
+        {sectors.data ? (
+          <SectorTable className={span(5)} data={sectors.data} />
+        ) : (
+          fallback('行业板块', sectors, span(5))
+        )}
+        {board.data ? (
+          <PoolBoard className={span(7)} data={board.data} />
+        ) : (
+          fallback('筛选池', board, span(7))
+        )}
+      </Bento>
     </>
   )
 }

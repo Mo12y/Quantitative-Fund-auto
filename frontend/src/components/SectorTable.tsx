@@ -37,12 +37,12 @@ const TH = 'field pb-2.5'
  * 窄屏：把「近3月/近6月/波动」三列隐藏（`hidden md:table-cell`），只留 行业/近1月/评分，
  * 不靠横向滚动 —— 横向滚动会让页面出现内部溢出。
  */
-export function SectorTable({ data }: { data: SectorsPayload }) {
+export function SectorTable({ data, className = '' }: { data: SectorsPayload; className?: string }) {
   const [all, setAll] = useState(false)
   const rows = all ? data.sectors : data.sectors.slice(0, 12)
 
   return (
-    <Card title="行业板块" note={`· 申万一级 ${data.sectors.length} 个 · 动量+趋势+风险`}>
+    <Card className={className} title="行业板块" note={`· 申万一级 ${data.sectors.length} 个 · 动量+趋势+风险`}>
       {data.momentum_leaders.length > 0 && (
         <div className="mb-3 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11.5px]">
           <span className="text-fg-4">动量领先</span>

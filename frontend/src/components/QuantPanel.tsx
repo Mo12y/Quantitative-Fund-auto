@@ -26,9 +26,9 @@ function Sub({ title, hint }: { title: string; hint?: string }) {
  * 界面上不能靠高亮某个模型制造"这就是最优解"的印象。
  * 表头用各自的指标名（IC / ICIR / QLIKE / AUC / Brier / F1），不翻译成口语。
  */
-export function QuantPanel({ data }: { data: QuantModels }) {
+export function QuantPanel({ data, className = '' }: { data: QuantModels; className?: string }) {
   return (
-    <Card title="量化模型" note="· vol 预测 / 回撤预警 / 组合模拟（样本外）">
+    <Card className={className} title="量化模型" note="· vol 预测 / 回撤预警 / 组合模拟（样本外）">
       <div className="text-[11.5px] leading-relaxed text-fg-4">
         只陈列模型对照原始值，<b className="font-semibold text-fg-3">不给出"哪个更好"的结论</b> —— 本项目样本外验证（51 窗口）
         的结论是「看不出优于等权持有的选基能力」，界面上不制造最优解印象。

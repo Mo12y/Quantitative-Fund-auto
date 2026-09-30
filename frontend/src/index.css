@@ -233,37 +233,34 @@ body {
 }
 .rise-in {
   animation: qfa-rise 0.42s cubic-bezier(0.22, 0.72, 0.28, 1) backwards;
+  /* 延迟走**自定义属性**（会继承），而不是直接写 animation-delay ——
+     这样卡片无论被包在几层容器里（比如 Bento 栅格的 Tile）都能拿到同一个节奏。 */
+  animation-delay: var(--rise-delay, 0ms);
 }
 
-/* 错峰：整屏卡片"唰"地同时出现是最廉价的效果。按 main 的直接子元素排，
-   并覆盖一层栅格子元素（否则栅格里的卡片会先于上面的卡片出现，时间线乱掉）。 */
-main > :nth-child(1),
-main > :nth-child(1) > * {
-  animation-delay: 0ms;
+/* 错峰节拍：只在这里定义一处，嵌套多深都继承得到。
+   ⚠️ 曾用 `main > *:nth-child(k) > *` 直接写 animation-delay ——
+   一旦卡片被包进栅格 Tile（多一层），节奏就断了。 */
+main > :nth-child(1) {
+  --rise-delay: 0ms;
 }
-main > :nth-child(2),
-main > :nth-child(2) > * {
-  animation-delay: 60ms;
+main > :nth-child(2) {
+  --rise-delay: 60ms;
 }
-main > :nth-child(3),
-main > :nth-child(3) > * {
-  animation-delay: 120ms;
+main > :nth-child(3) {
+  --rise-delay: 120ms;
 }
-main > :nth-child(4),
-main > :nth-child(4) > * {
-  animation-delay: 180ms;
+main > :nth-child(4) {
+  --rise-delay: 180ms;
 }
-main > :nth-child(5),
-main > :nth-child(5) > * {
-  animation-delay: 240ms;
+main > :nth-child(5) {
+  --rise-delay: 240ms;
 }
-main > :nth-child(6),
-main > :nth-child(6) > * {
-  animation-delay: 300ms;
+main > :nth-child(6) {
+  --rise-delay: 300ms;
 }
-main > :nth-child(n + 7),
-main > :nth-child(n + 7) > * {
-  animation-delay: 360ms;
+main > :nth-child(n + 7) {
+  --rise-delay: 360ms;
 }
 
 /* ── 条形/进度：从左侧"长出来"（transform 走合成层，不触发布局）────────── */
@@ -278,6 +275,8 @@ main > :nth-child(n + 7) > * {
 .grow-x {
   transform-origin: left center;
   animation: qfa-grow 0.9s cubic-bezier(0.2, 0.75, 0.25, 1) backwards;
+  /* 跟着卡片的节奏，再晚 120ms —— 条子在卡片出现之后才长出来 */
+  animation-delay: calc(var(--rise-delay, 0ms) + 120ms);
 }
 
 /* ── 小元素滑入 / 弹出（温度尺指针等）────────────────────────────────── */
@@ -288,7 +287,8 @@ main > :nth-child(n + 7) > * {
   }
 }
 .slide-thumb {
-  animation: qfa-slide-thumb 0.72s cubic-bezier(0.2, 0.75, 0.25, 1) 160ms backwards;
+  animation: qfa-slide-thumb 0.72s cubic-bezier(0.2, 0.75, 0.25, 1) backwards;
+  animation-delay: calc(var(--rise-delay, 0ms) + 160ms);
 }
 
 /* ── 骨架屏：加载时给"形状"，比一行「加载中…」有信息量 ───────────────── */

@@ -93,7 +93,10 @@ ANIM_JS = r"""() => {
   const g = document.querySelector('.grow-x');
   const s = document.querySelector('.slide-thumb');
   const sk = document.querySelector('.skeleton');
-  const delays = [...document.querySelectorAll('main > *')].map(
+  // ⚠️ 读**动画元素自己**的 animation-delay，而不是 `main > *` 的 ——
+  // 错峰现在通过可继承的自定义属性 `--rise-delay` 下发（卡片被包进栅格也能拿到节奏），
+  // 所以父容器上是读不到延迟的。
+  const delays = [...document.querySelectorAll('.rise-in')].map(
     el => getComputedStyle(el).animationDelay);
   return {
     grow: g ? getComputedStyle(g).animationName : null,
