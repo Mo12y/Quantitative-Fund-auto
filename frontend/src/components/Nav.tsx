@@ -1,20 +1,30 @@
-import { ENTRIES, ENTRY_LABEL, type Entry } from '../lib/router'
+import { Icon } from './Icon'
+import { ENTRIES, ENTRY_ICON, ENTRY_LABEL, type Entry } from '../lib/router'
 
 /**
  * 顶栏四入口导航（计划书 §6）。
  *
- * 视觉：**吸顶 + 毛玻璃 + 药丸态**。当前项用「药丸底 + 亮字」，同时带 `aria-current="page"` ——
- * 不只靠颜色区分（同涨跌的色盲约定一致）。
- * 品牌标用主蓝→次紫渐变小方块，作为整站唯一"装饰性"元素。
+ * 视觉：**吸顶 + 毛玻璃 + 药丸态 + 图标**。当前项用「药丸底 + 亮字 + 强调色图标」，
+ * 同时带 `aria-current="page"` —— 不只靠颜色区分（同涨跌的色盲约定一致）。
+ * 品牌标用主蓝→次紫渐变方块，作为整站唯一"装饰性"元素。
  */
 export function Nav({ entry, onGo }: { entry: Entry; onGo: (e: Entry) => void }) {
   return (
-    <div className="sticky top-0 z-30 border-b border-line bg-canvas/72 backdrop-blur-xl">
-      <nav className="mx-auto flex max-w-[1080px] flex-wrap items-center gap-x-2 gap-y-1 px-4">
-        <span className="mr-3 flex items-center gap-2 py-3.5 text-[13.5px] font-semibold text-fg">
+    <div className="sticky top-0 z-30 border-b border-line bg-canvas/55 backdrop-blur-2xl">
+      {/* 导航底部的极光细线：把"吸顶条"和内容分开，同时给品牌区一点颜色 */}
+      <i
+        className="pointer-events-none absolute inset-x-0 bottom-0 h-px opacity-60"
+        style={{
+          background:
+            'linear-gradient(90deg, transparent, rgba(90,162,255,.55) 22%, rgba(139,108,255,.55) 62%, transparent)',
+        }}
+        aria-hidden="true"
+      />
+      <nav className="relative mx-auto flex max-w-[1080px] flex-wrap items-center gap-x-2 gap-y-1 px-4">
+        <span className="mr-3 flex items-center gap-2.5 py-3.5 text-[13.5px] font-semibold text-fg">
           <i
-            className="inline-block h-[14px] w-[14px] shrink-0 rounded-[5px]"
-            style={{ background: 'linear-gradient(135deg, var(--color-accent), var(--color-accent-2))' }}
+            className="grad-brand inline-block h-[17px] w-[17px] shrink-0 rounded-[6px]"
+            style={{ boxShadow: '0 0 16px -2px rgba(90,162,255,.75)' }}
             aria-hidden="true"
           />
           量化基金
@@ -31,12 +41,13 @@ export function Nav({ entry, onGo }: { entry: Entry; onGo: (e: Entry) => void })
                 onClick={() => onGo(e)}
                 aria-current={on ? 'page' : undefined}
                 className={
-                  'rounded-full px-3.5 py-1.5 text-[13px] transition-all duration-150 ' +
+                  'inline-flex items-center gap-1.5 rounded-full px-3.5 py-1.5 text-[13px] transition-all duration-150 ' +
                   (on
-                    ? 'bg-card-hi text-fg shadow-[inset_0_1px_0_rgba(255,255,255,.07),0_6px_18px_-12px_rgba(0,0,0,.9)]'
+                    ? 'bg-card-hi text-fg shadow-[inset_0_1px_0_rgba(255,255,255,.08),0_8px_22px_-14px_rgba(0,0,0,.95)]'
                     : 'text-fg-3 hover:bg-card hover:text-fg-2')
                 }
               >
+                <Icon name={ENTRY_ICON[e]} size={15} className={on ? 'text-accent' : ''} />
                 {ENTRY_LABEL[e]}
               </button>
             )

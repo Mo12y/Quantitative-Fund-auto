@@ -21,6 +21,14 @@ export const ENTRY_LABEL: Record<Entry, string> = {
   settings: '设置',
 }
 
+/** 入口图标名（对应 `components/Icon.tsx` 的键）。纯粹是导航的视觉锚点，不影响语义。 */
+export const ENTRY_ICON: Record<Entry, string> = {
+  today: 'today',
+  position: 'position',
+  research: 'research',
+  settings: 'settings',
+}
+
 /** 解析 hash → 入口；无法识别（含空 hash）**一律回落 today**，不抛错、不白屏。 */
 function parse(hash: string): Entry {
   const h = hash.replace(/^#\/?/, '').trim()

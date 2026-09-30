@@ -31,9 +31,11 @@ export function Card({ title, note, lead = false, action, className = '', childr
       }
     >
       {(title || action) && (
-        <header className="mb-3 flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
+        <header className="mb-3.5 flex flex-wrap items-center justify-between gap-x-3 gap-y-1">
           {title ? (
-            <h2 className="text-[12px] font-semibold tracking-[.06em] text-fg-3">
+            <h2 className="flex items-center text-[12px] font-semibold tracking-[.06em] text-fg-3">
+              {/* 标题前的渐变强调条：给每张卡一个视觉锚点（纯文字标题会显得平） */}
+              <i className="grad-brand mr-2 inline-block h-[11px] w-[3px] shrink-0 rounded-full" aria-hidden="true" />
               {title}
               {note && <span className="ml-2 font-normal tracking-normal text-fg-4">{note}</span>}
             </h2>

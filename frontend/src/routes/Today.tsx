@@ -26,11 +26,6 @@ function tempTone(t: number): string {
   if (t <= 80) return 'text-warn'
   return 'text-rise'
 }
-function tempBar(t: number): string {
-  if (t <= 60) return 'bg-accent'
-  if (t <= 80) return 'bg-warn'
-  return 'bg-rise'
-}
 
 /**
  * 温度显示精度：保留 1 位小数。
@@ -134,13 +129,43 @@ export default function Today() {
                   </span>
                 </div>
               )}
-              {/* 温度条只在有读数时画 —— 数据不足时画一条 0% 的条同样是"假装有读数" */}
+              {/* 温度尺：**刻度轨道 + 指针**，不是进度条 ——
+                  温度是"落在哪一档"的读数，用指针读**位置**比用填充读**长度**更直接；
+                  轨道底色本身就是冷→热渐变，指针一放上去档位自明。
+                  ⚠️ 数据不足时**整条尺子都不画** —— 画一条 0% 的条同样是"假装有读数"。 */}
               {!ov.temp.insufficient_data && ov.temp.temperature != null && (
-                <div className="my-2.5 h-[5px] overflow-hidden rounded-[3px] bg-inset">
-                  <i
-                    className={'block h-full ' + tempBar(ov.temp.temperature)}
-                    style={{ width: `${Math.max(0, Math.min(100, ov.temp.temperature))}%` }}
-                  />
+                <div className="mt-3">
+                  <div
+                    className="relative h-[9px] rounded-full"
+                    style={{
+                      background:
+                        'linear-gradient(90deg, rgba(90,162,255,.34), rgba(90,162,255,.16) 26%, rgba(227,179,65,.26) 62%, rgba(255,107,94,.32))',
+                    }}
+                  >
+                    {[20, 40, 60, 80].map((v) => (
+                      <i
+                        key={v}
+                        className="absolute top-0 h-full w-px bg-canvas/55"
+                        style={{ left: `${v}%` }}
+                        aria-hidden="true"
+                      />
+                    ))}
+                    <i
+                      className="absolute -top-[2px] h-[13px] w-[3px] rounded-full bg-fg"
+                      style={{
+                        left: `calc(${Math.max(0, Math.min(100, ov.temp.temperature))}% - 1.5px)`,
+                        boxShadow: '0 0 10px rgba(238,243,250,.65)',
+                      }}
+                      aria-hidden="true"
+                    />
+                  </div>
+                  <div className="relative mt-1 h-[13px] text-[10px] text-fg-4">
+                    {[20, 40, 60, 80].map((v) => (
+                      <span key={v} className="absolute -translate-x-1/2" style={{ left: `${v}%` }}>
+                        {v}
+                      </span>
+                    ))}
+                  </div>
                 </div>
               )}
               <div className="text-[11.5px] leading-relaxed text-fg-4">

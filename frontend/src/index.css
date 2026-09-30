@@ -1,35 +1,34 @@
 @import "tailwindcss";
 
 /* ============================================================================
-   设计 token v2 —— 2026-09-30 视觉升级（用户授权「放开做美观」）
-   方向：**深空石板 + 极光强调**（专业金融终端感）
-   依据：本轮调研（2025 暗色金融趋势 / Finaura 设计系统 / Ghostfolio 视觉极简）
-     · 暗色不纯黑 + **顶部柔光**制造纵深（纯黑平面会显得廉价）
-     · 三级明度阶梯 canvas < card < inset，卡面加**顶部内高光**与柔阴影
-     · 强调色在暗背景下降饱和，避免 vibrate；主蓝 + 次紫用于渐变
-     · 金融数据层级：**字段名小号弱色，数字大号高对比**；数字一律等宽
-     · 微交互：卡片入场、hover 过渡、可见焦点环
+   设计 token v3 —— 2026-09-30 第二轮（用户：「太素了 / 非常无聊 / 背景除了卡片都是纯黑」）
+   方向：**极光底 + 磨砂玻璃卡**（现代金融终端质感）
+   依据：GitHub 源码（shadcn-ui/ui 的 globals.css、ghostfolio/ghostfolio 的 styles.scss）
+     · 大面积暗底色**不能是纯色**：会显死、显廉价 → 多层极光 + 颗粒
+     · 卡片用**磨砂玻璃**（半透明 + backdrop-blur）而非实心块 → 与底色产生交互
+     · 明度阶梯 canvas < card < inset；边框半透明（在任何底色上自适应）
+     · 金融数据层级：字段名小号弱色，数字大号高对比；数字一律等宽
    ⚠️ 两条硬约束**不变**（功能性，非审美）：
      · **涨红跌绿**（中国惯例）—— 命名用 rise/fall，不要用 up/down
      · 涨跌**不能只靠颜色**（红绿组合影响约 8% 男性）→ 必须同时给 ▲▼
    ============================================================================ */
 @theme {
-  /* 层级（canvas < card < inset）—— 明度阶梯比例对齐 shadcn/ui 的 oklch L 0.145/0.205/0.269 */
-  --color-canvas: #090c12;
-  --color-card: #131922;
-  --color-card-hi: #1b2230;
-  --color-inset: #1a212c;
-  /* ⚠️ 边框用**半透明**（取自 shadcn/ui `oklch(1 0 0 / 10%)` 的做法）：
+  /* 层级（canvas < card < inset）—— 明度阶梯比例对齐 shadcn 的 oklch L 0.145/0.205/0.269 */
+  --color-canvas: #080b12;
+  --color-card: #141a25;
+  --color-card-hi: #1d2534;
+  --color-inset: #1a2130;
+  /* ⚠️ 边框用**半透明**（取自 shadcn/ui `oklch(1 0 0 / 10%)`）：
      实色边框只在特定底色上成立，半透明在 canvas/card/inset 上都自适应。 */
-  --color-line: rgba(154, 178, 214, 0.10);
-  --color-line-strong: rgba(154, 178, 214, 0.20);
+  --color-line: rgba(158, 182, 220, 0.11);
+  --color-line-strong: rgba(158, 182, 220, 0.22);
 
   /* 文本四级 —— 采用 Ghostfolio/Material 的 alpha 阶梯（.87/.70/.50/.38），
      而不是四个随手挑的灰：层级差恒定，任何底色上对比关系都不变 */
-  --color-fg: #e9eff7;
-  --color-fg-2: #a2b0c4;
-  --color-fg-3: #7a8799;
-  --color-fg-4: #596476;
+  --color-fg: #eef3fa;
+  --color-fg-2: #a6b4c8;
+  --color-fg-3: #7d8a9d;
+  --color-fg-4: #5b6678;
 
   /* 强调（降饱和 + 次色用于渐变） */
   --color-accent: #5aa2ff;
@@ -48,8 +47,8 @@
 
   --radius-sm: 8px;
   --radius-md: 12px;
-  --radius-lg: 16px;
-  --radius-xl: 22px;
+  --radius-lg: 18px;
+  --radius-xl: 24px;
 
   --font-mono: ui-monospace, SFMono-Regular, "SF Mono", Consolas, monospace;
   --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
@@ -58,14 +57,15 @@
 
 html {
   color-scheme: dark;
+  background-color: #05070c;
   /* 吸顶导航会盖住锚点目标 —— 必须留出它的高度（shadcn/ui 同做法） */
-  scroll-padding-top: 64px;
+  scroll-padding-top: 76px;
   overscroll-behavior-y: none;
 }
 
-/* 选中态配色（shadcn/ui 同做法：默认蓝底白字在暗色下太刺） */
+/* 选中态配色（默认蓝底白字在暗色下太刺） */
 ::selection {
-  background: rgba(90, 162, 255, 0.28);
+  background: rgba(90, 162, 255, 0.30);
   color: var(--color-fg);
 }
 
@@ -88,36 +88,78 @@ body {
   text-rendering: optimizeLegibility;
   /* 不合成字重：避免浏览器把 500 假装成 600，字重层级失真 */
   font-synthesis-weight: none;
-  /* 顶部两团柔光（蓝 + 紫）制造纵深；固定不随滚动，像环境光 */
-  background:
-    radial-gradient(900px 460px at 10% -10%, rgba(90, 162, 255, 0.11), transparent 62%),
-    radial-gradient(820px 420px at 92% -14%, rgba(139, 108, 255, 0.10), transparent 60%),
-    var(--color-canvas);
-  background-attachment: fixed;
-  background-color: var(--color-canvas);
+
+  /* ==========================================================================
+     极光底 —— 解决"卡片之外都是纯黑"。
+     三层叠：
+       ① **颗粒**：大面积暗色在真实显示器上会出现色带与"死区"，颗粒把它变成有质感的表面；
+       ② **极光**：三团位置/色相错开的柔光（主蓝 / 次紫 / 青），让一屏里始终有冷暖过渡；
+       ③ 底色：极深的蓝黑（不是 #000 —— 纯黑在 OLED 之外几乎不可读）。
+     全部 `fixed`：滚动时极光不动，卡片在其上"滑过"，与磨砂玻璃配合产生纵深。
+     ========================================================================== */
+  background-color: #0a0e17;
+  background-image:
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='4' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='160' height='160' filter='url(%23n)' opacity='.20'/%3E%3C/svg%3E"),
+    radial-gradient(1250px 740px at 4% -18%, rgba(56, 132, 255, 0.34), transparent 60%),
+    radial-gradient(1050px 660px at 100% -12%, rgba(140, 92, 255, 0.30), transparent 58%),
+    radial-gradient(900px 580px at -8% 52%, rgba(56, 132, 255, 0.15), transparent 62%),
+    radial-gradient(1500px 860px at 62% 118%, rgba(20, 196, 190, 0.22), transparent 64%);
+  background-repeat: repeat, no-repeat, no-repeat, no-repeat, no-repeat;
+  background-size: 160px 160px, auto, auto, auto, auto;
+  background-attachment: fixed, fixed, fixed, fixed, fixed;
 }
 
-/* ── 卡面：顶部内高光 + 柔阴影，建立"浮起"的层级 ───────────────────────── */
-.surface {
+/* ── 磨砂玻璃卡面 ────────────────────────────────────────────────────────
+   与实心卡片的关键差别：**半透明 + backdrop-blur**，于是底部极光会透上来一点点，
+   卡片不再是"贴上去的一块砖"，而是与背景有交互的一层。
+   顶部内高光模拟掠射光，柔阴影负责层级。                                          */
+.surface,
+.glass {
   background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.035), rgba(255, 255, 255, 0) 42%),
-    var(--color-card);
+    linear-gradient(180deg, rgba(255, 255, 255, 0.055), rgba(255, 255, 255, 0) 46%),
+    rgba(20, 27, 38, 0.70);
+  backdrop-filter: blur(16px) saturate(140%);
+  -webkit-backdrop-filter: blur(16px) saturate(140%);
+}
+.surface {
   border: 1px solid var(--color-line);
   box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.04),
-    0 18px 40px -28px rgba(0, 0, 0, 0.95);
+    inset 0 1px 0 rgba(255, 255, 255, 0.055),
+    0 22px 48px -30px rgba(0, 0, 0, 0.92);
 }
 
-/* 强调卡（结论卡）：左侧极光条 + 稍强阴影 */
+/* 强调卡（结论卡）：左侧极光条 + 内嵌极光 + 更强阴影 */
 .surface-lead {
-  border-left: 2px solid var(--color-accent);
+  position: relative;
+  border: 1px solid var(--color-line);
   background:
-    linear-gradient(90deg, rgba(90, 162, 255, 0.10), rgba(90, 162, 255, 0) 30%),
-    linear-gradient(180deg, rgba(255, 255, 255, 0.04), rgba(255, 255, 255, 0) 42%),
-    var(--color-card);
+    radial-gradient(560px 220px at 0% 0%, rgba(90, 162, 255, 0.17), transparent 70%),
+    radial-gradient(420px 200px at 100% 0%, rgba(139, 108, 255, 0.10), transparent 70%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.05), rgba(255, 255, 255, 0) 44%),
+    rgba(22, 29, 42, 0.80);
+  backdrop-filter: blur(18px) saturate(140%);
+  -webkit-backdrop-filter: blur(18px) saturate(140%);
   box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.045),
-    0 22px 50px -30px rgba(0, 0, 0, 0.98);
+    inset 0 1px 0 rgba(255, 255, 255, 0.06),
+    0 26px 56px -30px rgba(0, 0, 0, 0.98);
+}
+/* 左强调条用伪元素而不是 border-image —— border-image 会接管**所有**边，
+   把其余三边的细边框也变成渐变，与"只强调左侧"的意图相反。 */
+.surface-lead::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 16px;
+  bottom: 16px;
+  width: 2px;
+  border-radius: 2px;
+  background: linear-gradient(180deg, var(--color-accent), var(--color-accent-2));
+  box-shadow: 0 0 14px -1px rgba(90, 162, 255, 0.65);
+}
+
+/* 带极光晕染的区块（KPI 格、chip 等）——统一入口，避免各处手写 rgba */
+.tint-aurora {
+  background-image: radial-gradient(150px 78px at 0% 0%, rgba(90, 162, 255, 0.10), transparent 72%);
 }
 
 /* ── 字段名：小号、弱色、微字距（金融界面惯例）───────────────────────── */
@@ -140,7 +182,7 @@ body {
   transition: background-color 0.14s ease;
 }
 .row-hover:hover {
-  background-color: rgba(255, 255, 255, 0.022);
+  background-color: rgba(255, 255, 255, 0.028);
 }
 
 /* ── 滚动条（默认太亮，压暗到与画布同系）────────────────────────────── */
@@ -169,11 +211,11 @@ body {
   border-radius: 4px;
 }
 
-/* ── 入场微动效：卡片自下轻浮入（0.3s，克制）────────────────────────── */
+/* ── 入场微动效：卡片自下轻浮入（0.34s，克制）────────────────────────── */
 @keyframes qfa-rise {
   from {
     opacity: 0;
-    transform: translateY(7px);
+    transform: translateY(8px);
   }
   to {
     opacity: 1;
@@ -181,7 +223,12 @@ body {
   }
 }
 .rise-in {
-  animation: qfa-rise 0.32s cubic-bezier(0.22, 0.7, 0.3, 1) both;
+  animation: qfa-rise 0.34s cubic-bezier(0.22, 0.7, 0.3, 1) both;
+}
+
+/* 品牌渐变（导航标 / 卡片标题前的强调条共用一处，避免各写一遍色值） */
+.grad-brand {
+  background-image: linear-gradient(135deg, var(--color-accent), var(--color-accent-2));
 }
 
 /* 尊重系统的"减少动态效果"偏好 */

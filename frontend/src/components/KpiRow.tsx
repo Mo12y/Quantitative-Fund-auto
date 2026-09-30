@@ -105,10 +105,25 @@ export function KpiRow({
     },
   ]
 
+  /**
+   * 分格线：手写而不是用 `gap-px + bg-line` 的老技巧 ——
+   * 那个技巧要求容器铺一层"线色"底，于是格子必须**不透明**才不会被染白，
+   * 而这里想让整块跟卡片一样是磨砂玻璃（半透明 + blur）。
+   * 移动端 2 列 / sm 起 4 列，分格线规则不同，故按索引算。
+   */
+  const sep = (i: number): string => {
+    const p = ['border-line']
+    if (i % 2 === 1) p.push('border-l') // 移动端：每行第 2 格画左边线
+    if (i >= 2) p.push('border-t') // 移动端：第二行起画上边线
+    if (i > 0) p.push('sm:border-l') // 桌面端：除首格外都画左边线
+    p.push('sm:border-t-0') // 桌面端单行，不要上边线
+    return p.join(' ')
+  }
+
   return (
-    <div className="rise-in mb-4 grid grid-cols-2 gap-px overflow-hidden rounded-[var(--radius-lg)] border border-line bg-line shadow-[inset_0_1px_0_rgba(255,255,255,.04),0_18px_40px_-28px_rgba(0,0,0,.95)] sm:grid-cols-4">
-      {items.map((it) => (
-        <div key={it.label} className="bg-card px-4 py-4">
+    <div className="rise-in glass mb-4 grid grid-cols-2 overflow-hidden rounded-[var(--radius-lg)] border border-line shadow-[0_22px_48px_-30px_rgba(0,0,0,.92)] sm:grid-cols-4">
+      {items.map((it, i) => (
+        <div key={it.label} className={'tint-aurora px-4 py-4 ' + sep(i)}>
           <div className="field mb-1.5">{it.label}</div>
           <div className={'num text-[26px] font-semibold leading-none tracking-[-.02em] sm:text-[30px] ' + it.cls}>
             {it.sym && <span className="mr-1 align-top text-[12px] opacity-90">{it.sym}</span>}
