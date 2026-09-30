@@ -8,7 +8,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspa
 # 联网刷新请用 CLI：python src/main.py temp（此时不设此变量，默认 live）。
 os.environ.setdefault("QFA_MARKET_LIVE", "0")
 
-from flask import Flask, jsonify, render_template, request
+from flask import Flask, jsonify, render_template, request, send_from_directory
 from flask.json.provider import DefaultJSONProvider
 from src.data.database import Database
 from src.analysis.fund_scorer import FundScreener, type_bucket
@@ -51,6 +51,8 @@ BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
 DB_PATH = os.path.join(BASE_DIR, "data", "fund_quant.db")
 SECTORS_CACHE_FILE = os.path.join(BASE_DIR, "data", "sectors_cache.json")
 STATIC_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
+# 新前端（React）构建产物；由下方 /v2 路由托管，与旧仪表盘并存
+FRONTEND_DIST = os.path.join(BASE_DIR, "frontend", "dist")
 
 # 板块数据缓存（启动时预计算）
 _sectors_cache = None
@@ -207,6 +209,26 @@ def index():
         # 改不动静态资源版本号时，宁可让浏览器每次都回源，也不要它继续用旧 JS
         v = int(time.time())
     return render_template("dashboard.html", v=v)
+
+
+@app.route("/v2")
+@app.route("/v2/")
+def index_v2():
+    """新前端（React 构建产物）—— 挂在 /v2，与旧仪表盘（/）并存对照跑。
+
+    产物由 `frontend/` 构建（npm run build，base=/v2/）；未构建时给明确提示而不是 404。
+    """
+    if not os.path.exists(os.path.join(FRONTEND_DIST, "index.html")):
+        return jsonify({"ok": False, "error": "新前端尚未构建：在 frontend/ 下执行 npm run build"}), 503
+    return send_from_directory(FRONTEND_DIST, "index.html")
+
+
+@app.route("/v2/<path:filename>")
+def v2_static(filename):
+    """静态资源（assets/*）；未命中的路径回落 index.html（SPA 语义）。"""
+    if os.path.isfile(os.path.join(FRONTEND_DIST, filename)):
+        return send_from_directory(FRONTEND_DIST, filename)
+    return send_from_directory(FRONTEND_DIST, "index.html")
 
 
 def _all_plan():

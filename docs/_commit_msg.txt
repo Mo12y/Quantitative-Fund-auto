@@ -1,0 +1,35 @@
+feat(前端): 入库 React 新前端脚手架 + /v2 托管（阶段 0/1 交接）
+
+接手核查后提交在途工作。这不是我写的，是我验证后入库的——原执行者把
+frontend/ 与 /v2 路由留在工作区未提交。
+
+## 内容
+
+- frontend/：React 19 + Vite 6 + TS 5.7 + Tailwind v4 + Recharts 2.15
+  23 个源文件（node_modules/ 与 dist/ 已由 frontend/.gitignore 排除）
+- src/web/app.py：新增 /v2 与 /v2/<path> 路由，托管 frontend/dist
+  未构建时返 503 + 中文提示，静态未命中回落 index.html（SPA 语义）
+- docs/前端重构计划书.md：决策、设计规范、API 契约、分阶段计划、验收、已知缺口
+
+## 为什么推倒重来（计划书 §1，我复核后认可）
+
+1. app.js 1385 行靠模板字符串拼 HTML，双路径分叉、难测
+2. **一个功能性错误**：app.css 的涨跌色是欧美惯例（绿=涨/红=跌），
+   中国惯例是涨红跌绿 → 旧界面满屏"涨了显示绿、跌了显示红"。
+   新前端把方向判定收成 lib/format.ts 唯一入口，并命名用 rise/fall 而非 up/down
+   （up/down 在两种惯例下颜色相反，正是这次事故的词源）。
+
+## 接手验证（实测，非声明）
+
+| 项 | 命令 | 结果 |
+|---|---|---|
+| 后端测试基线 | python -m pytest tests/ -q | **618 passed, 2 skipped** ✅ |
+| 构建可复现 | cd frontend && npm run build | tsc -b + vite 双向绿，636.37 kB / gzip 185.04 kB ✅ |
+| 旧仪表盘不回归 | GET / | 200 ✅ |
+| 新前端托管 | GET /v2、/v2/ | 200 ✅ |
+| API 正常 | GET /api/overview | 200 ✅ |
+
+## 未做（留给阶段 2）
+
+浏览器侧逐项验收（计划书 §8 要求：顶栏/结论卡五格/KPI 四格/曲线双线/
+持仓筛选排序/温度卡均出现且 console 无 error）——尚未执行，故**不声称阶段 1 已完成**。
