@@ -3,6 +3,7 @@ import { Card } from '../components/Card'
 import { ConstraintNote } from '../components/ConstraintNote'
 import { PageHead } from '../components/PageHead'
 import { QuantPanel } from '../components/QuantPanel'
+import { Skeleton } from '../components/Skeleton'
 import { SourceTag } from '../components/SourceTag'
 import { Warming } from '../components/Warming'
 import { fmtMoney, fmtPct, plainText } from '../lib/format'
@@ -72,7 +73,11 @@ export default function Settings() {
       {/* ── 投资计划 ─────────────────────────────────────────── */}
       <Card title="投资计划" note={pl ? `· ${plainText(pl.name)}` : ''}>
         {!pl ? (
-          <div className="text-sm text-fg-3">{plan.error ? `读取失败：${plan.error}` : '加载中…'}</div>
+          plan.error ? (
+            <div className="text-sm text-fg-2">读取失败：{plan.error}</div>
+          ) : (
+            <Skeleton lines={4} />
+          )
         ) : (
           <>
             <div className="grid grid-cols-2 gap-x-6 gap-y-3 sm:grid-cols-3">
@@ -175,10 +180,10 @@ export default function Settings() {
               （gitignore，个人文件）。约束<b className="font-semibold text-fg-3">只作用于候选筛选与买入候选</b>，不改变持仓与账本。
             </div>
           </>
+        ) : rebalance.error ? (
+          <div className="text-sm text-fg-2">读取失败：{rebalance.error}</div>
         ) : (
-          <div className={'text-sm ' + (rebalance.error ? 'text-fg-2' : 'text-fg-3')}>
-            {rebalance.error ? `读取失败：${rebalance.error}` : '加载中…'}
-          </div>
+          <Skeleton lines={4} />
         )}
       </Card>
 
@@ -187,9 +192,7 @@ export default function Settings() {
         <QuantPanel data={quant.data} />
       ) : (
         <Card title="量化模型">
-          <div className={'text-sm ' + (quant.error ? 'text-fg-2' : 'text-fg-3')}>
-            {quant.error ? `读取失败：${quant.error}` : '加载中…'}
-          </div>
+          {quant.error ? <div className="text-sm text-fg-2">读取失败：{quant.error}</div> : <Skeleton lines={5} />}
         </Card>
       )}
 

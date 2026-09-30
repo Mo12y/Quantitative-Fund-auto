@@ -5,6 +5,7 @@ import { Card } from '../components/Card'
 import { PageHead } from '../components/PageHead'
 import { PoolBoard } from '../components/PoolBoard'
 import { SectorTable } from '../components/SectorTable'
+import { Skeleton } from '../components/Skeleton'
 import { SourceTag } from '../components/SourceTag'
 import { Warming } from '../components/Warming'
 import { useApi } from '../lib/useApi'
@@ -16,13 +17,15 @@ import { useApi } from '../lib/useApi'
  */
 const loadBoard = (o?: GetOptions) => endpoints.fundsBoard(8, 300, o)
 
-/** 分区块的兜底：失败说原因、等待说加载中（都不许白屏） */
+/** 分区块的兜底：失败说原因、等待给骨架（都不许白屏） */
 function fallback(title: string, st: { error: string | null }): ReactNode {
   return (
     <Card title={title}>
-      <div className={'text-sm ' + (st.error ? 'text-fg-2' : 'text-fg-3')}>
-        {st.error ? `读取失败：${st.error}` : '加载中…'}
-      </div>
+      {st.error ? (
+        <div className="text-sm text-fg-2">读取失败：{st.error}</div>
+      ) : (
+        <Skeleton lines={4} />
+      )}
     </Card>
   )
 }

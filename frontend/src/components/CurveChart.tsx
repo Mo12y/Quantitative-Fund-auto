@@ -203,6 +203,9 @@ export function CurveChart({ curve }: { curve: PortfolioCurve }) {
               baseValue={0}
               dot={false}
               activeDot={{ r: 4, strokeWidth: 0 }}
+              /* 绘制动效：本组合先画，沪深300 稍晚跟上 —— 一起画会看不出两条线的关系 */
+              animationDuration={950}
+              animationEasing="ease-out"
             />
             <Line
               type="monotone"
@@ -212,6 +215,9 @@ export function CurveChart({ curve }: { curve: PortfolioCurve }) {
               strokeWidth={1.8}
               strokeDasharray="6 4"
               dot={false}
+              animationBegin={260}
+              animationDuration={950}
+              animationEasing="ease-out"
             />
             {/* 末点强调：一眼看到"现在在哪" */}
             <ReferenceDot

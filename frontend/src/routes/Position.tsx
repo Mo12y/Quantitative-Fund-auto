@@ -3,6 +3,7 @@ import type { DcaPlan, InvestmentPlan } from '../api/types'
 import { Card } from '../components/Card'
 import { HoldingsTable } from '../components/HoldingsTable'
 import { PageHead } from '../components/PageHead'
+import { Skeleton } from '../components/Skeleton'
 import { SourceTag } from '../components/SourceTag'
 import { VerdictCard } from '../components/VerdictCard'
 import { Warming } from '../components/Warming'
@@ -57,10 +58,11 @@ function PlanProgress({ plan }: { plan: InvestmentPlan | null }) {
                 {fmtMoney(f.invested)} / {fmtMoney(f.target)}
               </span>
             </div>
-            {/* 进度条：百分比来自后端 progress_pct（不自己算，避免与后端口径分叉） */}
-            <div className="mt-1 h-[4px] overflow-hidden rounded-[2px] bg-inset">
+            {/* 进度条：百分比来自后端 progress_pct（不自己算，避免与后端口径分叉）；
+                条子用 scaleX 从左侧"长出来"（合成层动画，不触发重排） */}
+            <div className="mt-1 h-[5px] overflow-hidden rounded-full bg-inset">
               <i
-                className="block h-full bg-accent"
+                className="grad-brand grow-x block h-full rounded-full"
                 style={{ width: `${Math.max(0, Math.min(100, f.progress_pct))}%` }}
               />
             </div>
@@ -169,7 +171,7 @@ export default function Position() {
 
       {!ov && !overview.error && (
         <Card lead title="持仓" note="· 结论">
-          <div className="text-sm text-fg-3">加载中…</div>
+          <Skeleton lines={3} />
         </Card>
       )}
 
@@ -191,9 +193,7 @@ export default function Position() {
             <DcaList plans={dca.data} />
           ) : (
             <Card title="定投计划">
-              <div className={'text-sm ' + (dca.error ? 'text-fg-2' : 'text-fg-3')}>
-                {dca.error ? `读取失败：${dca.error}` : '加载中…'}
-              </div>
+              {dca.error ? <div className="text-sm text-fg-2">读取失败：{dca.error}</div> : <Skeleton lines={2} />}
             </Card>
           )}
         </>

@@ -211,11 +211,13 @@ body {
   border-radius: 4px;
 }
 
-/* ── 入场微动效：卡片自下轻浮入（0.34s，克制）────────────────────────── */
+/* ── 入场微动效：卡片自下轻浮入 + 按 DOM 顺序**错峰** ─────────────────────
+   `fill-mode: backwards`（不是 both）：动画结束后交还给元素自身样式，
+   否则 forwards 会把 `transform` 永久钉在 keyframe 上，后续 hover 之类的变换全部失效。 */
 @keyframes qfa-rise {
   from {
     opacity: 0;
-    transform: translateY(8px);
+    transform: translateY(10px);
   }
   to {
     opacity: 1;
@@ -223,7 +225,101 @@ body {
   }
 }
 .rise-in {
-  animation: qfa-rise 0.34s cubic-bezier(0.22, 0.7, 0.3, 1) both;
+  animation: qfa-rise 0.42s cubic-bezier(0.22, 0.72, 0.28, 1) backwards;
+}
+
+/* 错峰：整屏卡片"唰"地同时出现是最廉价的效果。按 main 的直接子元素排，
+   并覆盖一层栅格子元素（否则栅格里的卡片会先于上面的卡片出现，时间线乱掉）。 */
+main > :nth-child(1),
+main > :nth-child(1) > * {
+  animation-delay: 0ms;
+}
+main > :nth-child(2),
+main > :nth-child(2) > * {
+  animation-delay: 60ms;
+}
+main > :nth-child(3),
+main > :nth-child(3) > * {
+  animation-delay: 120ms;
+}
+main > :nth-child(4),
+main > :nth-child(4) > * {
+  animation-delay: 180ms;
+}
+main > :nth-child(5),
+main > :nth-child(5) > * {
+  animation-delay: 240ms;
+}
+main > :nth-child(6),
+main > :nth-child(6) > * {
+  animation-delay: 300ms;
+}
+main > :nth-child(n + 7),
+main > :nth-child(n + 7) > * {
+  animation-delay: 360ms;
+}
+
+/* ── 条形/进度：从左侧"长出来"（transform 走合成层，不触发布局）────────── */
+@keyframes qfa-grow {
+  from {
+    transform: scaleX(0);
+  }
+  to {
+    transform: scaleX(1);
+  }
+}
+.grow-x {
+  transform-origin: left center;
+  animation: qfa-grow 0.9s cubic-bezier(0.2, 0.75, 0.25, 1) backwards;
+}
+
+/* ── 小元素滑入 / 弹出（温度尺指针等）────────────────────────────────── */
+@keyframes qfa-slide-thumb {
+  from {
+    left: 0;
+    opacity: 0;
+  }
+}
+.slide-thumb {
+  animation: qfa-slide-thumb 0.72s cubic-bezier(0.2, 0.75, 0.25, 1) 160ms backwards;
+}
+
+/* ── 骨架屏：加载时给"形状"，比一行「加载中…」有信息量 ───────────────── */
+@keyframes qfa-shimmer {
+  from {
+    background-position: -180% 0;
+  }
+  to {
+    background-position: 180% 0;
+  }
+}
+.skeleton {
+  border-radius: 6px;
+  background: linear-gradient(
+    90deg,
+    rgba(255, 255, 255, 0.045) 25%,
+    rgba(255, 255, 255, 0.105) 37%,
+    rgba(255, 255, 255, 0.045) 63%
+  );
+  background-size: 220% 100%;
+  animation: qfa-shimmer 1.5s ease-in-out infinite;
+}
+
+/* ── hover 反馈（很克制：只动边框亮度，不做位移）────────────────────────
+   卡片不是可点元素，做"抬起"会暗示可点击，是误导。 */
+.surface,
+.surface-lead,
+.glass {
+  transition: border-color 0.18s ease, box-shadow 0.18s ease;
+}
+.surface:hover,
+.surface-lead:hover {
+  border-color: var(--color-line-strong);
+}
+
+/* 表格行 hover：从左侧一抹极光，帮助"跟住一行"（长表格尤其有用） */
+.row-hover:hover {
+  background-image: linear-gradient(90deg, rgba(90, 162, 255, 0.09), rgba(90, 162, 255, 0) 44%);
 }
 
 /* 品牌渐变（导航标 / 卡片标题前的强调条共用一处，避免各写一遍色值） */
@@ -231,10 +327,13 @@ body {
   background-image: linear-gradient(135deg, var(--color-accent), var(--color-accent-2));
 }
 
-/* 尊重系统的"减少动态效果"偏好 */
+/* 尊重系统的"减少动态效果"偏好 —— 全关，不做例外 */
 @media (prefers-reduced-motion: reduce) {
-  .rise-in {
-    animation: none;
+  .rise-in,
+  .grow-x,
+  .slide-thumb,
+  .skeleton {
+    animation: none !important;
   }
   * {
     transition-duration: 0.001ms !important;

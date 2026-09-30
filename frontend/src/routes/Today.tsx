@@ -4,6 +4,7 @@ import { CurveChart } from '../components/CurveChart'
 import { HoldingsTable } from '../components/HoldingsTable'
 import { KpiRow } from '../components/KpiRow'
 import { PageHead } from '../components/PageHead'
+import { Skeleton } from '../components/Skeleton'
 import { SourceTag } from '../components/SourceTag'
 import { VerdictCard } from '../components/VerdictCard'
 import { Warming } from '../components/Warming'
@@ -89,7 +90,7 @@ export default function Today() {
 
       {!ov && !overview.error && (
         <Card lead title="今天" note="· 结论">
-          <div className="text-sm text-fg-3">加载中…</div>
+          <Skeleton lines={3} />
         </Card>
       )}
 
@@ -151,7 +152,7 @@ export default function Today() {
                       />
                     ))}
                     <i
-                      className="absolute -top-[2px] h-[13px] w-[3px] rounded-full bg-fg"
+                      className="slide-thumb absolute -top-[2px] h-[13px] w-[3px] rounded-full bg-fg"
                       style={{
                         left: `calc(${Math.max(0, Math.min(100, ov.temp.temperature))}% - 1.5px)`,
                         boxShadow: '0 0 10px rgba(238,243,250,.65)',
