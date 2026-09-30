@@ -58,9 +58,16 @@
 html {
   color-scheme: dark;
   background-color: #05070c;
-  /* 吸顶导航会盖住锚点目标 —— 必须留出它的高度（shadcn/ui 同做法） */
-  scroll-padding-top: 76px;
+  /* 吸顶元素会盖住锚点目标，必须留出它的高度 */
+  scroll-padding-top: 24px;
   overscroll-behavior-y: none;
+}
+
+/* 窄屏有吸顶导航条（`Nav` 只在 lg 以下出现），要留出它的高度 */
+@media (max-width: 1023.98px) {
+  html {
+    scroll-padding-top: 76px;
+  }
 }
 
 /* 选中态配色（默认蓝底白字在暗色下太刺） */

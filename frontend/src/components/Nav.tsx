@@ -2,15 +2,17 @@ import { Icon } from './Icon'
 import { ENTRIES, ENTRY_ICON, ENTRY_LABEL, type Entry } from '../lib/router'
 
 /**
- * 顶栏四入口导航（计划书 §6）。
+ * 顶部导航条 —— **只在 `lg` 以下出现**（`lg` 及以上由 `Sidebar.tsx` 接管）。
  *
- * 视觉：**吸顶 + 毛玻璃 + 药丸态 + 图标**。当前项用「药丸底 + 亮字 + 强调色图标」，
+ * 为什么保留两条：212px 的侧栏在 1024px 以下会吃掉 20% 可用宽度，表格/图表先遭殃。
+ * 断点设在 `lg`，两侧各司其职；导航项数据同源于 `lib/router.ts`，不重复定义。
+ *
+ * 视觉：吸顶 + 毛玻璃 + 药丸态 + 图标。当前项用「药丸底 + 亮字 + 强调色图标」，
  * 同时带 `aria-current="page"` —— 不只靠颜色区分（同涨跌的色盲约定一致）。
- * 品牌标用主蓝→次紫渐变方块，作为整站唯一"装饰性"元素。
  */
 export function Nav({ entry, onGo }: { entry: Entry; onGo: (e: Entry) => void }) {
   return (
-    <div className="sticky top-0 z-30 border-b border-line bg-canvas/55 backdrop-blur-2xl">
+    <div className="sticky top-0 z-30 border-b border-line bg-canvas/55 backdrop-blur-2xl lg:hidden">
       {/* 导航底部的极光细线：把"吸顶条"和内容分开，同时给品牌区一点颜色 */}
       <i
         className="pointer-events-none absolute inset-x-0 bottom-0 h-px opacity-60"
