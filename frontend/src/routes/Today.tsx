@@ -67,10 +67,8 @@ export default function Today() {
   return (
     <>
       <div className="mb-4 flex flex-wrap items-baseline justify-between gap-3">
-        <h1 className="text-[17px] font-medium tracking-[.2px]">
-          今天要做什么
-          <span className="ml-1.5 text-[13px] font-normal text-fg-3">量化基金 · 个人账本</span>
-        </h1>
+        {/* 品牌名已移到顶栏导航（`components/Nav.tsx`），这里不再重复 */}
+        <h1 className="text-[17px] font-medium tracking-[.2px]">今天要做什么</h1>
         <SourceTag
           source={overview.source}
           asof={ov ? ov.curve.dates[ov.curve.dates.length - 1] : null}

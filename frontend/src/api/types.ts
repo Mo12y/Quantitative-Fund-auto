@@ -232,3 +232,174 @@ export interface Explain {
   stages: ExplainStage[]
   error?: string
 }
+
+/* ── 筛选池（/api/funds、/api/funds/board） ───────────────────── */
+
+/** B 层约束在池子里的标注结果（§4.4）：kept 通过 / dropped 落选 / skipped 未评估 */
+export type ConstraintStatus = 'kept' | 'dropped' | 'skipped' | string
+
+export interface PoolFund {
+  code: string
+  name: string
+  type: string
+  /** 风险标签，形如「🟢 稳健」（emoji 由 `plainText` 统一剥） */
+  risk: string
+  /** 运作费率（%）。⚠️ 缺失为 `null` —— **不是 0**，界面不得当 0 显示 */
+  fee: number | null
+  score: number | null
+  /** 申购状态文案（如「开放申购」/「限大额」） */
+  purchase_status: string
+  purchasable: string
+  momentum_3m: number | null
+  max_dd_1y: number | null
+  sharpe: number | null
+  ann_vol: number | null
+  /** 同类分组名与组内样本数（分位必须带组，否则会被读成全市场排名） */
+  group: string
+  group_n: number
+  percentiles: Record<string, number | null> | null
+  percentiles_scale?: string | null
+  nav_asof: string | null
+  insufficient_data: boolean
+  reason?: string | null
+  metrics?: Record<string, number | null>
+  /** ⚠️ 池子是**只标注不剔除**（浏览面保持完整）；这里只记状态，不代表被过滤掉 */
+  constraint_status?: ConstraintStatus
+  constraint_reasons?: string[]
+  reasons?: string[]
+}
+
+export interface PoolSummary {
+  total: number
+  avg_fee: number
+  fee_n: number
+  limited_n: number
+  status_unknown_n: number
+  by_risk: Record<string, number>
+}
+
+export interface FundsPayload {
+  funds: PoolFund[]
+  summary: PoolSummary
+  constraint_review?: ConstraintReview | null
+}
+
+/** 筛选池总榜的一块（按板块分组，每块取前 size 只） */
+export interface BoardGroup {
+  board: string
+  total: number
+  funds: PoolFund[]
+}
+
+export interface BoardPool {
+  boards: BoardGroup[]
+  total_funds: number
+  size: number
+  constraint_review?: ConstraintReview | null
+  error?: string
+}
+
+/* ── 行业板块（/api/sectors） ─────────────────────────────────── */
+
+export interface Sector {
+  name: string
+  rank: number
+  ret_1m: number
+  ret_3m: number
+  ret_6m: number
+  score: number
+  ma_ratio: number
+  volatility: number
+  max_dd_6m: number
+}
+
+export interface SectorLite {
+  name: string
+  ret_1m: number
+  ret_3m: number
+}
+
+export interface SectorsPayload {
+  cached_at?: string
+  sectors: Sector[]
+  momentum_leaders: SectorLite[]
+  value_candidates: SectorLite[]
+  error?: string
+}
+
+/* ── 量化模型（/api/quant_models） ────────────────────────────── */
+
+export interface QuantVolRow {
+  model: string
+  ic_mean: number | null
+  icir: number | null
+  qlike: number | null
+  mz_beta: number | null
+  dm_p_vs_base: number | null
+  perm_delta: number | null
+  perm_p_value: number | null
+}
+
+export interface QuantDrawdownRow {
+  model: string
+  threshold: number | null
+  auc: number | null
+  brier: number | null
+  f1: number | null
+  precision_pos: number | null
+  recall_pos: number | null
+  miss_rate: number | null
+}
+
+export interface QuantPortfolioRow {
+  scheme: string
+  months: number
+  total_return: number
+  annual_return: number
+  annual_volatility: number
+  sharpe: number
+  calmar: number
+  max_drawdown: number
+  avg_position: number
+  avg_turnover: number
+}
+
+export interface QuantSignal {
+  month: string
+  pred_vol: number | null
+  vol_target_pos: number | null
+  dd_triggered: number
+  dd_warning_frac: number
+  combined_pos: number
+}
+
+export interface QuantModels {
+  vol: QuantVolRow[]
+  drawdown: QuantDrawdownRow[]
+  portfolio: QuantPortfolioRow[]
+  signals: QuantSignal[]
+  reports: Record<string, boolean>
+  error?: string
+}
+
+/* ── 定投计划（/api/dca） ─────────────────────────────────────── */
+
+export interface DcaPlan {
+  id: number
+  fund_code: string
+  fund_name: string
+  amount_per_period: number
+  frequency: string
+  executed_periods: number
+  expected_periods: number
+  /** 是否有**到期未执行**的期数（前端据此给「待执行」提示，不是装饰） */
+  due: boolean
+  last_synced_at?: string | null
+}
+
+/* ── 投资计划（/api/plan） ────────────────────────────────────── */
+
+export interface PlanPayload {
+  plan: InvestmentPlan | null
+  error?: string
+}
