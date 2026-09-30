@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" role="img" aria-label="量化基金">
+  <!-- 站点图标。取色与两套前端的 token 同源：
+       底色 canvas #0e1117（新前端 --canvas / 旧前端 --canvas 同值）
+       主色 accent #4a9eff（新前端 --accent / 旧前端 --primary 家族）
+       ⚠️ 刻意不用涨跌色（rise/fall）—— 图标是品牌标识，不该随行情语义变色。 -->
+  <rect width="32" height="32" rx="7" fill="#0e1117"/>
+  <path d="M6.5 22.5 L12.5 15.5 L17.5 19.5 L25.5 8.5"
+        fill="none" stroke="#4a9eff" stroke-width="2.6"
+        stroke-linecap="round" stroke-linejoin="round"/>
+  <circle cx="25.5" cy="8.5" r="2.4" fill="#4a9eff"/>
+</svg>

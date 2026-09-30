@@ -62,7 +62,11 @@ export function CurveChart({ curve }: { curve: PortfolioCurve }) {
 
       <div className="h-[190px] w-full">
         <ResponsiveContainer width="100%" height="100%">
-          <LineChart data={data} margin={{ top: 6, right: 6, bottom: 0, left: -16 }}>
+          {/* ⚠️ margin.left 曾是 -16，会把 Y 轴刻度的**负号裁掉**：
+              Recharts 的 Y 轴刻度右对齐，"-4.0%" 比 "4.0%" 多占一格，
+              -16 的负边距正好吃掉这一格 → 图上 -4% 与 +4% 长得一模一样。
+              金融图里这是会误导读数的缺陷，故改为 0（宽度已由 YAxis width 预留）。 */}
+          <LineChart data={data} margin={{ top: 6, right: 6, bottom: 0, left: 0 }}>
             <CartesianGrid stroke={GRID} strokeDasharray="3 4" vertical={false} />
             <XAxis
               dataKey="date"
