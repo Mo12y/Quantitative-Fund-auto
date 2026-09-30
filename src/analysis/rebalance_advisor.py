@@ -62,18 +62,23 @@ class RebalanceAdvisor:
     # 主接口
     # =================================================================
 
-    def analyze(self, total_capital: float = None, cash_reserve: float = 0.0) -> dict:
+    def analyze(self, total_capital: float = None, cash_reserve: float = 0.0,
+                target_equity_override: float = None) -> dict:
         """
         分析当前持仓，生成调仓建议。
 
         Args:
             total_capital: 总资金；不传则 = 持仓市值 + cash_reserve（投资计划的现金弹药）
             cash_reserve: 计划里的现金底仓，作为未投资部分的资金
+            target_equity_override: 覆盖温度模型给出的目标权益占比（%）。
+                来自本地画像 config/user_profile.local.yaml 的 `target_equity_pct`。
+                None = 用温度模型的值。详见 _target_equity_override 的赋值处。
 
         Returns:
             dict: 包含完整的调仓方案
         """
         # 1. 获取数据
+        self._target_equity_override = target_equity_override
         temp = self.thermometer.get_temperature()
         holdings = self.db.get_current_holdings()
 
@@ -108,11 +113,31 @@ class RebalanceAdvisor:
                       "另有 %.1f%% 属 QDII-海外 / 商品 / 其他，温度对它们不适用，**不参与**本次判断。"
                       % non_applicable_pct)
 
-        target_equity_pct = temp["target_equity_pct"]
+        # 目标权益仓位：默认由**温度模型**决定；用户可在本地画像里覆盖
+        # （config/user_profile.local.yaml 的 `target_equity_pct`）。
+        #
+        # 为什么允许覆盖（2026-09-30 用户决策）：温度模型给的是"市场该配多少"，
+        # 但用户的**预期会变**（保守时想 30%、进取时想 45%），不该被模型锁死。
+        # ⚠️ 覆盖时**必须记录来源**（target_source），前端要能说出这个数是谁定的 ——
+        # 否则用户看到一个与温度不符的目标，会以为模型算错了。
+        _override = self._target_equity_override
+        if _override is not None:
+            target_equity_pct = float(_override)
+            target_source = "user_profile"
+        else:
+            target_equity_pct = temp["target_equity_pct"]
+            target_source = "temperature"
 
         # 温度数据不足（全维度缺失 → target_equity_pct 为 None）→ 目标仓位无法确定，
         # **不给任何调仓指令**（黑箱审计 F-02 的连带：旧实现会拿兜底 50.0 硬算出
         # "建议权益 35%" 并据此给出大额买卖指令）。
+        #
+        # ⚠️ 已记录的边界（2026-09-30）：即使用户在画像里显式设了 target_equity_pct，
+        # **本条仍然拦截**。理由：仓位偏差的算术虽然只依赖 current/target（都已知），
+        # 但"加仓买哪只"走 `_build_increase_instructions(..., temp, ...)`，温度缺失时
+        # 那条路径未经充分验证。宁可在这里明确拒绝，也不产出一个没验证过的建议。
+        # 用户若确实想在温度缺失时仍按自己的目标调仓，需要先补 `_build_increase_instructions`
+        # 在 temp 降级下的行为测试 —— 属后续批次，不要在这里偷偷放开。
         if target_equity_pct is None:
             return {
                 "current_equity_pct": round(current_equity_pct, 1),
@@ -140,6 +165,10 @@ class RebalanceAdvisor:
             total_capital, portfolio_value, cash
         )
 
+        # 偏差百分点取整到 1 位后**固定下来**，后面 gap_pct / gap_amount 都用它，
+        # 保证"屏上能显示的三个数"互相自洽（见 gap_amount 处的说明）。
+        _gap_pct = round(target_equity_pct - current_equity_pct, 1)
+
         # 4. 生成摘要
         summary = self._summarize(instructions, current_equity_pct, target_equity_pct,
                                    total_capital, portfolio_value, temp)
@@ -147,13 +176,21 @@ class RebalanceAdvisor:
         return {
             "current_equity_pct": round(current_equity_pct, 1),
             "target_equity_pct": target_equity_pct,
+            "target_source": target_source,
             "non_applicable_pct": round(non_applicable_pct, 1),
             "scope_note": scope_note,
             "total_capital": total_capital,
             "portfolio_value": portfolio_value,
             "cash_available": cash,
+            "rebalance_pp": REBALANCE_PP,
             "need_rebalance": abs(current_equity_pct - target_equity_pct) > REBALANCE_PP,
-            "gap_pct": round(target_equity_pct - current_equity_pct, 1),
+            "gap_pct": _gap_pct,            # 折算成金额的**差额**（正=权益不足需补，负=权益过多需减）。
+            #
+            # ⚠️ 必须用**已取整的 `_gap_pct`** 算，不能用未取整的差值。
+            # 否则用户在屏上自己验算会得到不同的数：实测未取整时 gap_amount=34.57，
+            # 而屏上 36.9 − 33.9 = 3.0，3.0% × 1134.51 = 34.04 —— 差 0.53，
+            # 属于本项目反复栽过的"同屏两个数互相打架"。取整后三个数自洽。
+            "gap_amount": round(_gap_pct / 100.0 * total_capital, 2),
             "temperature": temp,
             "instructions": [self._serialize_instruction(i) for i in instructions],
             "summary": summary,

@@ -1,0 +1,137 @@
+﻿======================================================================
+TABLE investment_plans
+======================================================================
+  id                     INTEGER
+  name                   TEXT
+  goal                   TEXT
+  total_capital          REAL
+  cash_reserve           REAL
+  start_date             TEXT
+  horizon                TEXT
+  risk_pref              TEXT
+  notes                  TEXT
+  status                 TEXT
+  created_at             TEXT
+  updated_at             TEXT
+  ── 1 行样例
+     id                     1
+     name                   '1000元半年建仓计划（剔除纳斯达克）'
+     goal                   '分4笔建仓，温度联动加减仓'
+     total_capital          1000.0
+     cash_reserve           280.0
+     start_date             '2026-08-24'
+     horizon                '6个月'
+     risk_pref              '稳健偏平衡'
+     notes                  '2026-09-01 剔除纳斯达克，额度转入现金底仓'
+     status                 'active'
+     created_at             '2026-09-10 08:40:26'
+     updated_at             '2026-09-10 08:40:26'
+     ----------------------------------------
+
+======================================================================
+TABLE investment_plan_items
+======================================================================
+  id                     INTEGER
+  plan_id                INTEGER
+  fund_code              TEXT
+  fund_name              TEXT
+  role                   TEXT
+  target_amount          REAL
+  target_pct             REAL
+  cadence                TEXT
+  dca_daily              REAL
+  tranches               TEXT
+  notes                  TEXT
+  ── 3 行样例
+     id                     1
+     plan_id                1
+     fund_code              '018392'
+     fund_name              '南方上海金ETF联接C'
+     role                   '🛡️ 黄金对冲'
+     target_amount          300.0
+     target_pct             30.0
+     cadence                None
+     dca_daily              None
+     tranches               '[{"date": "2026-08-24", "amount": 300.0}]'
+     notes                  None
+     ----------------------------------------
+     id                     2
+     plan_id                1
+     fund_code              '007029'
+     fund_name              '易方达中证500ETF联接C'
+     role                   '📊 宽基底仓'
+     target_amount          175.0
+     target_pct             17.5
+     cadence                None
+     dca_daily              None
+     tranches               '[{"date": "2026-08-24", "amount": 100.0}, {"date": "2026-09-20", "amount": 38.0}, {"date": "2026-10-20", "amount": 37.0}]'
+     notes                  None
+     ----------------------------------------
+     id                     3
+     plan_id                1
+     fund_code              '014143'
+     fund_name              '银河创新成长混合C'
+     role                   '🚀 科技卫星'
+     target_amount          175.0
+     target_pct             17.5
+     cadence                None
+     dca_daily              None
+     tranches               '[{"date": "2026-08-24", "amount": 40.0}, {"date": "2026-09-20", "amount": 45.0}, {"date": "2026-10-20", "amount": 45.0}, {"date": "2026-11-20", "amount": 45.0}]'
+     notes                  None
+     ----------------------------------------
+
+======================================================================
+本地画像文件（rebalance.constraint_review 提到 user_profile.local.yaml）
+======================================================================
+  找到: config\user_profile.local.example.yaml
+# 用户画像本地配置 —— **模板**（可入库）
+# 用法：复制本文件为 config/user_profile.local.yaml 并填入自己的偏好。
+# 该 local 文件已加入 .gitignore，不会进版本库（与 investment_plan.local 同一模式）。
+#
+# 键与 src/analysis/user_constraint.py 的 PROFILE_KEYS 一一对应；
+# **未识别的键会被显式忽略**（如 risk_pref 这类自由文本不做映射 —— 没有经校准的
+# "文字→阈值"表，不编造；见 docs/基金推荐系统设计方案.md §4.4）。
+#
+# ── 组别偏好 ──────────────────────────────────────────────────────
+# preferred_groups : 只保留这些参照系组；excluded_groups : 排除这些组
+#   六个组别（精确名称）：
+#     A 偏股混合 / B 灵活配置 / C 主动股票 / D 指数股票 / E 债券 / F QDII/其他
+#
+# ── 风险偏好（两套口径可同时用）────────────────────────────────────
+# min_percentiles / max_percentiles : 同类百分位下限/上限（0-100，**越大越好**口径；
+#   回撤/波动已按方向归一：分越高 = 回撤控制越好）。缺该指标时不猜 → 归"未评估"。
+# max_values / min_values : 指标绝对上限/下限，需要候选带 metrics（当前 /api/recommend 已注入）。
+#   字段：max_drawdown_1y（%）、ann_vol（%）、annual_return（%）、momentum_3m（%）、sharpe
+#   例：max_drawdown_1y: 25 表示"近一年最大回撤不超过 25%"
+#
+# ── 持仓重叠 ─────────────────────────────────────────────────────
+# overlap_max_board_pct : 单个板块在现有持仓中的金额占比上限（%）。默认 40。
+#   ⚠️ 这是**用户偏好值**（不是统计阈值）：现有持仓里 半导体/人工智能 各 19.4%、
+#   黄金 15.2%、宽基 12.1%（2026-09-26 实测）—— 40% 基本只会拦住"已持有同一只"，
+#   想让半导体/AI 触发就用 20%，连黄金一起拦用 15%。
+# overlap_exclude_held : 候选就是已持有的同一只是否剔除（默认 true；想加仓某只时设 false）
+#
+# ── 相关性重叠（"伪分散"）────────────────────────────────────────────
+# corr_max_r : 候选与已持基金**近 1 年周收益相关性**上限。**不写这一行 = 该约束不启用**
+#   （阈值属统计判断值，不设默认）。起点建议 0.8（强相关）；>1 即永不触发。
+#   实测参考（2026-09-26）：用户 7 只持仓 5/21 对 r≥0.60，核心簇 0.88 ——
+#   主题词层面分散、周收益层面同涨同跌。板块关键词法看不见这一层。
+#
+# 下面全是**示例**（不是任何人的真实偏好），按需删改。去掉行首 # 即生效：
+
+# preferred_groups: ['A 偏股混合', 'B 灵活配置', 'C 主动股票', 'D 指数股票']
+# excluded_groups: ['F QDII/其他']
+# min_percentiles: {max_drawdown_1y: 50}
+# max_values: {max_drawdown_1y: 30}
+# overlap_max_board_pct: 40
+# overlap_exclude_held: true
+# corr_max_r: 0.8
+  找到: config\user_profile.local.yaml
+# 用户画像本地配置（个人数据，不进版本库）—— 由智能体按用户选择（2026-09-26）创建
+#
+# corr_max_r：相关性重叠上限（候选与已持基金近 1 年周收益 Pearson r）
+#   背景实测（2026-09-26，只读）：7 只持仓里有 5/21 对 r ≥ 0.60
+#   （信澳业绩驱动 ~ 创业板AI = 0.88、科创芯片 ~ 中证500 = 0.79）——
+#   "主题词看着分散、实际同涨同跌"。用户选择阈值起点 **0.8**（强相关，保守）。
+#   调高=更宽松（>1 即永不触发）；调低=更严格（0.7 会开始拦 A股宽基 ~ 科技成长）。
+corr_max_r: 0.8

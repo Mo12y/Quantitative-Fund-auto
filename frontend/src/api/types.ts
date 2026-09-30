@@ -50,7 +50,19 @@ export interface Rebalance {
   need_rebalance: boolean
   current_equity_pct: number
   target_equity_pct: number | null
+  /** 目标是谁定的：'temperature' = 温度模型 / 'user_profile' = 用户在本地画像里覆盖。
+   *  界面必须说出来 —— 否则用户看到一个与温度不符的目标会以为模型算错。 */
+  target_source?: 'temperature' | 'user_profile' | null
   gap_pct: number | null
+  /** 与 gap_pct **同基数**的差额金额（元）；正 = 权益不足需补，负 = 权益过多需减。
+   *  ⚠️ 不要用别的口径自己乘出这个数 —— 旧前端就是拿 portfolio.total_invested 乘的，
+   *  基数与百分比差 33%（¥314.72 vs 应为 ¥418.63）。 */
+  gap_amount?: number | null
+  /** 调仓容忍带（±百分点）。用它把差额说成"在容忍范围内"，而不是一个待办。 */
+  rebalance_pp?: number
+  /** 百分比的基数 = 持仓市值 + 现金弹药。金额必须按它算才与百分比自洽。 */
+  total_capital?: number
+  portfolio_value?: number
   summary: { verdict: string; detail: string }
   instructions: Instruction[]
   degraded?: string[]

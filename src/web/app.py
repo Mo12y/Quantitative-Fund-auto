@@ -937,7 +937,31 @@ def _all_rebalance():
         except Exception:
             cash_reserve = 0.0
             degraded.append("cash_reserve")
-        rb = advisor.analyze(cash_reserve=cash_reserve)
+        # 用户可在本地画像里覆盖温度模型给出的目标权益仓位
+        # （config/user_profile.local.yaml 的 `target_equity_pct`）。
+        # 读不到 / 非数值 → None（用温度），**不编造默认值**。
+        target_override = None
+        try:
+            from src.analysis.user_profile import load_profile
+            _prof, _ = load_profile()
+            _raw = _prof.get("target_equity_pct")
+            if _raw is not None and str(_raw).strip() != "":
+                target_override = float(_raw)
+                if not (0 <= target_override <= 100):
+                    degraded.append("target_equity_pct_out_of_range")
+                    target_override = None
+        except Exception:
+            target_override = None
+        # ⚠️ 只在**确有覆盖**时才传这个 kwarg：值为 None 时省略，等价于用温度模型。
+        # 为什么要这样写：`analyze()` 的既有调用契约是 `(cash_reserve=...)`，
+        # 无条件多传一个 kwarg 会让任何按旧签名包装/打桩 analyze 的地方抛 TypeError，
+        # 而 _all_rebalance 的 `except` 会把它吞成 {"error": ...} —— 表现为
+        # 一堆看似无关的 KeyError（实测 11 个测试同时挂）。少传一个 None 就能避开。
+        if target_override is None:
+            rb = advisor.analyze(cash_reserve=cash_reserve)
+        else:
+            rb = advisor.analyze(cash_reserve=cash_reserve,
+                                 target_equity_override=target_override)
         # 本应加仓（权益不足）却没有候选 → 是**约束挡住的**还是本来就没有？
         # 这个布尔值让前端能说实话（而不是显示"当前无需调仓"）。
         counts = (constraint_review or {}).get("counts") or {}
@@ -949,7 +973,19 @@ def _all_rebalance():
             "need_rebalance": rb["need_rebalance"],
             "current_equity_pct": rb["current_equity_pct"],
             "target_equity_pct": rb["target_equity_pct"],
+            # 目标是谁定的：'temperature' = 温度模型，'user_profile' = 用户在画像里覆盖。
+            # 前端**必须**能说出这一点 —— 否则用户看到一个与温度不符的目标会以为模型算错。
+            "target_source": rb.get("target_source"),
             "gap_pct": rb["gap_pct"],
+            # 差额金额与百分比**同基数**（total_capital = 持仓市值 + 现金弹药）。
+            # 旧前端（app.js:650）用 portfolio.total_invested 自己乘，基数差 33% —— 不要再犯。
+            "gap_amount": rb.get("gap_amount"),
+            # 调仓容忍带（±百分点）。前端要用它把"差额"说成"在容忍范围内"而不是一个待办。
+            "rebalance_pp": rb.get("rebalance_pp"),
+            # 口径透明化：这三个数必须一起给出，前端才能算出与百分比同基数的金额。
+            # 只给百分比、让前端自己找基数 —— 正是旧前端算出 ¥314.72（应为 ¥418.63）的原因。
+            "total_capital": rb.get("total_capital"),
+            "portfolio_value": rb.get("portfolio_value"),
             "summary": rb["summary"],
             "instructions": rb["instructions"],
             "cash_reserve": cash_reserve,

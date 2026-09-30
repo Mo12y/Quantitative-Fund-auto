@@ -1,3 +1,4 @@
+import type { ReactNode } from 'react'
 import type { Rebalance, Stats } from '../api/types'
 import { dirClass, dirOf, dirSymbol, fmtMoney, fmtPct, fmtSignedMoney, fmtSignedPct } from '../lib/format'
 
@@ -6,13 +7,26 @@ interface KpiItem {
   value: string
   cls: string
   sym?: string
-  sub: string
+  /** 副行。允许 ReactNode，因为「权益占比」需要分两行说清目标 + 差额 + 基数 */
+  sub: ReactNode
 }
 
 /**
  * 四格 KPI —— 只放四个，其余下沉到明细卡。
  * 「权益占比」用**温度适用的 A 股口径**（rebalance.current_equity_pct），
  * 与 SSOT 的资产类别占比（含 QDII/黄金）不是一回事，所以标签写明口径。
+ *
+ * ⚠️ 权益格的金额口径（2026-09-30 对账后定案）：
+ *   百分比的基数是 `total_capital = 持仓市值 + 现金弹药`（rebalance_advisor.py:83），
+ *   **不是**总资产、不是累计投入、更不是计划总资金。所以差额金额一律取
+ *   后端给的 `gap_amount`（与百分比同基数），**绝不自己乘**。
+ *   旧前端就是自己乘的（app.js:650 用 portfolio.total_invested），
+ *   结果同屏的「36.9%」与「权益 ≈ ¥314.72」互相矛盾（按正确基数应为 ¥418.63，差 33%）。
+ *
+ *   主次也据此调整：**差额为主、目标为辅**。理由：把目标绝对值当主数字会被读成
+ *   "我该持有这么多"，而它其实只是个配置基准；差额天然在无需调仓时接近 0，不诱导操作。
+ *   并且不论 need_rebalance 真假都不隐藏数字 —— 隐藏会留信息真空（用户不知道偏了多少），
+ *   而是用容忍带（±rebalance_pp）把"要不要动"说清楚。
  */
 export function KpiRow({
   stats,
@@ -26,6 +40,44 @@ export function KpiRow({
 }) {
   const pnlDir = dirOf(stats.total_pnl)
   const rzDir = dirOf(stats.realized_pnl)
+
+  const rb = rebalance
+  const targetPct = rb?.target_equity_pct ?? null
+  const gapPct = rb?.gap_pct ?? null
+  const gapAmt = rb?.gap_amount ?? null
+  const band = rb?.rebalance_pp ?? null
+  const base = rb?.total_capital ?? null
+  const targetSrc = rb?.target_source === 'user_profile' ? '我的设定' : '温度模型'
+
+  const equitySub: ReactNode = rb ? (
+    <>
+      <div>
+        目标 {targetPct != null ? fmtPct(targetPct) : '—'}
+        <span className="text-fg-4">（{targetSrc}）</span>
+      </div>
+      {gapPct != null && gapAmt != null && (
+        <div>
+          {rb.need_rebalance ? (
+            <>
+              {gapPct > 0 ? '待补 ' : '待减 '}
+              <b className={gapPct > 0 ? 'text-rise' : 'text-fall'}>
+                {fmtMoney(Math.abs(gapAmt))}
+              </b>
+              {`（${fmtSignedPct(gapPct)}）`}
+            </>
+          ) : (
+            <>差 {fmtSignedPct(gapPct)} · 在容忍带内{band != null ? `（±${band}pp）` : ''}</>
+          )}
+        </div>
+      )}
+      {base != null && (
+        <div className="text-fg-4">基数 {fmtMoney(base)}（持仓市值+现金）</div>
+      )}
+    </>
+  ) : (
+    '—'
+  )
+
   const items: KpiItem[] = [
     {
       label: '总资产',
@@ -49,9 +101,9 @@ export function KpiRow({
     },
     {
       label: '权益占比（A 股）',
-      value: rebalance ? fmtPct(rebalance.current_equity_pct) : '—',
+      value: rb ? fmtPct(rb.current_equity_pct) : '—',
       cls: 'text-fg',
-      sub: rebalance?.target_equity_pct != null ? `目标 ${fmtPct(rebalance.target_equity_pct)}` : '目标 —',
+      sub: equitySub,
     },
   ]
 
@@ -64,7 +116,7 @@ export function KpiRow({
             {it.sym && <span className="mr-0.5 text-[10px]">{it.sym}</span>}
             {it.value}
           </div>
-          <div className="mt-0.5 text-[11.5px] text-fg-3">{it.sub}</div>
+          <div className="mt-0.5 space-y-0.5 text-[11.5px] text-fg-3">{it.sub}</div>
         </div>
       ))}
     </div>
