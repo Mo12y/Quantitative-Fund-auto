@@ -1,6 +1,10 @@
 # 自动化基金量化系统
 
 > 🎓 大学生量化基金投资助手 | 场外基金 · 每周信号 · 半自动执行
+>
+> **接手开发的智能体 / 协作者请先读 [`AGENTS.md`](AGENTS.md)**（环境 · 命令 · 铁律 · 去哪查）
+> 与 [`docs/agents/HANDOFF.md`](docs/agents/HANDOFF.md) 顶部交接块。
+> ⚠️ `.workbuddy/memory/` **不在 git 里**（本机速记），别把唯一副本写在那儿。
 
 **目录**
 
