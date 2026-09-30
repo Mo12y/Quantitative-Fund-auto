@@ -19,15 +19,22 @@ import { Card } from './Card'
 const RISE = '#ff6b5e'
 const FALL = '#34c76a'
 const BENCH = '#7c8899'
-/** 网格线：压得很暗，好让零轴跳出来 */
-const GRID = '#1c2532'
-const TICK = '#6b7889'
 /**
- * ⚠️ 零轴（y=0）—— 必须与普通网格线**明显区分**：
- *   更亮（#5f7488 vs 网格 #1c2532）+ 实线（网格是虚线）+ 更粗（1.6 vs 1）。
+ * 网格线：**必须看得见**。
+ * 原来是 `#1c2532` + 只画水平线 —— 实测「垂直 0 条、轴线 0 条」，用户反馈
+ * "没有坐标轴没有参考系，读起来困难"。参考系是折线图的地基，不能为了"干净"把它压没。
+ */
+const GRID = '#202a37'
+/** 坐标轴线：比网格略亮，给图一个明确的框 */
+const AXIS = '#2b3644'
+/** 刻度文字（原 #6b7889 偏暗，长刻度读不出来） */
+const TICK = '#7d8a9d'
+/**
+ * ⚠️ 零轴（y=0）—— 全图**最强**的一条线：
+ *   实线（网格是虚线）+ 更亮（#7b8fa6 vs 网格 #202a37）+ 更粗（1.6 vs 1）。
  *   零轴是这张图唯一的分界语义（盈/亏），混进网格里就读不出来了。
  */
-const ZERO = '#5f7488'
+const ZERO = '#7b8fa6'
 
 interface TipPayload {
   dataKey?: string | number
@@ -39,19 +46,29 @@ interface TipPayload {
  *
  * 为什么不直接用 Recharts 自动刻度：实测它在 [-3.3%, 2.0%] 上取到 `2.0 / -1.3 / -3.3`，
  * **跳过了 0** —— 零轴虽然画出来了，却没有对应标签，"盈亏分界"就还是读不出来。
- * （这就是"零线不明显"的根因之一，不是线不够亮。）
+ *
+ * 步长从「漂亮档位」里挑（1 / 2 / 2.5 / 5 × 10^k），选**刻度条数最接近 want** 的那个：
+ * 早先版本用"最小的 ≥ raw 的档位"，在 span≈6 时会直接跳到 step=2，只剩 3 条线 ——
+ * 网格太稀等于没有参考系。
  */
-function niceTicks(lo: number, hi: number, want = 5): number[] {
+function niceTicks(lo: number, hi: number, want = 6): number[] {
   const span = hi - lo
   if (!(span > 0)) return [lo, 0, hi]
-  const raw = span / want
-  const mag = Math.pow(10, Math.floor(Math.log10(raw)))
-  const norm = raw / mag
-  const step = (norm >= 5 ? 10 : norm >= 2 ? 5 : norm >= 1 ? 2 : 1) * mag
-  const out: number[] = []
-  for (let t = Math.ceil(lo / step) * step; t <= hi + 1e-9; t += step) out.push(Number(t.toFixed(4)))
-  if (!out.some((t) => Math.abs(t) < 1e-9)) out.push(0)
-  return out.sort((a, b) => a - b)
+  const mag = Math.pow(10, Math.floor(Math.log10(span)))
+  let best: number[] | null = null
+  for (const m of [0.5, 1, 2, 2.5, 5, 10]) {
+    const step = m * mag
+    const out: number[] = []
+    for (let t = Math.ceil(lo / step) * step; t <= hi + 1e-9; t += step) {
+      out.push(Number(t.toFixed(6)))
+    }
+    if (out.length < 3 || out.length > want + 3) continue
+    if (!best || Math.abs(out.length - want) < Math.abs(best.length - want)) best = out
+  }
+  const ticks = best ?? []
+  if (!ticks.some((t) => Math.abs(t) < 1e-9)) ticks.push(0)
+  if (!ticks.length) return [lo, 0, hi]
+  return ticks.sort((a, b) => a - b)
 }
 
 /** 自定义 tooltip：跟随主题，不用 Recharts 默认的白底 */
@@ -119,6 +136,9 @@ export function CurveChart({ curve }: { curve: PortfolioCurve }) {
   const yLo = lo0 - pad
   const yHi = hi0 + pad
   const yTicks = niceTicks(yLo, yHi)
+  // X 轴刻度密度：目标 ~7 个标签 —— 它同时也是**垂直网格线的条数**。
+  // 标签太多会互相挤压、网格线糊成一片；太少又失去参考系。
+  const xInterval = Math.max(0, Math.ceil(n / 7) - 1)
 
   return (
     <Card title="组合收益" note="· 资金加权 · 过零轴为盈亏分界">
@@ -165,20 +185,26 @@ export function CurveChart({ curve }: { curve: PortfolioCurve }) {
               </linearGradient>
             </defs>
 
-            <CartesianGrid stroke={GRID} strokeDasharray="2 6" vertical={false} />
+            {/* 双向网格 —— 垂直网格**必须开**：原来 `vertical={false}`，实测「垂直 0 条、轴线 0 条」，
+                折线浮在空底上没有任何参考系（用户直接反馈读不出横坐标位置）。 */}
+            <CartesianGrid stroke={GRID} strokeDasharray="2 4" />
             <XAxis
               dataKey="date"
               tick={{ fill: TICK, fontSize: 11 }}
               tickLine={false}
-              axisLine={false}
-              minTickGap={36}
+              /* 底部轴线：给图一个下边界（原来 axisLine=false，整张图是"浮"着的） */
+              axisLine={{ stroke: AXIS }}
+              /* 只显示 MM-DD —— 完整日期（2026-08-26）10 个字符会把一屏挤满，
+                 而且长标签逼着 `minTickGap` 大幅抽稀，垂直网格也就跟着没法看 */
+              tickFormatter={(d: string) => String(d).slice(5)}
+              interval={xInterval}
               dy={4}
             />
             {/* 域强制包含 0，且刻度里一定有 0（见 niceTicks 注释：自动刻度会跳过 0） */}
             <YAxis
               tick={{ fill: TICK, fontSize: 11 }}
               tickLine={false}
-              axisLine={false}
+              axisLine={{ stroke: AXIS }}
               width={50}
               tickFormatter={(v: number) => `${v.toFixed(1)}%`}
               domain={[yLo, yHi]}
