@@ -1,7 +1,7 @@
 import { useMemo } from 'react'
 import { CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
 import type { PortfolioCurve } from '../api/types'
-import { dirClass, dirOf, dirSymbol, fmtSignedPct } from '../lib/format'
+import { dirClass, dirOf, dirSymbol, fmtMoney, fmtSignedPct } from '../lib/format'
 import { Card } from './Card'
 
 /** 图表用色与 index.css 的 @theme 同源（Recharts 不吃 CSS 变量，只能各写一份，改一处要同步） */
@@ -34,6 +34,8 @@ export function CurveChart({ curve }: { curve: PortfolioCurve }) {
   const d = dirOf(last)
   const relDir = dirOf(rel)
   const comboColor = last >= 0 ? RISE : FALL
+  // 未入仓 = 待确认买入 + 起算日晚于曲线末点的持仓（见后端 curve.excluded_*）
+  const excluded = (curve.excluded_not_in ?? 0) + (curve.excluded_pending ?? 0)
 
   return (
     <Card title="组合收益" note="· 资金加权">
@@ -87,8 +89,29 @@ export function CurveChart({ curve }: { curve: PortfolioCurve }) {
         </ResponsiveContainer>
       </div>
 
+      {/* ⚠️ 未入仓披露。曲线只画「已起算」的持仓，于是曲线终值与顶部 KPI 的
+          「总资产」天然对不上（本机实测：KPI ¥854.51 vs 曲线 ¥834.60）。
+          黑箱验收审计 F-03 专门修过这个「同一屏两个市值互相打架」，修法就是
+          **把差额显式说出来**，后端也为此加了 excluded_not_in / excluded_pending /
+          excluded_amount 三个字段；旧前端照此显示了。
+          但本次前端重写**三个字段一个都没渲染**（types.ts 里有类型，全项目无人使用）
+          —— 等于把 F-03 的修复丢了，用户会重新看到两个对不上的数字而无从解释。 */}
+      {excluded > 0 && (
+        <div className="mt-1 text-[11.5px] text-fg-4">
+          另有 {excluded} 笔未入仓
+          {curve.excluded_amount ? `（约 ${fmtMoney(curve.excluded_amount)}）` : ''}
+          未计入
+        </div>
+      )}
+
       <div className="mt-1 text-[11.5px] text-fg-4">
-        {curve.dates[0]} ~ {curve.dates[n - 1]} · {n} 个交易日 · 起止 0.00%
+        {curve.dates[0]} ~ {curve.dates[n - 1]} · {n} 个交易日
+        {/* 原为硬编码的「起止 0.00%」。两点问题：
+            ① 数字写死在文案里，迟早与实际不符；
+            ② 「起止」说的是首尾两个值，却只给了首值 —— 措辞与内容不符。
+            末值已由上方大字号显示（那是本卡的主结论），故这里只报**起点**，
+            用来交代曲线基线，避免与主结论重复。 */}
+        {` · 起点 ${fmtSignedPct(data[0].combo)}`}
       </div>
     </Card>
   )
