@@ -25,7 +25,7 @@ function Plain({ v, digits = 1, suffix = '' }: { v: number | null | undefined; d
   )
 }
 
-const TH = 'pb-2 text-[11px] font-normal text-fg-3'
+const TH = 'field pb-2.5'
 
 /**
  * 申万一级行业排名（31 个）—— 动量 + 趋势 + 风险。
@@ -71,24 +71,24 @@ export function SectorTable({ data }: { data: SectorsPayload }) {
         </thead>
         <tbody>
           {rows.map((s) => (
-            <tr key={s.name} className="border-t border-line">
+            <tr key={s.name} className="row-hover border-t border-line">
               <td className="py-2 pr-3 text-[13px]">
                 <span className="mr-1.5 text-[11px] text-fg-4">{s.rank}</span>
                 <span className="text-fg">{plainText(s.name)}</span>
               </td>
-              <td className="py-2 text-right text-[12.5px]">
+              <td className="num py-2 text-right text-[12.5px]">
                 <Signed v={s.ret_1m} />
               </td>
-              <td className="hidden py-2 text-right text-[12.5px] md:table-cell">
+              <td className="num hidden py-2 text-right text-[12.5px] md:table-cell">
                 <Signed v={s.ret_3m} />
               </td>
-              <td className="hidden py-2 text-right text-[12.5px] md:table-cell">
+              <td className="num hidden py-2 text-right text-[12.5px] md:table-cell">
                 <Signed v={s.ret_6m} />
               </td>
-              <td className="hidden py-2 text-right text-[12.5px] lg:table-cell">
+              <td className="num hidden py-2 text-right text-[12.5px] lg:table-cell">
                 <Plain v={s.volatility} suffix="%" />
               </td>
-              <td className="py-2 text-right text-[12.5px]">
+              <td className="num py-2 text-right text-[12.5px]">
                 <Plain v={s.score} digits={2} />
               </td>
             </tr>

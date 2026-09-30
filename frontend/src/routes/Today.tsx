@@ -3,8 +3,10 @@ import { Card } from '../components/Card'
 import { CurveChart } from '../components/CurveChart'
 import { HoldingsTable } from '../components/HoldingsTable'
 import { KpiRow } from '../components/KpiRow'
+import { PageHead } from '../components/PageHead'
 import { SourceTag } from '../components/SourceTag'
 import { VerdictCard } from '../components/VerdictCard'
+import { Warming } from '../components/Warming'
 import { plainText } from '../lib/format'
 import { useApi } from '../lib/useApi'
 
@@ -66,22 +68,16 @@ export default function Today() {
 
   return (
     <>
-      <div className="mb-4 flex flex-wrap items-baseline justify-between gap-3">
-        {/* 品牌名已移到顶栏导航（`components/Nav.tsx`），这里不再重复 */}
-        <h1 className="text-[17px] font-medium tracking-[.2px]">今天要做什么</h1>
+      <PageHead title="今天要做什么" sub="结论 · 组合 · 持仓 · 温度">
         <SourceTag
           source={overview.source}
           asof={ov ? ov.curve.dates[ov.curve.dates.length - 1] : null}
           onRefresh={refreshAll}
           busy={busy}
         />
-      </div>
+      </PageHead>
 
-      {warmingWait > 0 && busy && (
-        <div className="mb-3.5 rounded-md border border-line bg-inset px-3 py-2 text-xs text-fg-2">
-          正在计算…还需约 {warmingWait} 秒（首次计算较慢，之后会命中缓存）
-        </div>
-      )}
+      <Warming seconds={busy ? warmingWait : 0} note="首次计算较慢，之后会命中缓存" />
 
       {overview.error && (
         <Card lead title="今天" note="· 结论">

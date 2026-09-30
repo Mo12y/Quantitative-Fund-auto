@@ -45,15 +45,17 @@ function Seg({
   onChange: (v: string) => void
 }) {
   return (
-    <div className="flex gap-0.5 rounded-md bg-inset p-0.5">
+    <div className="flex gap-0.5 rounded-full border border-line bg-inset p-0.5">
       {options.map((o) => (
         <button
           key={o.v}
           type="button"
           onClick={() => onChange(o.v)}
           className={
-            'rounded-sm px-2.5 py-1 text-xs transition-colors ' +
-            (o.v === value ? 'bg-card text-fg' : 'text-fg-3 hover:text-fg-2')
+            'rounded-full px-2.5 py-1 text-xs transition-all duration-150 ' +
+            (o.v === value
+              ? 'bg-card-hi text-fg shadow-[inset_0_1px_0_rgba(255,255,255,.06)]'
+              : 'text-fg-3 hover:text-fg-2')
           }
         >
           {o.label}
@@ -125,24 +127,24 @@ export function HoldingsTable({ holdings }: { holdings: Holding[] }) {
         <table className="w-full border-collapse">
           <thead>
             <tr>
-              <th className="pb-2 text-left text-[11px] font-normal text-fg-3">基金</th>
-              <th className="pb-2 text-right text-[11px] font-normal text-fg-3">市值</th>
-              <th className="pb-2 text-right text-[11px] font-normal text-fg-3">收益</th>
-              <th className="pb-2 text-right text-[11px] font-normal text-fg-3">收益率</th>
+              <th className="field pb-2.5 text-left">基金</th>
+              <th className="field pb-2.5 text-right">市值</th>
+              <th className="field pb-2.5 text-right">收益</th>
+              <th className="field pb-2.5 text-right">收益率</th>
             </tr>
           </thead>
           <tbody>
             {shown.map((r) => {
               const d = dirOf(r.pct)
               return (
-                <tr key={r.code} className="border-t border-line">
+                <tr key={r.code} className="row-hover border-t border-line">
                   <td className="py-2.5 pr-3 text-[13.5px]">
                     <span className="text-fg">{r.name}</span>
                     <span className="mono ml-1.5 text-[11.5px] text-fg-4">{r.code}</span>
                   </td>
-                  <td className="py-2.5 text-right text-[13.5px] text-fg-2">{fmtMoney(r.value)}</td>
-                  <td className={'py-2.5 text-right text-[13.5px] ' + dirClass(d)}>{fmtSignedMoney(r.pnl)}</td>
-                  <td className={'py-2.5 text-right text-[13.5px] ' + dirClass(d)}>
+                  <td className="num py-2.5 text-right text-[13.5px] text-fg-2">{fmtMoney(r.value)}</td>
+                  <td className={'num py-2.5 text-right text-[13.5px] ' + dirClass(d)}>{fmtSignedMoney(r.pnl)}</td>
+                  <td className={'num py-2.5 text-right text-[13.5px] ' + dirClass(d)}>
                     <span className="mr-0.5 text-[10px]">{dirSymbol(d)}</span>
                     {fmtSignedPct(r.pct)}
                   </td>

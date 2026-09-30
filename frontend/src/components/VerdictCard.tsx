@@ -3,11 +3,11 @@ import { fmtMoney, plainText } from '../lib/format'
 import { Card } from './Card'
 import { DrillDown } from './DrillDown'
 
-/** 指令动作徽标配色：减仓=提示黄、加仓=红（中国惯例里红是买入/走高）、其余中性 */
+/** 指令动作徽标配色：减仓=提示黄、加仓=涨红（中国惯例里红是买入/走高）、其余中性 */
 function actCls(action: string): string {
-  if (action.includes('卖')) return 'text-warn border-[#3d3117]'
-  if (action.includes('买')) return 'text-rise border-[#4a2620]'
-  return 'text-fg-3 border-line-strong'
+  if (action.includes('卖')) return 'text-warn border-warn/30 bg-warn/10'
+  if (action.includes('买')) return 'text-rise border-rise/30 bg-rise/10'
+  return 'text-fg-3 border-line-strong bg-inset'
 }
 
 /**
@@ -52,20 +52,27 @@ export function VerdictCard({
 
   return (
     <Card lead title="今天" note="· 结论">
-      <div className="mb-1.5 text-[22px] font-medium leading-snug">{verdict}</div>
-      {detail && <div className="mb-4 text-[13.5px] text-fg-2">{detail}</div>}
+      <div className="mb-1.5 text-[24px] font-semibold leading-snug tracking-[-.01em]">{verdict}</div>
+      {detail && <div className="mb-4 text-[13px] text-fg-2">{detail}</div>}
 
       <div className="grid gap-2">
         {rebalance.instructions.length === 0 ? (
-          <div className="rounded-md bg-inset px-3 py-2 text-[13.5px] text-fg-2">无需任何买卖操作。</div>
+          <div className="rounded-[var(--radius-md)] bg-inset px-3.5 py-2.5 text-[13px] text-fg-2">
+            无需任何买卖操作。
+          </div>
         ) : allHold ? (
-          <div className="rounded-md bg-inset px-3 py-2 text-[13.5px] text-fg-2">
+          <div className="rounded-[var(--radius-md)] bg-inset px-3.5 py-2.5 text-[13px] text-fg-2">
             {rebalance.instructions.length} 只持仓仓位均在合理范围内，无需操作。
           </div>
         ) : (
           rebalance.instructions.map((ins, i) => (
-            <div key={`${ins.fund_code}-${i}`} className="flex items-start gap-2.5 rounded-md bg-inset px-3 py-2 text-[13.5px]">
-              <span className={'shrink-0 rounded-full border px-2 py-px text-xs ' + actCls(ins.action)}>{ins.action}</span>
+            <div
+              key={`${ins.fund_code}-${i}`}
+              className="flex items-start gap-2.5 rounded-[var(--radius-md)] bg-inset px-3.5 py-2.5 text-[13px]"
+            >
+              <span className={'shrink-0 rounded-full border px-2 py-px text-[11px] ' + actCls(ins.action)}>
+                {ins.action}
+              </span>
               <span className="text-fg-2">
                 {ins.fund_name} · {fmtMoney(ins.amount)} · {plainText(ins.reason)}
               </span>

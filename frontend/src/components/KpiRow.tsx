@@ -13,6 +13,10 @@ interface KpiItem {
 
 /**
  * 四格 KPI —— 只放四个，其余下沉到明细卡。
+ *
+ * 视觉：**字段名弱、数字强**（金融数据的层级惯例）。数字 26/30px 半粗 + 负字距，
+ * 副行用 11px 弱色。四格之间用 1px 分隔线（`gap-px + bg-line` 的经典做法）。
+ *
  * 「权益占比」用**温度适用的 A 股口径**（rebalance.current_equity_pct），
  * 与 SSOT 的资产类别占比（含 QDII/黄金）不是一回事，所以标签写明口径。
  *
@@ -22,11 +26,6 @@ interface KpiItem {
  *   后端给的 `gap_amount`（与百分比同基数），**绝不自己乘**。
  *   旧前端就是自己乘的（app.js:650 用 portfolio.total_invested），
  *   结果同屏的「36.9%」与「权益 ≈ ¥314.72」互相矛盾（按正确基数应为 ¥418.63，差 33%）。
- *
- *   主次也据此调整：**差额为主、目标为辅**。理由：把目标绝对值当主数字会被读成
- *   "我该持有这么多"，而它其实只是个配置基准；差额天然在无需调仓时接近 0，不诱导操作。
- *   并且不论 need_rebalance 真假都不隐藏数字 —— 隐藏会留信息真空（用户不知道偏了多少），
- *   而是用容忍带（±rebalance_pp）把"要不要动"说清楚。
  */
 export function KpiRow({
   stats,
@@ -52,7 +51,8 @@ export function KpiRow({
   const equitySub: ReactNode = rb ? (
     <>
       <div>
-        目标 {targetPct != null ? fmtPct(targetPct) : '—'}
+        <span className="text-fg-4">目标</span>{' '}
+        <span className="mono text-fg-2">{targetPct != null ? fmtPct(targetPct) : '—'}</span>
         <span className="text-fg-4">（{targetSrc}）</span>
       </div>
       {gapPct != null && gapAmt != null && (
@@ -70,9 +70,7 @@ export function KpiRow({
           )}
         </div>
       )}
-      {base != null && (
-        <div className="text-fg-4">基数 {fmtMoney(base)}（持仓市值+现金）</div>
-      )}
+      {base != null && <div className="text-fg-4">基数 {fmtMoney(base)}（持仓市值+现金）</div>}
     </>
   ) : (
     '—'
@@ -108,15 +106,15 @@ export function KpiRow({
   ]
 
   return (
-    <div className="mb-3.5 grid grid-cols-2 gap-px overflow-hidden rounded-lg border border-line bg-line sm:grid-cols-4">
+    <div className="rise-in mb-4 grid grid-cols-2 gap-px overflow-hidden rounded-[var(--radius-lg)] border border-line bg-line shadow-[inset_0_1px_0_rgba(255,255,255,.04),0_18px_40px_-28px_rgba(0,0,0,.95)] sm:grid-cols-4">
       {items.map((it) => (
-        <div key={it.label} className="bg-card px-4 py-3.5">
-          <div className="mb-1 text-[11.5px] text-fg-3">{it.label}</div>
-          <div className={'text-[21px] font-medium tracking-[-.2px] ' + it.cls}>
-            {it.sym && <span className="mr-0.5 text-[10px]">{it.sym}</span>}
+        <div key={it.label} className="bg-card px-4 py-4">
+          <div className="field mb-1.5">{it.label}</div>
+          <div className={'num text-[26px] font-semibold leading-none tracking-[-.02em] sm:text-[30px] ' + it.cls}>
+            {it.sym && <span className="mr-1 align-top text-[12px] opacity-90">{it.sym}</span>}
             {it.value}
           </div>
-          <div className="mt-0.5 space-y-0.5 text-[11.5px] text-fg-3">{it.sub}</div>
+          <div className="mt-2 space-y-0.5 text-[11px] leading-relaxed text-fg-3">{it.sub}</div>
         </div>
       ))}
     </div>

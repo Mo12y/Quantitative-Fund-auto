@@ -4,7 +4,7 @@ import { dirClass, dirOf, dirSymbol, fmtSignedPct, plainText } from '../lib/form
 import { Card } from './Card'
 import { ConstraintNote } from './ConstraintNote'
 
-const TH = 'pb-2 text-[11px] font-normal text-fg-3'
+const TH = 'field pb-2.5'
 
 /**
  * 约束标注徽标。
@@ -52,7 +52,7 @@ export function PoolBoard({ data }: { data: BoardPool }) {
     >
       <div className="mb-2.5 text-[11.5px] leading-relaxed text-fg-4">
         性质：<b className="text-fg-3">不推荐"买哪只"，只排除有坑的</b>（存续/规模/费率/申购状态等硬检查）。
-        板块按**基金名称关键词**归类（近似口径），与上方申万行业不是同一套分类，故两卡不联动。
+        板块按<b className="font-semibold text-fg-3">基金名称关键词</b>归类（近似口径），与上方申万行业不是同一套分类，故两卡不联动。
         质量池以稳健型为主，名称不含任何主题关键词的基金会归入「其他」，因此它通常是最大一桶
         —— 这是归类口径的结果，不是漏筛。
       </div>
@@ -96,7 +96,7 @@ export function PoolBoard({ data }: { data: BoardPool }) {
         </thead>
         <tbody>
           {cur.funds.map((f) => (
-            <tr key={f.code} className="border-t border-line">
+            <tr key={f.code} className="row-hover border-t border-line">
               <td className="py-2 pr-3 text-[13px]">
                 <span className="text-fg">{plainText(f.name)}</span>
                 <span className="mono ml-1.5 text-[11.5px] text-fg-4">{f.code}</span>

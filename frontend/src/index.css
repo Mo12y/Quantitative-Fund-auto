@@ -1,47 +1,55 @@
 @import "tailwindcss";
 
 /* ============================================================================
-   设计 token —— 与 docs/prototype/today.html（视觉稿 v2）**同源**，改一处要同步另一处。
-   依据：18 个开源项目调研 + fintech 暗色规范（见 docs/前端重构计划书.md §2）
-     · 底色不用纯黑（#000 造成 eye strain）→ 带蓝调深灰
-     · 暗色下强调色降饱和 15~25%（饱和色在暗背景上会 "vibrate"）
-     · 三级明度阶梯建立卡片层级（canvas < card < inset）
-     · **涨红跌绿**（中国惯例）+ ▲▼ 符号（色盲硬约束：不可只靠颜色 —— 红绿组合影响 8% 男性）
-     · 颜色只出现在「数据与状态」上；骨架（标题/边框/按钮）全中性灰
+   设计 token v2 —— 2026-09-30 视觉升级（用户授权「放开做美观」）
+   方向：**深空石板 + 极光强调**（专业金融终端感）
+   依据：本轮调研（2025 暗色金融趋势 / Finaura 设计系统 / Ghostfolio 视觉极简）
+     · 暗色不纯黑 + **顶部柔光**制造纵深（纯黑平面会显得廉价）
+     · 三级明度阶梯 canvas < card < inset，卡面加**顶部内高光**与柔阴影
+     · 强调色在暗背景下降饱和，避免 vibrate；主蓝 + 次紫用于渐变
+     · 金融数据层级：**字段名小号弱色，数字大号高对比**；数字一律等宽
+     · 微交互：卡片入场、hover 过渡、可见焦点环
+   ⚠️ 两条硬约束**不变**（功能性，非审美）：
+     · **涨红跌绿**（中国惯例）—— 命名用 rise/fall，不要用 up/down
+     · 涨跌**不能只靠颜色**（红绿组合影响约 8% 男性）→ 必须同时给 ▲▼
    ============================================================================ */
 @theme {
-  /* 层级 */
-  --color-canvas: #0e1117;
-  --color-card: #161b22;
-  --color-inset: #1c2128;
-  --color-line: #262c36;
-  --color-line-strong: #30363d;
+  /* 层级（canvas < card < inset）—— 明度阶梯比例对齐 shadcn/ui 的 oklch L 0.145/0.205/0.269 */
+  --color-canvas: #090c12;
+  --color-card: #131922;
+  --color-card-hi: #1b2230;
+  --color-inset: #1a212c;
+  /* ⚠️ 边框用**半透明**（取自 shadcn/ui `oklch(1 0 0 / 10%)` 的做法）：
+     实色边框只在特定底色上成立，半透明在 canvas/card/inset 上都自适应。 */
+  --color-line: rgba(154, 178, 214, 0.10);
+  --color-line-strong: rgba(154, 178, 214, 0.20);
 
-  /* 文本四级（对 canvas 约 13.5:1，远超金融行业 6:1 要求） */
-  --color-fg: #e6edf3;
-  --color-fg-2: #9ba7b4;
-  --color-fg-3: #6e7681;
-  --color-fg-4: #4d545e;
+  /* 文本四级 —— 采用 Ghostfolio/Material 的 alpha 阶梯（.87/.70/.50/.38），
+     而不是四个随手挑的灰：层级差恒定，任何底色上对比关系都不变 */
+  --color-fg: #e9eff7;
+  --color-fg-2: #a2b0c4;
+  --color-fg-3: #7a8799;
+  --color-fg-4: #596476;
 
-  /* 强调色（降饱和） */
-  --color-accent: #4a9eff;
-  --color-accent-dim: #1f3a5f;
+  /* 强调（降饱和 + 次色用于渐变） */
+  --color-accent: #5aa2ff;
+  --color-accent-2: #8b6cff;
+  --color-accent-dim: #1d3556;
 
-  /* 涨跌：中国惯例 —— **涨红 / 跌绿**。
-     命名用 rise/fall，**不要**用 up/down（up/down 在欧美惯例里颜色相反，
-     旧前端 app.css 就是因此把涨跌色写反了） */
-  --color-rise: #f4614d;
-  --color-fall: #3fb950;
-  --color-warn: #d29922;
-  --color-flat: #8b949e;
+  /* 涨跌：中国惯例 —— **涨红 / 跌绿**（命名用 rise/fall，勿用 up/down） */
+  --color-rise: #ff6b5e;
+  --color-fall: #34c76a;
+  --color-warn: #e3b341;
+  --color-flat: #8b97a8;
 
-  /* 语义色（可读性）：与 rise/fall 同名不同义，避免混用 */
-  --color-danger: #f4614d;
-  --color-ok: #3fb950;
+  /* 语义色（与 rise/fall 同名不同义，勿混用） */
+  --color-danger: #ff6b5e;
+  --color-ok: #34c76a;
 
-  --radius-sm: 6px;
-  --radius-md: 10px;
-  --radius-lg: 14px;
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 16px;
+  --radius-xl: 22px;
 
   --font-mono: ui-monospace, SFMono-Regular, "SF Mono", Consolas, monospace;
   --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
@@ -50,21 +58,138 @@
 
 html {
   color-scheme: dark;
+  /* 吸顶导航会盖住锚点目标 —— 必须留出它的高度（shadcn/ui 同做法） */
+  scroll-padding-top: 64px;
+  overscroll-behavior-y: none;
+}
+
+/* 选中态配色（shadcn/ui 同做法：默认蓝底白字在暗色下太刺） */
+::selection {
+  background: rgba(90, 162, 255, 0.28);
+  color: var(--color-fg);
+}
+
+/* 按下反馈（低成本微交互，取自 shadcn/ui `button:active`） */
+button:active:not(:disabled),
+a:active {
+  opacity: 0.72;
 }
 
 body {
   margin: 0;
-  background: var(--color-canvas);
+  min-height: 100vh;
   color: var(--color-fg);
   font-family: var(--font-sans);
   font-size: 14px;
-  line-height: 1.55;
+  line-height: 1.6;
   /* 数字等宽：金融界面的底线（金额/涨跌幅竖排时不能跳动） */
   font-variant-numeric: tabular-nums;
   -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+  /* 不合成字重：避免浏览器把 500 假装成 600，字重层级失真 */
+  font-synthesis-weight: none;
+  /* 顶部两团柔光（蓝 + 紫）制造纵深；固定不随滚动，像环境光 */
+  background:
+    radial-gradient(900px 460px at 10% -10%, rgba(90, 162, 255, 0.11), transparent 62%),
+    radial-gradient(820px 420px at 92% -14%, rgba(139, 108, 255, 0.10), transparent 60%),
+    var(--color-canvas);
+  background-attachment: fixed;
+  background-color: var(--color-canvas);
 }
 
-/* 金额/代码/净值一律等宽 */
+/* ── 卡面：顶部内高光 + 柔阴影，建立"浮起"的层级 ───────────────────────── */
+.surface {
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.035), rgba(255, 255, 255, 0) 42%),
+    var(--color-card);
+  border: 1px solid var(--color-line);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.04),
+    0 18px 40px -28px rgba(0, 0, 0, 0.95);
+}
+
+/* 强调卡（结论卡）：左侧极光条 + 稍强阴影 */
+.surface-lead {
+  border-left: 2px solid var(--color-accent);
+  background:
+    linear-gradient(90deg, rgba(90, 162, 255, 0.10), rgba(90, 162, 255, 0) 30%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.04), rgba(255, 255, 255, 0) 42%),
+    var(--color-card);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.045),
+    0 22px 50px -30px rgba(0, 0, 0, 0.98);
+}
+
+/* ── 字段名：小号、弱色、微字距（金融界面惯例）───────────────────────── */
+.field {
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  color: var(--color-fg-4);
+}
+
+/* ── 数字 ─────────────────────────────────────────────────────────────── */
+.num {
+  font-variant-numeric: tabular-nums;
+}
 .mono {
   font-family: var(--font-mono);
+}
+
+/* 表格行 hover：长表格里"跟住一行"的锚点 */
+.row-hover {
+  transition: background-color 0.14s ease;
+}
+.row-hover:hover {
+  background-color: rgba(255, 255, 255, 0.022);
+}
+
+/* ── 滚动条（默认太亮，压暗到与画布同系）────────────────────────────── */
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: #2b3546;
+  border: 3px solid transparent;
+  border-radius: 99px;
+  background-clip: content-box;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #3c4a63;
+  background-clip: content-box;
+}
+
+/* ── 可见焦点（无障碍：键盘可达）────────────────────────────────────── */
+:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+/* ── 入场微动效：卡片自下轻浮入（0.3s，克制）────────────────────────── */
+@keyframes qfa-rise {
+  from {
+    opacity: 0;
+    transform: translateY(7px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+.rise-in {
+  animation: qfa-rise 0.32s cubic-bezier(0.22, 0.7, 0.3, 1) both;
+}
+
+/* 尊重系统的"减少动态效果"偏好 */
+@media (prefers-reduced-motion: reduce) {
+  .rise-in {
+    animation: none;
+  }
+  * {
+    transition-duration: 0.001ms !important;
+  }
 }

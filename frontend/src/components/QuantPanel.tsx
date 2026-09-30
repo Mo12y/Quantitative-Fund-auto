@@ -1,7 +1,7 @@
 import type { QuantModels } from '../api/types'
 import { Card } from './Card'
 
-const TH = 'pb-1.5 text-[11px] font-normal text-fg-3'
+const TH = 'field pb-1.5'
 const TD = 'py-1.5 text-[12.5px]'
 
 function num(v: number | null | undefined, digits = 3): string {
@@ -30,7 +30,7 @@ export function QuantPanel({ data }: { data: QuantModels }) {
   return (
     <Card title="量化模型" note="· vol 预测 / 回撤预警 / 组合模拟（样本外）">
       <div className="text-[11.5px] leading-relaxed text-fg-4">
-        只陈列模型对照原始值，**不给出"哪个更好"的结论** —— 本项目样本外验证（51 窗口）
+        只陈列模型对照原始值，<b className="font-semibold text-fg-3">不给出"哪个更好"的结论</b> —— 本项目样本外验证（51 窗口）
         的结论是「看不出优于等权持有的选基能力」，界面上不制造最优解印象。
       </div>
 
@@ -47,7 +47,7 @@ export function QuantPanel({ data }: { data: QuantModels }) {
         </thead>
         <tbody>
           {data.vol.map((r) => (
-            <tr key={r.model} className="border-t border-line">
+            <tr key={r.model} className="row-hover border-t border-line">
               <td className={TD + ' text-fg'}>{r.model}</td>
               <td className={TD + ' mono text-right text-fg-2'}>{num(r.ic_mean, 4)}</td>
               <td className={TD + ' mono text-right text-fg-2'}>{num(r.icir, 3)}</td>
@@ -71,7 +71,7 @@ export function QuantPanel({ data }: { data: QuantModels }) {
         </thead>
         <tbody>
           {data.drawdown.map((r) => (
-            <tr key={r.model} className="border-t border-line">
+            <tr key={r.model} className="row-hover border-t border-line">
               <td className={TD + ' text-fg'}>{r.model}</td>
               <td className={TD + ' mono text-right text-fg-2'}>{num(r.auc, 3)}</td>
               <td className={TD + ' mono hidden text-right text-fg-2 sm:table-cell'}>{num(r.brier, 4)}</td>
@@ -96,7 +96,7 @@ export function QuantPanel({ data }: { data: QuantModels }) {
         </thead>
         <tbody>
           {data.portfolio.map((r) => (
-            <tr key={r.scheme} className="border-t border-line">
+            <tr key={r.scheme} className="row-hover border-t border-line">
               <td className={TD + ' text-fg'}>{r.scheme}</td>
               <td className={TD + ' mono text-right text-fg-3'}>{r.months}</td>
               <td className={TD + ' mono text-right text-fg-2'}>{num(r.total_return, 2)}%</td>

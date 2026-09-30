@@ -2,8 +2,10 @@ import { endpoints } from '../api/endpoints'
 import type { DcaPlan, InvestmentPlan } from '../api/types'
 import { Card } from '../components/Card'
 import { HoldingsTable } from '../components/HoldingsTable'
+import { PageHead } from '../components/PageHead'
 import { SourceTag } from '../components/SourceTag'
 import { VerdictCard } from '../components/VerdictCard'
+import { Warming } from '../components/Warming'
 import { fmtMoney, fmtPct, plainText } from '../lib/format'
 import { useApi } from '../lib/useApi'
 
@@ -148,24 +150,16 @@ export default function Position() {
 
   return (
     <>
-      <div className="mb-4 flex flex-wrap items-baseline justify-between gap-3">
-        <h1 className="text-[17px] font-medium tracking-[.2px]">
-          持仓
-          <span className="ml-1.5 text-[13px] font-normal text-fg-3">调仓 · 明细 · 计划 · 定投</span>
-        </h1>
+      <PageHead title="持仓" sub="调仓 · 明细 · 计划 · 定投">
         <SourceTag
           source={overview.source}
           asof={ov ? ov.curve.dates[ov.curve.dates.length - 1] : null}
           onRefresh={refreshAll}
           busy={busy}
         />
-      </div>
+      </PageHead>
 
-      {wait > 0 && busy && (
-        <div className="mb-3.5 rounded-md border border-line bg-inset px-3 py-2 text-xs text-fg-2">
-          正在计算…还需约 {wait} 秒
-        </div>
-      )}
+      <Warming seconds={busy ? wait : 0} />
 
       {overview.error && (
         <Card lead title="持仓" note="· 结论">
