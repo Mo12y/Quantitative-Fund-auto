@@ -380,6 +380,24 @@ class Database:
 
         self.conn.commit()
 
+        # 市场温度**历史序列**（2026-10-01 新增）—— 温度原本是实时算、无历史存档，
+        # 导致无法给温度做历史回测（见 docs/审计修复记录.md 第四批 §11）。
+        # 由 `scripts/build_temperature_history.py` 按 thermometer 真实公式重建后写入。
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS market_temperature (
+                trade_date      TEXT PRIMARY KEY,
+                temperature     REAL NOT NULL,
+                pe_score        REAL,
+                pb_score        REAL,
+                erp_score       REAL,
+                volume_score    REAL,
+                sentiment_score REAL,
+                computed_at     REAL NOT NULL
+            )
+        """)
+
+        self.conn.commit()
+
         # 兼容迁移：dca_plans 增列（auto_sync / last_synced_at）
         try:
             have = {r[1] for r in self.conn.execute("PRAGMA table_info(dca_plans)")}

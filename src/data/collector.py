@@ -611,6 +611,14 @@ class DataCollector:
                     "WHERE index_code = ? AND trade_date = ? AND volume IS NULL",
                     [(r["volume"], r["index_code"], r["trade_date"]) for r in has_vol])
 
+        # `pe_percentile`/`pb_percentile` 是**派生列**：采集侧拿不到"到今天为止的完整历史"
+        # （那正是分位的分母），所以这里不写、改为写库后统一重算。
+        # 历史教训：两处采集曾硬编码 0，导致全表 15,215 行分位全为 0 —— 而 0 看起来
+        # 是一个合法值（"PE 分位 0 = 极冷"），属典型静默误读。见 percentiles 模块 docstring。
+        from src.analysis.percentiles import recompute_index_percentiles
+        for code in sorted({r["index_code"] for r in records}):
+            recompute_index_percentiles(self.db, code)
+
     # =================================================================
     # 工具方法
     # =================================================================

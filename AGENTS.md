@@ -52,6 +52,8 @@
 | **前端真机验收**（32 项，需先起服务） | `python scripts/verify_frontend.py` |
 | **账本不变量检查**（13 项，只读） | `python scripts/check_ledger_invariants.py` |
 | 同类结构体检（只读） | `python scripts/analyze_peer_structure.py` |
+| 回填指数估值分位（**写库，先快照**） | `python scripts/backfill_index_percentiles.py [--dry-run]` |
+| 重建温度历史序列（**写库，先快照**） | `python scripts/build_temperature_history.py` |
 | 预计算快照（让 Web 首屏免冷算） | `python src/main.py precompute` |
 
 其它 CLI（`python src/main.py <cmd>`）：`collect` `index` `nav` `snapshot` `calendar` `temp` `score`

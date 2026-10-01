@@ -65,6 +65,8 @@ except ImportError:
     from src.analysis.risk_free import RISK_FREE_ANNUAL
 from scipy import stats
 
+from .percentiles import MIN_PERIODS, expanding_percentile
+
 warnings.filterwarnings("ignore")
 
 # =====================================================================
@@ -235,18 +237,22 @@ def load_index_data(db_path, index_code="000300"):
     df["close"] = pd.to_numeric(df["close"], errors="coerce")
     for col in ("pe", "pb", "pe_percentile"):
         df[col] = pd.to_numeric(df[col], errors="coerce")
-    # pe_percentile 归一化到 [0,1]
+    # pe_percentile 归一化到 [0,1]（列里存的可能是 0-100 的百分数）
     if df["pe_percentile"].max() > 1.5:
         df["pe_percentile"] = df["pe_percentile"] / 100.0
 
-    # index_daily.pe_percentile 在采集时根本没算（save_index_val_to_db 里逐日分位留了 0），
-    # 全表实测为 0 → hs300_pe_pct 特征恒为 0、温度计方案的仓位恒定 0.70。
-    # 这里用 **扩展窗口分位数** 就地补算（只用 ≤ 当日数据，无未来函数）。
-    if df["pe_percentile"].abs().max() == 0 and df["pe"].notna().sum() > 252:
-        pe = df["pe"]
-        df["pe_percentile"] = pe.expanding(min_periods=252).apply(
-            lambda w: float((w < w[-1]).sum()) / len(w), raw=True)
-        print(f"  [index] pe_percentile 全为 0（采集缺算）→ 已用扩展窗口分位补算，"
+    # `index_daily.pe_percentile` 是**派生列**：采集侧算不出来（它不知道历史），
+    # 2026-10-01 之前全表 15,215 行留的是 0 —— 直接当特征用会让 hs300_pe_pct 恒为 0、
+    # 温度计方案的仓位恒定 0.70。这里就地补算（只用 ≤ 当日数据，无未来函数）。
+    #
+    # ⚠️ 补算逻辑已收敛到 `src/analysis/percentiles.py`（单一实现）——
+    #    原先这里有一份就地实现，温度历史回测又要用同一份，三处各写一遍必然漂移。
+    # ⚠️ 判据是「全为 0 **或** 全空」：采集侧现已改为写 NULL（不拿 0 冒充真实读数，
+    #    因为 0 恰好是一个**看起来合法**的值 = "PE 分位 0 = 极冷"，属典型静默误读）。
+    col = pd.to_numeric(df["pe_percentile"], errors="coerce")
+    if (col.abs().max() == 0 or col.isna().all()) and df["pe"].notna().sum() > MIN_PERIODS:
+        df["pe_percentile"] = expanding_percentile(df["pe"]) / 100.0
+        print(f"  [index] pe_percentile 全为 0/空（采集缺算）→ 已用扩展窗口分位补算，"
               f"区间 {df['pe_percentile'].min():.3f}~{df['pe_percentile'].max():.3f}")
 
     print(f"  [index] {index_code}: {len(df)} 行, "
