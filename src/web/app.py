@@ -391,10 +391,17 @@ def _user_constraints(db, codes=None):
         held = [h.get("fund_code") for h in holdings if h.get("fund_code")]
         try:
             ctx["overlap"] = portfolio_overlap.overlap_map(db.conn, list(codes), held)
-            meta["overlap_note"] = "相关性：%d/%d 只可计算（近 1 年周收益）" % (len(ctx["overlap"]), len(codes))
+            note = "相关性：%d/%d 只可计算（近 1 年周收益）" % (len(ctx["overlap"]), len(codes))
         except Exception as e:
             ctx["overlap"] = {}
-            meta["overlap_note"] = "相关性计算失败：%s" % str(e)[:60]
+            note = "相关性计算失败：%s" % str(e)[:60]
+        # 类对基线（相对模式的门限底数）：缺文件 → None，约束评估时**声明"未评估"**（不猜）
+        ctx["overlap_baseline"] = portfolio_overlap.load_baselines()
+        if ctx["overlap_baseline"]:
+            note += "；类对基线 as_of=%s" % ctx["overlap_baseline"].get("as_of")
+        else:
+            note += "；类对基线未生成（跑 scripts/build_overlap_baselines.py；相对模式将声明未评估）"
+        meta["overlap_note"] = note
     return built, ctx, meta
 
 

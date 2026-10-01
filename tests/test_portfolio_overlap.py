@@ -65,3 +65,79 @@ def test_empty_inputs(conn):
     assert po.overlap_map(conn, ["B0"], []) == {}
     assert po.overlap_map(conn, [], ["A0"]) == {}
     assert po.overlap_map(conn, None, None) == {}
+
+
+# ── 类对基线（2026-10-01：相对模式的门限底数）─────────────────────────────
+
+def _seed_info(db, code, ft, name=None):
+    db.upsert_fund_info({"fund_code": code, "fund_name": name or ("基金%s" % code),
+                         "fund_type": ft})
+
+
+def test_overlap_map_reports_class_pair(tmp_path):
+    """overlap_map 要带双方类别与类对键（相对基线判定依赖它）。"""
+    db = Database(str(tmp_path / "c1.db"))
+    _seed_series(db, "A0", seed=1)
+    _seed_series(db, "B0", seed=2)
+    _seed_info(db, "A0", "类甲")
+    _seed_info(db, "B0", "类乙")
+    m = po.overlap_map(db.conn, ["B0"], ["A0"])
+    assert m["B0"]["cand_class"] == "类乙" and m["B0"]["held_class"] == "类甲"
+    assert m["B0"]["pair"] == po.pair_key("类甲", "类乙")
+    db.close()
+
+
+def test_overlap_map_missing_class_is_none(tmp_path):
+    """库内无 fund_info → 类别查不到 → cand_class / pair 都是 None（不猜，由调用方声明未评估）。"""
+    db = Database(str(tmp_path / "c2.db"))
+    _seed_series(db, "A0", seed=1)
+    _seed_series(db, "B0", seed=2)
+    m = po.overlap_map(db.conn, ["B0"], ["A0"])
+    assert m["B0"]["cand_class"] is None and m["B0"]["pair"] is None
+    db.close()
+
+
+class TestClassPairBaselines:
+    """类对分布：同源序列的类内高相关、跨类近独立；短序列不进样本。"""
+
+    @staticmethod
+    def _series():
+        import numpy as np
+        rng = np.random.default_rng(0)
+        base = rng.normal(0, 0.01, 60)
+        series, code_class = {}, {}
+        for i in range(4):
+            series["X%d" % i] = base + rng.normal(0, 0.002, 60)
+            code_class["X%d" % i] = "甲"
+        for i in range(3):
+            series["Y%d" % i] = rng.normal(0, 0.01, 60)
+            code_class["Y%d" % i] = "乙"
+        return series, code_class
+
+    def test_within_high_cross_low(self):
+        series, code_class = self._series()
+        pairs = po.class_pair_baselines(series, code_class)
+        within_key, cross_key = po.pair_key("甲", "甲"), po.pair_key("甲", "乙")
+        assert pairs[within_key]["n_pairs"] == 6 and pairs[within_key]["mu"] > 0.9
+        assert pairs[cross_key]["n_pairs"] == 12 and abs(pairs[cross_key]["mu"]) < 0.5
+        assert po.pair_key("乙", "乙") in pairs
+
+    def test_short_series_excluded(self):
+        import numpy as np
+        series = {"S": np.zeros(10), "L": np.random.default_rng(1).normal(0, 0.01, 60)}
+        assert po.class_pair_baselines(series, {"S": "甲", "L": "乙"}) == {}, \
+            "短于 min_weeks 的序列不参与（宁可没有，不拿半条序列算）"
+
+
+def test_baselines_save_load_roundtrip(tmp_path):
+    data = {"as_of": "2026-10-01", "pairs": {"甲|乙": {"mu": 0.3, "sigma": 0.1, "n_pairs": 40}}}
+    p = str(tmp_path / "b.json")
+    assert po.save_baselines(data, p) == p
+    assert po.load_baselines(p) == data
+    assert po.load_baselines(str(tmp_path / "nope.json")) is None
+    bad = tmp_path / "bad.json"
+    bad.write_text("not json", encoding="utf-8")
+    assert po.load_baselines(str(bad)) is None
+    stale = tmp_path / "stale.json"
+    stale.write_text('{"as_of": "x"}', encoding="utf-8")
+    assert po.load_baselines(str(stale)) is None, "缺 pairs 的载荷视为无效"

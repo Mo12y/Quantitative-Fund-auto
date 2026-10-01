@@ -20,8 +20,11 @@
   或绝对阈值（读 `item["metrics"]`，如回撤 ≤ 25%）；
 - `holding_overlap`：候选板块（`fund_boards` 关键词映射）在现有持仓中的金额占比 ≥ 上限
   → 剔除；已持有同一只 → 剔除。**"其他"板块（关键词未命中）不猜重叠**→ skipped。
-- `corr_overlap`（"伪分散"）：候选与已持基金近 1 年**周收益相关性** ≥ 上限 → 剔除。
-  数据由调用方注入（`ctx["overlap"]`，见 `portfolio_overlap`）；净值不足 20 周 → skipped。
+- `corr_overlap`（"伪分散"）：候选与已持基金近 1 年**周收益相关性**判"同涨同跌"，两种模式：
+  **相对基线（推荐）** —— r 超过 `max(该类对 μ + k·σ, 绝对底线)` → 剔除；
+  **绝对阈值（legacy）** —— r ≥ `max_r` → 剔除。
+  数据由调用方注入（`ctx["overlap"]` + `ctx["overlap_baseline"]`，见 `portfolio_overlap`）；
+  净值不足 20 周 / 缺分类 / 类对基线样本不足 → skipped（算不了，不猜）。
 
 架构纪律（必须遵守，违反即破坏叠加性）
 ------------------------------------
@@ -70,19 +73,38 @@ DATA_MISSING = "数据缺失"
 #: 不是从数据分布校准出来的阈值（本项目吃过"拍脑袋阈值"的亏，故此处显式声明性质）。
 DEFAULT_MAX_BOARD_PCT = 40.0
 
+#: 相对基线模式的默认参数（2026-10-01 实测标定；证据见 docs/审计修复记录.md 第四批 §13）：
+#: · **k=1.0** —— 门限 = μ + 1.0σ。实测 k=1.5 会把「指数型-股票」「混合型-偏股」**类内**门限
+#:   抬到 0.96~0.98（类内异质性 σ 本身就有 0.35 量级，k 再大一点门限就超过 1、永不触发），
+#:   与"绝对 0.8 对同组内形同虚设"要修的问题相反；k=1.0 时门限落在实测分布**上 ~1/6**
+#:   （指数型-股票类内 0.81、混合型-偏股 0.77、指数×海外 0.53）。
+#: · **floor=0.60** —— 第二道闸，防"低相关类对"因 σ 小被误伤：实测 股票×债 μ≈−0.05、σ≈0.12，
+#:   没有底线会把 r=0.15 的债基判成"同涨同跌"（经济上显然是错的）。
+CORR_BASELINE_K_DEFAULT = 1.0
+CORR_ABS_FLOOR_DEFAULT = 0.60
+#: · **cap=0.80** —— 第三道闸（**上限**）。两个作用：① 防"高相关类"的相对门限超过 1 变成
+#:   永不触发（实测 指数型-海外股票 类内 μ+σ=1.006、P90=0.996 —— 该类里纳指/标普/日经混装）；
+#:   ② 保证新规则**不宽于旧的绝对 0.8**（新规则 = 旧规则的上限保证 + 按类对基线向下收紧）。
+CORR_ABS_CAP_DEFAULT = 0.80
+
+#: 类对基线的**可判定下限**：样本对数 < 此值 → 该候选声明「未评估」（skipped，不猜）
+MIN_BASELINE_PAIRS = 30
+
 #: 用户画像（dict）中会被翻译为约束的键；**其余键一律显式声明"未识别、已忽略"**（不猜语义）。
 #: - preferred_groups / excluded_groups : 参照系组别白名单 / 黑名单 → type_preference
 #: - min_percentiles / max_percentiles  : 同类百分位下限 / 上限（越大越好口径）→ risk_preference
 #: - max_values / min_values            : 指标绝对上限 / 下限（需 item["metrics"]）→ risk_preference
 #: - overlap_max_board_pct              : 单板块占比上限（%）→ holding_overlap
 #: - overlap_exclude_held               : 已持有的同一只基金是否剔除（默认 True）→ holding_overlap
-#: - corr_max_r                         : 相关性重叠上限（周收益 Pearson r）→ corr_overlap
-#:   ⚠️ **不设默认、不自动启用** —— 阈值属统计判断值（本项目吃过"拍脑袋阈值"的亏），
-#:   要显式写进画像才生效；建议起点 0.8（强相关），>1 即永不触发。
+#: - corr_relative                      : **相对同类基线模式**（推荐）→ corr_overlap。
+#:   值 `true`（用默认 k / 底线 / 上限）或 `{k: 1.0, floor: 0.60, cap: 0.80}`（覆盖默认）。
+#: - corr_max_r                         : **绝对阈值模式**（legacy）→ corr_overlap。
+#:   ⚠️ 不设默认、不自动启用 —— 阈值属统计判断值，要显式写进画像才生效。
+#:   与 corr_relative 同时写时：相对模式优先，corr_max_r 被忽略（note 显式声明）。
 PROFILE_KEYS = (
     "preferred_groups", "excluded_groups",
     "min_percentiles", "max_percentiles", "max_values", "min_values",
-    "overlap_max_board_pct", "overlap_exclude_held", "corr_max_r",
+    "overlap_max_board_pct", "overlap_exclude_held", "corr_max_r", "corr_relative",
 )
 
 
@@ -342,18 +364,23 @@ def eval_holding_overlap(item: dict, params: dict, ctx: dict) -> tuple:
 
 
 def eval_corr_overlap(item: dict, params: dict, ctx: dict) -> tuple:
-    """相关性重叠（"伪分散"）：候选与已持基金是否**同涨同跌**。
+    """相关性重叠（"伪分散"）：候选与已持基金是否**同涨同跌**。两种模式：
 
-    数据：`ctx["overlap"][code] = {"max_r", "against", "n"}` —— 由调用方用
-    `portfolio_overlap.overlap_map()`（近 1 年周收益 Pearson r）预计算并注入；
-    本函数**纯读入参**，不查库。
+    - **相对基线（推荐）**：`params={"k", "floor"}`。门限 = `max(该类对 μ + k·σ, floor)`；
+      类对底数来自 `ctx["overlap_baseline"]`（`portfolio_overlap.build_baselines()` 的产物）。
+      为什么要它：绝对 0.8 对不同类对没有意义（实测同类基线 0.31~0.70、跨类 −0.05~0.57）。
+    - **绝对阈值（legacy）**：`params={"max_r"}`，直接与 r 比。
 
-    算不了就 skipped（**不猜成通过**）：未注入 / 该基金净值不足 20 周 / r 为 None。
-    口径与阈值性质见 `portfolio_overlap` 模块 docstring（阈值是政策、不是口径）。
+    数据：`ctx["overlap"][code] = {"max_r", "against", "n", "cand_class", "held_class", "pair"}`
+    —— 由调用方用 `portfolio_overlap.overlap_map()` 预计算并注入；本函数**纯读入参**，不查库。
+
+    算不了就 skipped（**不猜成通过**）：未注入 / 净值不足 20 周 / 缺分类 /
+    类对基线缺失或样本不足（< `MIN_BASELINE_PAIRS`）→ 一律"未评估"。
+    阈值性质见 `portfolio_overlap` 模块 docstring（阈值是政策、不是口径）。
     """
-    thr = params.get("max_r")
-    if thr is None:
-        return missing("约束未提供 max_r（相关性上限）")
+    max_r = params.get("max_r")
+    if max_r is None and params.get("k") is None and params.get("floor") is None:
+        return missing("约束未提供 max_r 或 k/floor（阈值模式未指定）")
     omap = ctx.get("overlap")
     if omap is None:
         return missing("ctx 未提供相关性数据（overlap）")
@@ -363,9 +390,45 @@ def eval_corr_overlap(item: dict, params: dict, ctx: dict) -> tuple:
     r = entry.get("max_r")
     if r is None:
         return missing("相关性结果为 None")
-    if float(r) >= float(thr):
-        return False, "与持仓 %s 的近 1 年周收益相关 %.2f（≥上限 %.2f）—— 同涨同跌" % (
-            entry.get("against"), float(r), float(thr))
+    r = float(r)
+    against = entry.get("against")
+
+    # ① 绝对阈值模式（legacy）
+    if max_r is not None:
+        thr = float(max_r)
+        if r >= thr:
+            return False, "与持仓 %s 的近 1 年周收益相关 %.2f（≥上限 %.2f）—— 同涨同跌" % (
+                against, r, thr)
+        return True, ""
+
+    # ② 相对基线模式：门限 = clamp(该类对 μ + k·σ, 底线, 上限)
+    k = float(params.get("k", CORR_BASELINE_K_DEFAULT))
+    floor = float(params.get("floor", CORR_ABS_FLOOR_DEFAULT))
+    cap = float(params.get("cap", CORR_ABS_CAP_DEFAULT))
+    baseline = ctx.get("overlap_baseline")
+    if not baseline:
+        return missing("同类基线未生成（跑 scripts/build_overlap_baselines.py 产出 "
+                       "data/overlap_baselines.json）")
+    pk = entry.get("pair")
+    if not pk:
+        return missing("缺少同类分类（候选 %s / 持仓 %s），相对基线无法判定" % (
+            entry.get("cand_class") or "?", entry.get("held_class") or "?"))
+    pair = (baseline.get("pairs") or {}).get(pk)
+    if not pair or int(pair.get("n_pairs") or 0) < MIN_BASELINE_PAIRS:
+        return missing("类对「%s」基线样本不足（%s 对 < %d）" % (
+            pk, (pair or {}).get("n_pairs", 0), MIN_BASELINE_PAIRS))
+    mu, sd = float(pair["mu"]), float(pair["sigma"])
+    thr_rel = mu + k * sd
+    thr = min(max(thr_rel, floor), cap)
+    if r >= thr:
+        bind = ""
+        if thr_rel < floor:
+            bind = "，绝对底线 %.2f 生效" % floor
+        elif thr_rel > cap:
+            bind = "，绝对上限 %.2f 生效" % cap
+        return False, ("与持仓 %s（%s）的近 1 年周收益相关 %.2f，超过同类基线门限 %.2f"
+                       "（%s：μ=%.2f，σ=%.2f，k=%.1f%s）—— 同涨同跌" % (
+                           against, entry.get("held_class"), r, thr, pk, mu, sd, k, bind))
     return True, ""
 
 
@@ -437,9 +500,50 @@ def build_constraints_from_user(user_profile: Optional[dict] = None,
         desc = "风险偏好：" + "；".join("%s=%s" % (k, v) for k, v in risk_params.items())
         constraints.append(Constraint(RISK_PREFERENCE, risk_params, SOURCE_USER_PROFILE, desc))
 
-    # 相关性重叠：**只有画像显式写了 corr_max_r 才启用**（统计阈值不设默认，见 PROFILE_KEYS 注释）
+    # 相关性重叠：两种模式 —— 相对基线（推荐，corr_relative）/ 绝对阈值（legacy，corr_max_r）。
+    # 只有画像**显式写了**才启用（统计阈值不设默认）；两种同时写 → 相对模式优先（note 声明）。
+    corr_rel = profile.get("corr_relative")
     corr_r = profile.get("corr_max_r")
-    if corr_r is not None:
+    if corr_rel is not None and corr_r is not None:
+        notes.append("同时写了 corr_relative 与 corr_max_r → 用相对基线模式，corr_max_r 已忽略")
+    if corr_rel is not None:
+        params = {"k": CORR_BASELINE_K_DEFAULT, "floor": CORR_ABS_FLOOR_DEFAULT,
+                  "cap": CORR_ABS_CAP_DEFAULT}
+        ok = True
+        if isinstance(corr_rel, dict):
+            for key in ("k", "floor", "cap"):
+                if key in corr_rel:
+                    try:
+                        params[key] = float(corr_rel[key])
+                    except (TypeError, ValueError):
+                        notes.append("corr_relative.%s=%r 不是数字 → 用默认 %.2f"
+                                     % (key, corr_rel[key], params[key]))
+            extra = sorted(set(corr_rel) - {"k", "floor", "cap"})
+            if extra:
+                notes.append("corr_relative 未识别键已忽略：%s（不猜语义）" % "、".join(extra))
+            if not (0.0 <= params["k"] <= 10.0):
+                notes.append("corr_relative.k=%.2f 超出合理范围 [0,10] → 用默认 %.2f"
+                             % (params["k"], CORR_BASELINE_K_DEFAULT))
+                params["k"] = CORR_BASELINE_K_DEFAULT
+            for key, default in (("floor", CORR_ABS_FLOOR_DEFAULT), ("cap", CORR_ABS_CAP_DEFAULT)):
+                if not (-1.0 <= params[key] <= 1.0):
+                    notes.append("corr_relative.%s=%.2f 超出合理范围 [-1,1] → 用默认 %.2f"
+                                 % (key, params[key], default))
+                    params[key] = default
+            if params["floor"] > params["cap"]:
+                notes.append("corr_relative.floor(%.2f) > cap(%.2f) → 两者对调即可；"
+                             "本次按 floor=cap=%.2f 处理" % (params["floor"], params["cap"],
+                                                              params["cap"]))
+                params["floor"] = params["cap"]
+        elif corr_rel is not True:
+            ok = False
+            notes.append("corr_relative=%r 不是 true/dict → 已忽略（不猜）" % (corr_rel,))
+        if ok:
+            constraints.append(Constraint(
+                CORR_OVERLAP, params, SOURCE_USER_PROFILE,
+                "相关性重叠（相对基线）：与持仓任一只的近 1 年周收益 r 超过「同类基线 μ+%.1fσ」"
+                "门限（底线 %.2f / 上限 %.2f）" % (params["k"], params["floor"], params["cap"])))
+    elif corr_r is not None:
         try:
             constraints.append(Constraint(
                 CORR_OVERLAP, {"max_r": float(corr_r)}, SOURCE_USER_PROFILE,

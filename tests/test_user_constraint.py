@@ -20,6 +20,7 @@ import pytest
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from src.analysis import user_constraint as uc
+from src.analysis.portfolio_overlap import pair_key as _pk
 from src.analysis.user_constraint import (
     Constraint, apply_constraints, build_constraints_from_user, register_constraint,
     HOLDING_OVERLAP, TYPE_PREFERENCE, RISK_PREFERENCE, CORR_OVERLAP,
@@ -348,6 +349,73 @@ class TestCorrOverlap:
         assert len(r.skipped) == 1
 
 
+class TestCorrOverlapRelative:
+    """相对基线模式：门限 = clamp(μ+kσ, 底线, 上限)；缺基线/缺类/样本不足 → skipped。"""
+
+    BASE = {"pairs": {_pk("甲", "甲"): {"mu": 0.62, "sigma": 0.10, "n_pairs": 500},
+                      _pk("甲", "乙"): {"mu": -0.05, "sigma": 0.12, "n_pairs": 400},
+                      _pk("甲", "丙"): {"mu": 0.30, "sigma": 0.10, "n_pairs": 5},
+                      _pk("甲", "丁"): {"mu": 0.90, "sigma": 0.30, "n_pairs": 400}}}
+
+    @staticmethod
+    def _ctx(r, cand="甲", held="甲"):
+        pair = _pk(cand, held) if (cand and held) else None
+        return {"overlap": {"X1": {"max_r": r, "against": "H1", "n": 56,
+                                   "cand_class": cand, "held_class": held, "pair": pair}},
+                "overlap_baseline": TestCorrOverlapRelative.BASE}
+
+    @staticmethod
+    def _c():
+        return Constraint(CORR_OVERLAP, {"k": 1.0, "floor": 0.6, "cap": 0.8},
+                          description="相关性重叠")
+
+    def test_above_relative_threshold_is_dropped(self, builtins):
+        # 甲|甲：μ+1σ = 0.72 → r=0.80 超过；理由要带 r / 对手 / 门限 / 基线数字（可解释性）
+        r = apply_constraints([{"code": "X1", "name": "甲"}], [self._c()], self._ctx(0.80))
+        assert [p["code"] for p in r.dropped] == ["X1"]
+        why = r.dropped[0]["dropped_reasons"][0]
+        assert "0.80" in why and "H1" in why and "0.72" in why and "μ=0.62" in why
+
+    def test_below_relative_threshold_is_kept(self, builtins):
+        r = apply_constraints([{"code": "X1", "name": "甲"}], [self._c()], self._ctx(0.70))
+        assert _kept_codes(r) == ["X1"]
+
+    def test_floor_binds_for_low_corr_class_pair(self, builtins):
+        """甲×乙 基线 μ+σ≈0.07 → 底线 0.6 生效：r=0.30 的债基不该被误伤。"""
+        r1 = apply_constraints([{"code": "X1", "name": "甲"}], [self._c()],
+                               self._ctx(0.30, "甲", "乙"))
+        assert _kept_codes(r1) == ["X1"]
+        r2 = apply_constraints([{"code": "X1", "name": "甲"}], [self._c()],
+                               self._ctx(0.62, "甲", "乙"))
+        assert [p["code"] for p in r2.dropped] == ["X1"]
+        assert "底线" in r2.dropped[0]["dropped_reasons"][0]
+
+    def test_cap_binds_for_high_corr_class_pair(self, builtins):
+        """甲×丁 基线 μ+σ=1.2 > 1 → 上限 0.8 生效（否则相对门限超过 1、永不触发）。"""
+        r = apply_constraints([{"code": "X1", "name": "甲"}], [self._c()],
+                              self._ctx(0.82, "甲", "丁"))
+        assert [p["code"] for p in r.dropped] == ["X1"]
+        assert "上限" in r.dropped[0]["dropped_reasons"][0]
+
+    def test_missing_baseline_is_skipped(self, builtins):
+        ctx = self._ctx(0.9)
+        ctx["overlap_baseline"] = None
+        r = apply_constraints([{"code": "X1", "name": "甲"}], [self._c()], ctx)
+        assert r.kept == [] and r.dropped == [] and len(r.skipped) == 1
+        assert "基线未生成" in r.skipped[0]["skipped_reasons"][0]
+
+    def test_missing_class_is_skipped(self, builtins):
+        r = apply_constraints([{"code": "X1", "name": "甲"}], [self._c()],
+                              self._ctx(0.9, "甲", None))
+        assert len(r.skipped) == 1 and "缺少同类分类" in r.skipped[0]["skipped_reasons"][0]
+
+    def test_small_pair_sample_is_skipped(self, builtins):
+        """甲|丙 只有 5 对 → 样本不足 → 未评估（不拿 5 对当基线）。"""
+        r = apply_constraints([{"code": "X1", "name": "甲"}], [self._c()],
+                              self._ctx(0.9, "甲", "丙"))
+        assert len(r.skipped) == 1 and "样本不足" in r.skipped[0]["skipped_reasons"][0]
+
+
 class TestBuildConstraintsFromUser:
     """用户数据 → 约束的翻译（不猜语义，未识别键显式声明）。"""
 
@@ -392,6 +460,33 @@ class TestBuildConstraintsFromUser:
         r = build_constraints_from_user({"corr_max_r": "强"}, REAL_LIKE_HOLDINGS)
         assert all(c.kind != CORR_OVERLAP for c in r.constraints), "不是数字就不启用"
         assert "corr_max_r" in r.note and "不是数字" in r.note
+
+    def test_corr_relative_dict_enables_relative_mode(self, builtins):
+        r = build_constraints_from_user({"corr_relative": {"k": 1.2, "floor": 0.5}},
+                                        REAL_LIKE_HOLDINGS)
+        corr = [c for c in r.constraints if c.kind == CORR_OVERLAP][0]
+        assert corr.params == {"k": 1.2, "floor": 0.5, "cap": uc.CORR_ABS_CAP_DEFAULT}
+        assert "相对基线" in corr.description and "1.2" in corr.description
+
+    def test_corr_relative_true_uses_defaults(self, builtins):
+        r = build_constraints_from_user({"corr_relative": True}, REAL_LIKE_HOLDINGS)
+        corr = [c for c in r.constraints if c.kind == CORR_OVERLAP][0]
+        assert corr.params == {"k": uc.CORR_BASELINE_K_DEFAULT,
+                               "floor": uc.CORR_ABS_FLOOR_DEFAULT,
+                               "cap": uc.CORR_ABS_CAP_DEFAULT}
+
+    def test_corr_relative_bad_value_declared_not_guessed(self, builtins):
+        r = build_constraints_from_user({"corr_relative": "强"}, REAL_LIKE_HOLDINGS)
+        assert all(c.kind != CORR_OVERLAP for c in r.constraints)
+        assert "corr_relative" in r.note
+
+    def test_both_modes_relative_wins_with_note(self, builtins):
+        """两种模式同时写 → 相对优先，note 显式声明 corr_max_r 被忽略（不静默）。"""
+        r = build_constraints_from_user({"corr_relative": True, "corr_max_r": 0.8},
+                                        REAL_LIKE_HOLDINGS)
+        corr = [c for c in r.constraints if c.kind == CORR_OVERLAP][0]
+        assert "max_r" not in corr.params
+        assert "corr_max_r 已忽略" in r.note
 
     def test_unknown_keys_and_risk_pref_text_are_declared(self, builtins):
         """未识别的画像键（含自由文本 risk_pref）→ 明确声明"已忽略/未映射"，不编造。"""

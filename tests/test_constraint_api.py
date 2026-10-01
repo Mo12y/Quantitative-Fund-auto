@@ -271,6 +271,27 @@ class TestAnnotateUserConstraints:
         assert review["overlap_note"].startswith("相关性：1/1"), \
             "相关性可计算只数必须如实回报（%s）" % review["overlap_note"]
 
+    def test_corr_relative_mode_end_to_end(self, dbp, tmp_path, monkeypatch):
+        """相对模式：画像写 corr_relative + 注入类对基线 → 门限按类对算（同序列候选必被剔除）。"""
+        _seed(dbp)
+        _seed_nav(dbp, "017470", seed=1)     # 持仓（混合型-偏股）
+        _seed_nav(dbp, "000059", seed=1)     # 候选与它**同序列** → r ≈ 1.0
+        prof = tmp_path / "user_profile.local.yaml"
+        prof.write_text("corr_relative: {k: 1.0, floor: 0.6, cap: 0.8}\n", encoding="utf-8")
+        monkeypatch.setattr(webapp.user_profile, "PROFILE_PATH", str(prof))
+        canned = {"as_of": "2026-10-01",
+                  "pairs": {"混合型-偏股|混合型-偏股": {"mu": 0.56, "sigma": 0.23, "n_pairs": 780}}}
+        monkeypatch.setattr(webapp.portfolio_overlap, "load_baselines", lambda: canned)
+        d = _db(dbp)
+        annotated, review = webapp._annotate_user_constraints(
+            d, [{"code": "000059", "name": "国联安中证医药100A"}])
+        d.close()
+        assert annotated[0]["constraint_status"] == "dropped", "同涨同跌（同类对门限）必须被剔除"
+        why = annotated[0]["constraint_reasons"][0]
+        assert "同类基线门限" in why and "混合型-偏股" in why
+        assert "类对基线 as_of=2026-10-01" in review["overlap_note"], \
+            "基线来源/as_of 必须照实上屏（%s）" % review["overlap_note"]
+
 
 class TestPoolEndpointWiring:
     """`/api/funds` 的载荷要带标注，且**不得污染缓存载荷**（共享 dict）。"""
