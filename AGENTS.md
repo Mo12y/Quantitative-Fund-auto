@@ -55,6 +55,7 @@
 | 回填指数估值分位（**写库，先快照**） | `python scripts/backfill_index_percentiles.py [--dry-run]` |
 | 重建温度历史序列（**写库，先快照**） | `python scripts/build_temperature_history.py` |
 | 构建类对相关基线（**只读账本**；corr_overlap 相对模式的门限底数，缺失→该约束声明未评估） | `python scripts/build_overlap_baselines.py` |
+| 回填流水 shares / sell_amount（**写库，先快照**；幂等，只补缺失不覆盖） | `python scripts/backfill_transaction_shares.py [--apply]` |
 | 预计算快照（让 Web 首屏免冷算） | `python src/main.py precompute` |
 
 其它 CLI（`python src/main.py <cmd>`）：`collect` `index` `nav` `snapshot` `calendar` `temp` `score`

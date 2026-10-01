@@ -8,6 +8,7 @@
   · 前端有 `scripts/verify_frontend.py` 兜回归，**数据层一直没有对应的守卫**。
   · 2026-10-01 第一次跑就抓到真缺陷：`transactions.shares` 有 12 条买入没填（占买入额 28%），
     导致复式记账恒等式 7/13 只基金不平 —— 详见 KNOWN 段。
+    （该缺陷已于同日修复、KNOWN 基线归零：docs/审计修复记录.md 第四批 §14。）
 
 **只读**：本脚本不含任何 INSERT/UPDATE/DELETE/commit。
 
@@ -33,11 +34,12 @@ from src.data.database import Database  # noqa: E402
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DB = os.path.join(ROOT, "data", "fund_quant.db")
 
-#: KNOWN 段的基线（超过即视为退化）。修好数据后把这里的数字下调或删除条目。
+#: KNOWN 段的基线（超过即视为退化）。**2026-10-01 三项已全部修复 → 基线归零**（再出现即回归）。
+#: 修复过程与回滚点见 docs/审计修复记录.md 第四批 §14；修复脚本 scripts/backfill_transaction_shares.py。
 KNOWN_BASELINE = {
-    "复式记账恒等式不平的基金数": 7,
-    "买入流水 shares 缺失条数": 12,
-    "sold 批次缺 sell_amount 条数": 1,
+    "复式记账恒等式不平的基金数": 0,
+    "买入流水 shares 缺失条数": 0,
+    "sold 批次缺 sell_amount 条数": 0,
 }
 
 results: list[tuple[str, str, bool, str]] = []
