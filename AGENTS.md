@@ -60,7 +60,7 @@
 
 其它 CLI（`python src/main.py <cmd>`）：`collect` `index` `nav` `snapshot` `calendar` `temp` `score`
 `sector` `sentiment` `recommend` `strategy` `portfolio` `buy` `sell` `rebalance` `dca` `plan` `report` `oos`
-`counterfactual` `sell_rules` `breakeven` `behavior`。
+`counterfactual` `sell_rules` `breakeven` `behavior` `drift`。
 
 ## 三、操作记忆：铁律
 

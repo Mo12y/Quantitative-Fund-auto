@@ -781,6 +781,91 @@ def cmd_behavior():
         print("  · %s" % n)
 
 
+def cmd_drift():
+    """风格漂移检测（M5）—— CUSUM-of-squares + PELT，查「名称与类型不变、风险特征变了」。
+
+    用法：`python src/main.py drift [基金代码 ...]`（不给代码 = 扫描当前持仓）。
+    ⭐ 判据一律带**市场对照**（同日期窗的沪深300 / β 用中证500）—— 只报**超额**变化。
+    """
+    import sys as _sys
+    from src.analysis.changepoint import analyze, scan, MIN_HISTORY
+    from src.data.database import Database
+
+    codes = [a for a in _sys.argv[2:] if not a.startswith("-")]
+    print("🔍 风格漂移检测（CUSUM-of-squares + PELT）")
+    print("   （只读净值与指数，不改任何东西；判据带市场对照）")
+    print()
+    db = Database()
+    try:
+        if codes:
+            rows = [analyze(db, c) for c in codes]
+            out = {"n": len(rows), "alerts": sum(1 for x in rows if x.get("alerts")),
+                   "results": rows}
+        else:
+            out = scan(db)
+    finally:
+        db.close()
+
+    print("范围：%s｜检查 %d 只｜告警 **%d** 只"
+          % ("指定代码" if codes else "当前持仓", out["n"], out["alerts"]))
+    print()
+    fired = [x for x in out["results"] if x.get("alerts")]
+    quiet = [x for x in out["results"] if not x.get("alerts")]
+
+    for r in fired:
+        _print_drift(r)
+    if quiet:
+        print("─" * 70)
+        print("未告警 / 不适用：")
+        for r in quiet:
+            v = r.get("vol") or {}
+            exc = v.get("excess_rel_change")
+            print("  %-8s %-22s %-12s %s"
+                  % (r["code"], str(r.get("name") or "")[:20], r.get("flag"),
+                     ("超额波动变化 %+.0f%%" % (exc * 100)) if exc is not None else
+                     (r.get("reason") or "")))
+    print()
+    print("读法（详见 `src/analysis/changepoint.py` module docstring）：")
+    for n in (out.get("notes") or []):
+        print("  · %s" % n)
+    print("  · 变点**不是结论**，是怀疑的入口；判据门槛已写死在模块常量（事前写死，不随数据挪）。")
+    print("  · 历史不足 %d 个收益点（约一年）的基金**不给判断**。" % MIN_HISTORY)
+
+
+def _print_drift(r):
+    """打印单只基金的漂移报告。"""
+    print("=" * 70)
+    print("%s %s｜%s" % (r["code"], str(r.get("name") or "")[:28], r.get("flag")))
+    if not r.get("ok"):
+        print("  %s" % (r.get("reason") or ""))
+        print()
+        return
+    print("  区间 %s（%d 个收益点）" % (r.get("span"), r.get("n_returns")))
+    pel = r.get("pelt_change_points") or []
+    print("  变点：%s（CUSUM-of-squares）" % r.get("cp_date"))
+    print("        PELT 在滚动波动上的变点：%s"
+          % ("、".join(pel[-3:]) if pel else "无"))
+    v = r.get("vol") or {}
+    if v.get("delta_pp") is not None:
+        line = "  波动  %.2f%% → %.2f%%  (%+.2fpp)" % (v["ref_pct"], v["test_pct"], v["delta_pp"])
+        if v.get("excess_rel_change") is not None:
+            line += "｜相对 %+.0f%%，沪深300 同期 %+.0f%% → **超额 %+.0f%%**" % (
+                v["rel_change"] * 100, v["bench_rel_change"] * 100, v["excess_rel_change"] * 100)
+        print(line)
+    b = r.get("beta") or {}
+    if b.get("delta") is not None:
+        line = "  β     %.2f → %.2f  (%+.2f)" % (b["ref"], b["test"], b["delta"])
+        if b.get("excess_delta") is not None:
+            line += "｜对照 %s 对沪深300 %+.2f → **超额 %+.2f**" % (
+                b.get("control_name", ""), b.get("control_delta", 0), b["excess_delta"])
+        print(line)
+    for a in r.get("alerts") or []:
+        print("  ⚠️ %s" % a)
+    if not r.get("control_available") and r.get("bench_available"):
+        print("  ⚠️ 中证500 对照序列缺失 → β 无市场对照")
+    print()
+
+
 def cmd_precompute():
     """预计算并落 SQLite 快照（温度/筛选池/调仓/聚合总览/板块总榜）。
 

@@ -43,6 +43,7 @@
     sell_rules      同标的卖出规则对比(冻结买入，只变卖出规则)
     breakeven       回本门槛(这笔操作要涨多少才不亏)
     behavior        行为画像(追高 / 割肉 / 交易频率 ↔ 收益)
+    drift           风格漂移检测(CUSUM-of-squares + PELT；名称与类型不变、风险特征变了)
 
 看板 / 自动化:
     web         启动 Web 仪表盘(http://localhost:5020；端口可用 QFA_PORT=5021 或 `web 5021` 覆盖)
