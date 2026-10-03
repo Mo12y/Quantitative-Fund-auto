@@ -50,7 +50,7 @@
 | 起 Web | `python src/main.py web`（默认 :5020） |
 | 前端构建 | `cd frontend && npm run build` |
 | **前端真机验收**（32 项，需先起服务） | `python scripts/verify_frontend.py` |
-| **账本不变量检查**（13 项，只读） | `python scripts/check_ledger_invariants.py` |
+| **数据契约检查**（24 项，只读） | `python scripts/check_ledger_invariants.py` |
 | 同类结构体检（只读） | `python scripts/analyze_peer_structure.py` |
 | 回填指数估值分位（**写库，先快照**） | `python scripts/backfill_index_percentiles.py [--dry-run]` |
 | 重建温度历史序列（**写库，先快照**） | `python scripts/build_temperature_history.py` |
@@ -98,7 +98,7 @@
 | 守卫 | 命令 | 挡住什么 |
 |:---|:---|:---|
 | 功能回归 | `python -m pytest tests/ -q` | 622 项功能断言（基线 **622 passed / 2 skipped**）|
-| 账本不变量 | `python scripts/check_ledger_invariants.py` | 值域 / 引用完整性 / **复式记账恒等式**（13 项）|
+| 数据契约（账本 + 市场数据） | `python scripts/check_ledger_invariants.py` | 值域 / 引用完整性 / 时序 / 覆盖率 / 新鲜度 / **复式记账恒等式**（24 项 = 账本 13 + 市场数据 11）|
 | 前端真机 | `python scripts/verify_frontend.py` | 四入口渲染、导航断点、移动端零溢出、动效绑定（32 项）|
 | **文档引用完整性** | `pytest tests/test_doc_refs.py -q` | 文档指向**仓库内不存在**的路径 |
 | 同类结构体检 | `python scripts/analyze_peer_structure.py` | 同类相关基线（决定 `corr_overlap` 阈值是否还成立）|
