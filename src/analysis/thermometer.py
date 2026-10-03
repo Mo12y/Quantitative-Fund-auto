@@ -18,6 +18,7 @@ import numpy as np
 import os
 from typing import Optional
 from ..data.database import Database
+from .user_profile import DEFAULT_EQUITY_PIVOT
 
 
 def _live_default() -> bool:
@@ -86,11 +87,11 @@ class MarketThermometer:
     HS300_CODE = "000300"
 
     TEMP_LEVELS = {
-        "cold":   (0,  20, "🧊 极冷", "极度恐慌，可大胆加仓", 0.70),
-        "cool":   (20, 40, "💧 偏冷", "市场低迷，适度加仓",   0.55),
-        "normal": (40, 60, "🌤️ 适中", "正常水平，保持定投",   0.35),
-        "warm":   (60, 80, "🔥 偏热", "情绪高涨，减少买入",   0.20),
-        "hot":    (80, 101,"☀️ 过热", "极度贪婪，考虑减仓",   0.05),
+        "cold":   (0,  20, "🧊 极冷", "极度恐慌，可大胆加仓", 0.80),
+        "cool":   (20, 40, "💧 偏冷", "市场低迷，适度加仓",   0.70),
+        "normal": (40, 60, "🌤️ 适中", "正常水平，保持定投",   0.60),
+        "warm":   (60, 80, "🔥 偏热", "情绪高涨，减少买入",   0.50),
+        "hot":    (80, 101,"☀️ 过热", "极度贪婪，考虑减仓",   0.40),
     }
 
     # 申万风格指数 (数据到2026-08-07, 可靠)
@@ -102,11 +103,28 @@ class MarketThermometer:
         "801822": {"name": "申万低PE(价值)", "style": "value",  "cap": "all"},
     }
 
-    def __init__(self, db: Database, weights: dict = None, live: Optional[bool] = None):
+    def __init__(self, db: Database, weights: dict = None, live: Optional[bool] = None,
+                 equity_pivot: tuple = None):
         self.db = db
         self.weights = weights or self.DEFAULT_WEIGHTS
         self.live = _live_default() if live is None else live
+        # 温度→权益仓位的**枢轴参数** `(中性目标 %, 温度调节 ±pp)`。
+        # None → 默认（单一来源 user_profile.DEFAULT_EQUITY_PIVOT）；调用方可传
+        # `user_profile.load_equity_pivot()[0]` 注入画像声明值 ——
+        # **刻意不在本类里读画像文件**：单元测试必须确定性，读文件会让断言随本机配置漂移。
+        self.equity_pivot = tuple(equity_pivot) if equity_pivot else DEFAULT_EQUITY_PIVOT
         self._lpr_cache = None  # 缓存LPR利率
+
+    @classmethod
+    def from_profile(cls, db: Database, **kwargs) -> "MarketThermometer":
+        """按**本机画像**的枢轴声明构造（`equity_neutral_pct` / `equity_tilt_pp`）。
+
+        所有面向用户的入口（Web / CLI / 周报 / 策略引擎）统一用这个构造器，
+        保证"同一台机器上的同一个目标"，不各读各的；
+        单元测试请直接 `MarketThermometer(db, equity_pivot=(60, 25))`（确定性，不读文件）。
+        """
+        from .user_profile import load_equity_pivot
+        return cls(db, equity_pivot=load_equity_pivot()[0], **kwargs)
 
     # =================================================================
     # 主接口
@@ -185,6 +203,13 @@ class MarketThermometer:
             "divergence": divergence,
             "market_style": style,
             "target_equity_pct": (round(base_equity * 100, 1) if base_equity is not None else None),
+            # 目标仓位的**来源模型**（显式化：别让"目标 60%"看起来凭空来 —— 报告/前端要能解释）
+            "target_model": {
+                "kind": "equity_pivot",
+                "neutral_pct": float(self.equity_pivot[0]),
+                "tilt_pp": float(self.equity_pivot[1]),
+                "note": "长期中性目标 ± 温度调节（AQR 式）；依据 docs/审计修复记录.md 第四批 §10-§11",
+            },
             # 适用范围（§8.6）：上层对非 A 股权益标的不得据此给仓位结论。
             "scope": dict(TEMPERATURE_SCOPE),
         }
@@ -532,37 +557,39 @@ class MarketThermometer:
                 return val
         return None
 
-    # 温度→权益仓位的锚点（取各档位中点）。锚点之间线性插值 → 仓位随温度连续变化，
-    # 避免"39.9°→55%、40.0°→35%"这类跨档 20 个百分点的跳变。
-    EQUITY_ANCHORS = ((10.0, 0.70), (30.0, 0.55), (50.0, 0.35), (70.0, 0.20), (90.0, 0.05))
+    # 温度→权益仓位模型（2026-10-01 起：**枢轴式**，AQR 式；依据 docs/审计修复记录.md 第四批 §10-§11）
+    #
+    # 旧模型（`EQUITY_ANCHORS` 锚点插值出 5%~70%、长期均值 ~40%）被 20 年真实温度回测证伪为
+    # **结构性低配**：按温度降暴露在风险调整后减分（年化 −2.45pp、夏普 0.16 vs 恒定 60% 的 0.26），
+    # 平均权益只有 40% —— 正对上 AQR"50 多年只收了 89% 的风险溢价"那句。
+    # 新模型 = 围绕**明示的长期中性目标**摆动：`target = 中性 + (50 − 温度)/50 × 幅度`。
+    # ⚠️ 中性目标是**风险偏好、不是数据推出来的** —— 用户可在画像里声明
+    # （`equity_neutral_pct` / `equity_tilt_pp`）；默认值单一来源 = `user_profile.DEFAULT_EQUITY_PIVOT`。
+    EQUITY_NEUTRAL_PCT, EQUITY_TILT_PP = DEFAULT_EQUITY_PIVOT
 
     def _classify_temperature(self, temp: float) -> tuple:
         """根据温度数值返回 (level, desc, action, target_equity)
 
-        target_equity 为**档位语义值**（用于文案/展示）；数值化的仓位建议走
-        _calc_target_equity 的插值，不要直接用这里的档位值。
+        target_equity 为**档位中点**的建议仓位（展示语境，与本类枢轴模型一致）；
+        数值化的仓位建议一律走 `_calc_target_equity`，不要直接用这里的档位值。
         """
         for level, (low, high, desc, action, equity) in self.TEMP_LEVELS.items():
             if low <= temp < high:
                 return level, desc, action, equity
-        return "normal", "🌤️ 适中", "正常水平，保持定投", 0.35
+        return "normal", "🌤️ 适中", "正常水平，保持定投", 0.60
 
     def _calc_target_equity(self, temp: float) -> float:
-        """温度→权益仓位映射（百分比）。在 EQUITY_ANCHORS 锚点之间线性插值，单调不增。"""
-        anchors = self.EQUITY_ANCHORS
-        if temp <= anchors[0][0]:
-            eq = anchors[0][1]
-        elif temp >= anchors[-1][0]:
-            eq = anchors[-1][1]
-        else:
-            eq = anchors[-1][1]
-            for (t0, e0), (t1, e1) in zip(anchors, anchors[1:]):
-                if t0 <= temp <= t1:
-                    eq = e0 + (e1 - e0) * (float(temp) - t0) / (t1 - t0)
-                    break
+        """温度→权益仓位映射（%，**枢轴式**，2026-10-01 起）。
+
+        `target = 中性目标 + (50 − 温度)/50 × 调节幅度` —— 温度 50° 处即中性，
+        0° / 100° 处达 ±幅度；输出夹在 [0, 100]。**单调不增、连续**（无档位跳变）。
+        参数来自 `self.equity_pivot`（默认 `DEFAULT_EQUITY_PIVOT` = 60 / 25，可由画像覆盖）。
+        """
+        neutral, tilt = self.equity_pivot
+        offset = (50.0 - float(temp)) / 50.0 * float(tilt)
         # float() 必要：temp 常是 numpy 标量，np.float64 会顺着算出 np.bool_
         # 之类的非 JSON 可序列化类型（Web 端 jsonify 会直接 500）。
-        return float(round(eq * 100, 1))
+        return float(round(min(max(float(neutral) + offset, 0.0), 100.0), 1))
 
     def get_volume_history(self, days: int = 60) -> pd.DataFrame:
         """获取近期成交量数据，用于报告展示"""

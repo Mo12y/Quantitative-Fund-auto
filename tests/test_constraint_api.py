@@ -196,6 +196,35 @@ class _StubHR:
                 "current_picks": [dict(p) for p in _PICKS]}
 
 
+class TestEquityPivotLoader:
+    """权益枢轴画像加载（2026-10-01，AQR 式）：缺省 / 覆盖 / 部分覆盖 / 非法值 → 不猜。"""
+
+    def test_default_when_absent(self, tmp_path):
+        p = tmp_path / "p.yaml"
+        p.write_text("corr_max_r: 0.8\n", encoding="utf-8")
+        pivot, note = user_profile.load_equity_pivot(str(p))
+        assert pivot == (60.0, 25.0) and "默认" in note
+
+    def test_override_and_note(self, tmp_path):
+        p = tmp_path / "p.yaml"
+        p.write_text("equity_neutral_pct: 55\nequity_tilt_pp: 20\n", encoding="utf-8")
+        pivot, note = user_profile.load_equity_pivot(str(p))
+        assert pivot == (55.0, 20.0) and "画像声明" in note
+
+    def test_partial_override_merges_default(self, tmp_path):
+        p = tmp_path / "p.yaml"
+        p.write_text("equity_neutral_pct: 45\n", encoding="utf-8")
+        pivot, _ = user_profile.load_equity_pivot(str(p))
+        assert pivot == (45.0, 25.0), "只写一个键 → 另一个用默认（单一来源 DEFAULT_EQUITY_PIVOT）"
+
+    def test_invalid_values_declared_not_guessed(self, tmp_path):
+        p = tmp_path / "p.yaml"
+        p.write_text("equity_neutral_pct: 600\nequity_tilt_pp: 强\n", encoding="utf-8")
+        pivot, note = user_profile.load_equity_pivot(str(p))
+        assert pivot == (60.0, 25.0)
+        assert "超出" in note and "不是数字" in note
+
+
 class TestRecommendEndpointWiring:
     @pytest.fixture()
     def client(self, tmp_path, monkeypatch, dbp):

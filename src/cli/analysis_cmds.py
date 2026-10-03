@@ -17,7 +17,7 @@ def cmd_score():
     """基金质量筛选（v3.0: 替代评分排名）"""
     db = Database("data/fund_quant.db")
     screener = FundScreener(db)
-    thermometer = MarketThermometer(db)
+    thermometer = MarketThermometer.from_profile(db)
 
     print("🔍 基金质量筛选 v3.0")
     print()
@@ -68,7 +68,7 @@ def cmd_score():
 def cmd_temp():
     """查看市场温度 (v2.0: 含真实成交量+风格判断+分歧检测)"""
     db = Database("data/fund_quant.db")
-    thermometer = MarketThermometer(db)
+    thermometer = MarketThermometer.from_profile(db)
 
     temp = thermometer.get_temperature()
 

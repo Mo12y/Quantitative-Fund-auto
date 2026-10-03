@@ -72,6 +72,56 @@ class TestTotalCapitalAndEquity(unittest.TestCase):
         self.assertAlmostEqual(r["current_equity_pct"], 75.0, places=1)
 
 
+class TestHonestSummary(unittest.TestCase):
+    """摘要必须说实话（2026-10-01）：缺口大但无指令 ≠ "偏差在合理范围内"。"""
+
+    def _advisor(self, holdings, infos, navs, target_eq):
+        a = RebalanceAdvisor(_FakeDB(holdings, infos, navs))
+        a.thermometer = _FixedTemp(target_eq)
+        a.screener = _StubScreener()
+        return a
+
+    def test_needs_buy_but_no_candidates_tells_truth(self):
+        """加仓缺口 >5pp 但候选池为空 → 必须如实说"需要加仓、暂无候选"。
+
+        2026-10-01 实测暴露：枢轴模型把目标从 36.9% 抬到 ~58.8% 后缺口 24.9pp，
+        但摘要仍显示"无需调仓 / 偏差在合理范围内"（因为 _summarize 只看"有没有指令"）。
+        """
+        holdings = [{"id": 1, "fund_code": "A", "fund_name": "A", "shares": 1000,
+                     "buy_amount": 1000, "buy_date": "2026-01-01", "status": "holding"}]
+        a = self._advisor(holdings, {"A": {"fund_type": "混合型"}}, {"A": 1.2}, target_eq=80.0)
+        a._pool = []                               # 池子为空（或前列全是非温度适用标的）
+        r = a.analyze(cash_reserve=800.0)
+        self.assertTrue(r["need_rebalance"])       # 当前 60% vs 目标 80% → 缺口 20pp
+        self.assertEqual(r["instructions"], [])
+        self.assertIn("暂无候选", r["summary"]["verdict"])
+        self.assertIn("20.0pp", r["summary"]["detail"])
+        self.assertNotIn("合理范围内", r["summary"]["detail"], "缺口 20pp 时不得写'偏差在合理范围内'")
+
+    def test_model_tag_when_absent_in_stub(self):
+        """桩温度没有 target_model → 不编造来源注（旧载荷兼容）。"""
+        holdings = [{"id": 1, "fund_code": "A", "fund_name": "A", "shares": 1000,
+                     "buy_amount": 1000, "buy_date": "2026-01-01", "status": "holding"}]
+        a = self._advisor(holdings, {"A": {"fund_type": "混合型"}}, {"A": 1.2}, target_eq=60.0)
+        a._pool = []
+        r = a.analyze(cash_reserve=800.0)          # 当前 60% vs 目标 60% → 无操作
+        self.assertIn("无需调仓", r["summary"]["verdict"])
+        self.assertNotIn("长期中性", r["summary"]["detail"])
+
+    def test_model_tag_declared_when_present(self):
+        """载荷带 target_model 时，摘要要**注明来源**（目标不是凭空来的）。"""
+        holdings = [{"id": 1, "fund_code": "A", "fund_name": "A", "shares": 1000,
+                     "buy_amount": 1000, "buy_date": "2026-01-01", "status": "holding"}]
+        a = self._advisor(holdings, {"A": {"fund_type": "混合型"}}, {"A": 1.2}, target_eq=60.0)
+        a.thermometer = _FixedTemp(60.0)
+        a.thermometer.get_temperature = lambda: {
+            "temperature": 50.0, "target_equity_pct": 60.0, "level_desc": "适中", "action": "保持",
+            "target_model": {"kind": "equity_pivot", "neutral_pct": 60.0, "tilt_pp": 25.0}}
+        a._pool = []
+        r = a.analyze(cash_reserve=800.0)
+        self.assertIn("长期中性 60% ±25pp", r["summary"]["detail"])
+
+
 if __name__ == "__main__":
     unittest.main()
 

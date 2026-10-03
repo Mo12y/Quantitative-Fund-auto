@@ -483,7 +483,7 @@ def quick_report():
     """
     db = Database("data/fund_quant.db")
     scorer = FundScreener(db)
-    thermometer = MarketThermometer(db)
+    thermometer = MarketThermometer.from_profile(db)
     portfolio = PortfolioTracker(db)
     reporter = WeeklyReporter(db)
 

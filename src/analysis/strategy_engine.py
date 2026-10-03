@@ -61,7 +61,7 @@ class StrategyEngine:
     def __init__(self, db: Database):
         self.db = db
         self.screener = FundScreener(db)
-        self.thermometer = MarketThermometer(db)
+        self.thermometer = MarketThermometer.from_profile(db)
         self._last_temp = None
         self._last_rebalance_date = None
         self._load_state()

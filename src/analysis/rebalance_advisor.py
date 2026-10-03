@@ -54,7 +54,7 @@ class RebalanceAdvisor:
         重算一遍（当前数据规模下约 85 秒）。同一个 dashboard 冷启动因此把最贵的计算做了两次。
         """
         self.db = db
-        self.thermometer = MarketThermometer(db)
+        self.thermometer = MarketThermometer.from_profile(db)
         self.screener = FundScreener(db)
         self._pool = pool                     # None = 自己算（旧路径，保留给 CLI / 测试）
 
@@ -450,6 +450,21 @@ class RebalanceAdvisor:
     # 摘要
     # =================================================================
 
+    @staticmethod
+    def _model_tag(temp: dict) -> str:
+        """目标数字的**来源注**（显式化：目标不是凭空来的，是"长期中性 ± 温度调节"）。
+
+        携带 `target_model` 时才加；旧载荷/测试桩没有该字段 → 返回空串（不编造）。
+        """
+        m = (temp or {}).get("target_model") or {}
+        if m.get("kind") == "equity_pivot":
+            try:
+                return "（长期中性 %.0f%% ±%.0fpp 温度调节）" % (
+                    float(m["neutral_pct"]), float(m["tilt_pp"]))
+            except (KeyError, TypeError, ValueError):
+                return ""
+        return ""
+
     def _summarize(self, instructions, current_eq, target_eq, total_cap, port_value, temp):
         sells = [i for i in instructions if i.action == "卖出"]
         buys = [i for i in instructions if i.action == "买入"]
@@ -459,9 +474,28 @@ class RebalanceAdvisor:
         total_buy = sum(i.amount for i in buys)
 
         if not sells and not buys:
+            tag = self._model_tag(temp)
+            # ⚠️ 2026-10-01：以前这里**只要没有指令**就写"偏差在合理范围内"。枢轴切换后暴露了它：
+            # 缺口 24.9pp、need_rebalance=True，但池里没有"🟢稳健 且 温度适用"的候选 → 指令为空
+            # → 摘要却写"无需调仓"。缺口大时必须说实话（别让空指令掩盖一个两位数的缺口）。
+            if current_eq < target_eq - REBALANCE_PP:
+                return {
+                    "verdict": "🟡 需要加仓，但池中暂无候选",
+                    "detail": f"目标权益{target_eq}%{tag}，当前{current_eq:.0f}%"
+                              f"（差 {target_eq - current_eq:.1f}pp）；但筛选池中没有「🟢稳健 且 温度适用」"
+                              f"的买入候选（常见：池子前列被债基占满 / 被用户约束挡下）—— "
+                              f"缺口仍在，先补候选，不要当作已达标。",
+                }
+            if current_eq > target_eq + REBALANCE_PP:
+                return {
+                    "verdict": "🟡 需要减仓，但未生成卖出指令",
+                    "detail": f"目标权益{target_eq}%{tag}，当前{current_eq:.0f}%"
+                              f"（超 {current_eq - target_eq:.1f}pp）；但卖出席位为空 —— 请检查持仓数据。",
+                }
             return {
                 "verdict": "✅ 无需调仓",
-                "detail": f"当前权益{current_eq:.0f}%, 目标{target_eq}%, 偏差在合理范围内。继续持有。",
+                "detail": f"当前权益{current_eq:.0f}%, 目标{target_eq}%{tag}, "
+                          f"偏差在合理范围内。继续持有。",
             }
 
         verdict = "🔴 需要大幅减仓" if total_sell > total_cap * 0.3 else \
@@ -473,7 +507,7 @@ class RebalanceAdvisor:
             detail_parts.append(f"卖出约{total_sell:.0f}元({len(sells)}笔)")
         if buys:
             detail_parts.append(f"买入约{total_buy:.0f}元({len(buys)}笔)")
-        detail_parts.append(f"目标权益{target_eq}%, 当前{current_eq:.0f}%")
+        detail_parts.append(f"目标权益{target_eq}%{self._model_tag(temp)}, 当前{current_eq:.0f}%")
 
         return {
             "verdict": verdict,

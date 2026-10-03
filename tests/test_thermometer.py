@@ -25,23 +25,23 @@ class TestTemperatureClassification(unittest.TestCase):
         self.t = MarketThermometer(db=None)
 
     def test_cold_range(self):
-        """0-20° 极冷，目标权益仓位 70%"""
+        """0-20° 极冷，档位中点建议仓位 80%（枢轴模型：60% + 25pp）"""
         level, desc, action, equity = self.t._classify_temperature(10)
         self.assertEqual(level, "cold")
         self.assertEqual(desc, "🧊 极冷")
-        self.assertEqual(equity, 0.70)
+        self.assertEqual(equity, 0.80)
 
     def test_normal_range(self):
-        """40-60° 适中，目标权益仓位 35%"""
+        """40-60° 适中，档位中点 = 中性目标 60%"""
         level, desc, action, equity = self.t._classify_temperature(50)
         self.assertEqual(level, "normal")
-        self.assertEqual(equity, 0.35)
+        self.assertEqual(equity, 0.60)
 
     def test_hot_range(self):
-        """80-100° 过热，目标权益仓位 5%"""
+        """80-100° 过热，档位中点建议仓位 40%（枢轴模型：60% − 20pp）"""
         level, desc, action, equity = self.t._classify_temperature(90)
         self.assertEqual(level, "hot")
-        self.assertEqual(equity, 0.05)
+        self.assertEqual(equity, 0.40)
 
     def test_lower_boundary_inclusive(self):
         """边界值：20° 应落入 cool（20 <= t < 40）"""
@@ -152,7 +152,7 @@ class TestValuationRenormalization(unittest.TestCase):
 
 
 class TestEquityInterpolation(unittest.TestCase):
-    """A2: 温度→仓位连续（线性插值），单调不增"""
+    """A2: 温度→仓位连续、单调不增（2026-10-01 起为**枢轴式**：中性 60% ±25pp）"""
 
     def setUp(self):
         self.t = MarketThermometer(db=None)
@@ -173,11 +173,38 @@ class TestEquityInterpolation(unittest.TestCase):
             prev = cur
             x += 0.5
 
-    def test_band_centres_match_levels(self):
-        """锚点仍落在原档位语义值上（10°/30°/50°/70°/90°）"""
-        self.assertAlmostEqual(self.t._calc_target_equity(10), 70.0, places=1)
-        self.assertAlmostEqual(self.t._calc_target_equity(50), 35.0, places=1)
-        self.assertAlmostEqual(self.t._calc_target_equity(90), 5.0, places=1)
+    def test_band_centres_match_pivot(self):
+        """档位中点落在枢轴模型上（10°/30°/50°/70°/90° → 80/70/60/50/40）"""
+        for temp, want in ((10, 80.0), (30, 70.0), (50, 60.0), (70, 50.0), (90, 40.0)):
+            self.assertAlmostEqual(self.t._calc_target_equity(temp), want, places=1)
+
+
+class TestEquityPivot(unittest.TestCase):
+    """枢轴式仓位模型（2026-10-01）：默认 60±25、参数可注入、夹逼 [0,100]、载荷声明模型。"""
+
+    def test_default_pivot(self):
+        t = MarketThermometer(db=None)
+        self.assertAlmostEqual(t._calc_target_equity(50), 60.0, places=1)
+        self.assertAlmostEqual(t._calc_target_equity(0), 85.0, places=1)
+        self.assertAlmostEqual(t._calc_target_equity(100), 35.0, places=1)
+        self.assertAlmostEqual(t._calc_target_equity(46.2), 61.9, places=1)
+
+    def test_custom_pivot_and_clamp(self):
+        t = MarketThermometer(db=None, equity_pivot=(80.0, 30.0))
+        self.assertAlmostEqual(t._calc_target_equity(50), 80.0, places=1)
+        self.assertAlmostEqual(t._calc_target_equity(0), 100.0, places=1)    # 110 → 夹到 100
+        self.assertAlmostEqual(t._calc_target_equity(100), 50.0, places=1)
+        t2 = MarketThermometer(db=None, equity_pivot=(10.0, 30.0))
+        self.assertAlmostEqual(t2._calc_target_equity(100), 0.0, places=1)   # −20 → 夹到 0
+
+    def test_declared_in_payload(self):
+        """载荷必须**声明模型**（显式化：目标不是凭空来的，报告/前端才能解释）。"""
+        db = _FakeDB(index_val=_IV3, daily_rows=_daily([100 + i for i in range(150)], volume=None))
+        t = MarketThermometer(db, live=False, equity_pivot=(55.0, 20.0)).get_temperature()
+        m = t["target_model"]
+        self.assertEqual(m["kind"], "equity_pivot")
+        self.assertAlmostEqual(m["neutral_pct"], 55.0)
+        self.assertAlmostEqual(m["tilt_pp"], 20.0)
 
 
 class TestDivergenceDetection(unittest.TestCase):

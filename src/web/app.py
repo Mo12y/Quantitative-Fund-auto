@@ -254,7 +254,7 @@ def _all_temp():
     """市场温度（本地，较慢，~9s）"""
     try:
         db = get_db()
-        t = MarketThermometer(db).get_temperature()
+        t = MarketThermometer.from_profile(db).get_temperature()
         db.close()
         return t
     except Exception as e:

@@ -19,7 +19,7 @@ def cmd_report():
     """生成完整周报 (v3.0 质量筛选 + 消息面)"""
     db = Database("data/fund_quant.db")
     screener = FundScreener(db)
-    thermometer = MarketThermometer(db)
+    thermometer = MarketThermometer.from_profile(db)
     portfolio = PortfolioTracker(db)
     reporter = WeeklyReporter(db)
 
