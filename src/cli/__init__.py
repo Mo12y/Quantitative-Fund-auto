@@ -22,6 +22,7 @@ from src.cli.analysis_cmds import (
     cmd_sector,
     cmd_recommend,
     cmd_oos,
+    cmd_counterfactual,
     cmd_plan,
     cmd_precompute,
 )
@@ -62,6 +63,7 @@ COMMANDS = {
     "sector": cmd_sector,
     "recommend": cmd_recommend,
     "oos": cmd_oos,
+    "counterfactual": cmd_counterfactual,
     "plan": cmd_plan,
     "precompute": cmd_precompute,
     "backtest": cmd_backtest,

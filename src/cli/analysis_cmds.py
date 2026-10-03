@@ -517,6 +517,50 @@ def cmd_oos():
           "看的是 S1 与对照的**差**，不是绝对数。")
 
 
+def cmd_counterfactual():
+    """反事实归因（P1）——「如果我当时不动，会怎样」。
+
+    用你**自己的**流水回答三个反事实（不是验证策略，是验证操作）：
+      ① 完全不动（买了就不卖）  ② 只定投（只留 10 元笔）  ③ 照温度信号动（温度低多投）
+    四个情形**投入总额不同**，所以只能比 XIRR（资金加权年化），不能比盈亏额。
+    """
+    from src.analysis.counterfactual import compare
+    from src.data.database import Database
+
+    print("🔍 反事实归因：如果我当时不动，会怎样")
+    print("   （只读你的流水与净值，不改任何东西）")
+    print()
+    db = Database()
+    try:
+        r = compare(db)
+    finally:
+        db.close()
+
+    if r.get("error"):
+        print("❌ %s" % r["error"])
+        return
+
+    print("区间 %s｜买入 %d 笔（定投 %d 笔）" % (r["span"], r["n_buys_total"], r["n_buys_dca"]))
+    print("定投规则：%s" % r["dca_rule"])
+    print()
+    print("%-24s %5s %10s %11s %10s %11s" % ("情形", "笔数", "投入", "期末市值", "盈亏", "XIRR"))
+    print("-" * 78)
+    order = [("actual", "实际（你自己操作的）"), ("hold_all", "① 完全不动（买了就不卖）"),
+             ("dca_only", "② 只定投（只留 10 元笔）"), ("temp_tilt", "③ 照温度信号动")]
+    for key, label in order:
+        c = r["cases"].get(key) or {}
+        x = ("%+.2f%%" % c["xirr_pct"]) if c.get("xirr_pct") is not None else "n/a"
+        print("%-24s %5s %10s %11s %10s %11s" % (
+            label, c.get("n_buys"), c.get("invested"), c.get("end_value"),
+            c.get("pnl"), x))
+    print()
+    print("读法：")
+    for n in r["notes"]:
+        print("  · %s" % n)
+    print("  · ⚠️ 各情形的**标的构成不同**（定投笔偏纳斯达克、主动笔偏 A 股/黄金）——")
+    print("    差异里混着「策略」与「标的」两个因素，别把全部差距都算成操作能力。")
+
+
 def cmd_precompute():
     """预计算并落 SQLite 快照（温度/筛选池/调仓/聚合总览/板块总榜）。
 
