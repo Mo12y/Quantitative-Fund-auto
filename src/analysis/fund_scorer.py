@@ -22,6 +22,7 @@ from .nav_series import valuation_nav_series
 from .risk_free import RISK_FREE_ANNUAL
 from . import peer_percentile
 from . import fund_fee
+from . import fund_metrics_store
 from . import nav_metrics
 
 # 申购状态分类（D2）——
@@ -31,6 +32,10 @@ from . import nav_metrics
 #   做法，**不得静默当作可申购**。
 _BLOCKED_PURCHASE_MARKERS = ("暂停申购", "封闭期")
 _LIMITED_PURCHASE_MARKERS = ("限大额", "限购")
+
+#: E2 用的"**未提供**"哨兵 —— 用来区分「上游没给指标」（要实时算）
+#: 与「上游给了、但结果是 None」（数据不足，**不该**再算一遍）。
+_NOT_GIVEN = object()
 
 
 def type_bucket(fund_type: str) -> str:
@@ -185,6 +190,14 @@ class FundScreener:
         # ② 一次性批量读回候选基金的净值序列（替代逐基金 get_fund_nav）
         series_map = self._load_nav_series([c for c, _ in picked])
 
+        # ⭐ E2 接入（2026-10-03，审计 §3 E2）：优先用**物化指标**（`fund_metrics` 表）。
+        # 收益：原来每只基金要 `nav_metrics.compute` **2~3 次**（回撤 / 动量 / 夏普各一次），
+        # 现在命中物化就是 0 次、未命中也是 1 次。
+        # ⚠️ 只用 `load()`（**纯读**），不用 `load_or_compute()` —— 后者会对缺失基金
+        #    再批量读一遍 NAV，而本方法**刚刚已经读过**（上一行的 `series_map`），
+        #    会造成双倍 IO。缺失者交给 `_score_series` 用已有序列实时算一次。
+        metrics_map = self._load_materialized_metrics([c for c, _ in picked])
+
         results = []
         for code, ftype in picked:
             pair = series_map.get(code)
@@ -194,7 +207,8 @@ class FundScreener:
             if vals is None or len(vals) < 60:
                 continue
             info = fund_info_map[code]
-            result = self._score_series(vals, info, dates)
+            result = self._score_series(vals, info, dates,
+                                        materialized=metrics_map.get(code))
 
             # 排除标签为"不合格"的基金，以及**买不进去**的（暂停申购/封闭期）
             if result["risk_label"] == "不合格" or result.get("purchase_blocked"):
@@ -375,15 +389,31 @@ class FundScreener:
             return "pass", "✅ 可申购", None, raw
         return "unknown", f"⊘ 申购状态未知({raw})", None, raw
 
-    def _check_drawdown(self, vals, dates=None) -> tuple:
+    def _prepare_metrics(self, vals, dates, materialized):
+        """⭐ E2：本只基金的指标 dict —— **只算一次**，供三个检查共用。
+
+        · `materialized` 命中 → 直接用它；
+          ⚠️ SQLite 不存 NaN，物化表里的 `None` 要**归一成 `nan`**，
+             否则下游 `np.isfinite(None)` 会抛 `TypeError`。
+        · 未命中 → 实时 `nav_metrics.compute` **一次**（原来是三个检查各算一次）。
+        · 数据不足 → 返回 `None`（三个检查据此各自返回"数据不足"，**不会**再各算一遍
+          —— 靠 `_NOT_GIVEN` 哨兵区分"没给"与"给了但为 None"）。
+        """
+        if materialized:
+            return {k: (float("nan") if v is None else v) for k, v in materialized.items()}
+        return nav_metrics.compute(vals, dates, risk_free=self.risk_free_rate)
+
+    def _check_drawdown(self, vals, dates=None, m=_NOT_GIVEN) -> tuple:
         """近1年最大回撤检查 → (level, check_text, warning, max_dd)
 
         入参是**升序的单位净值序列**（numpy array）。原来用 pandas 逐点循环，
         540 只基金要跑十几万次 Python 迭代；改成 maximum.accumulate 后整批只需几十毫秒。
+
+        `m` 为**上游已算好的** `nav_metrics.compute` 结果（E2 接入，省掉重复计算）。
         """
         # 2026-09-25：改走 nav_metrics —— 近1年回撤用**日期窗口**（原为 252 **点数**，
         # 序列有缺口时会跨过 1 年；口径文档早已指出必须按日期）。
-        m = nav_metrics.compute(vals, dates)
+        m = nav_metrics.compute(vals, dates) if m is _NOT_GIVEN else m
         if m is None:
             return "unknown", "⚠️ 数据不足", None, None
         max_dd = float(m["max_drawdown_1y"]) if np.isfinite(m["max_drawdown_1y"]) else 0.0
@@ -393,7 +423,7 @@ class FundScreener:
             return "warn", f"⚠️ {max_dd:.0f}%(偏高)", None, round(max_dd, 1)
         return "pass", f"✅ {max_dd:.0f}%", None, round(max_dd, 1)
 
-    def _check_momentum(self, vals, fund_type: str = None, dates=None) -> tuple:
+    def _check_momentum(self, vals, fund_type: str = None, dates=None, m=_NOT_GIVEN) -> tuple:
         """追涨风险检查 → (level, check_text, warning, mom_3m)
 
         **阈值 = 组内 P90**（A1 原则：追涨是相对概念，不能跨组用同一常数）。
@@ -405,7 +435,7 @@ class FundScreener:
         违反"数据缺失必须声明"）。改为如实声明"跳过"，由上层展示。
         """
         # 2026-09-25：近3月动量改走 nav_metrics 的**日期窗口**（原为 63 **点数**）。
-        m = nav_metrics.compute(vals, dates)
+        m = nav_metrics.compute(vals, dates) if m is _NOT_GIVEN else m
         if m is None:
             return "unknown", "⚠️ 数据不足", None, None
         mom = float(m["momentum_3m"]) if np.isfinite(m["momentum_3m"]) else 0.0
@@ -427,7 +457,7 @@ class FundScreener:
             return "warn", f"💡 近3月跌{abs(mom):.0f}%(可能超跌)", None, round(mom, 1)
         return "pass", f"✅ 近3月{mom:+.1f}%(P{self.MOMENTUM_WARNING_PCT}线 {thr:.1f}%)", None, round(mom, 1)
 
-    def _check_sharpe(self, vals, dates=None) -> tuple:
+    def _check_sharpe(self, vals, dates=None, m=_NOT_GIVEN) -> tuple:
         """风险调整收益检查 → (level, check_text, warning, sharpe, ann_vol)
 
         口径（2026-09-25 统一，实现见 `src/analysis/nav_metrics.py`）：
@@ -442,7 +472,8 @@ class FundScreener:
         · 窗口按**日期**切（`_load_nav_series` 已带日期）；序列有缺口，按点数当年数会
           把年化严重高估（实测最坏约 2.3 倍）。
         """
-        m = nav_metrics.compute(vals, dates, risk_free=self.risk_free_rate)
+        m = (nav_metrics.compute(vals, dates, risk_free=self.risk_free_rate)
+             if m is _NOT_GIVEN else m)
         if m is None:
             return "unknown", "⚠️ 数据不足", None, None, None
         sharpe, ann_vol = float(m["sharpe"]), float(m["ann_vol"])   # ann_vol 已是 %
@@ -457,6 +488,32 @@ class FundScreener:
     # ------------------------------------------------------------------
     # 净值序列装载
     # ------------------------------------------------------------------
+
+    def _load_materialized_metrics(self, codes: list) -> dict:
+        """⭐ E2：读 `fund_metrics` 物化指标 → `{code: {...}}`（**纯读，不触发计算**）。
+
+        三条纪律：
+
+        1. **不改口径** —— 物化值由 `fund_metrics_store` 调同一个 SSOT
+           `nav_metrics.compute` 产出；本方法只决定"用不用它"，不重算。
+        2. ⚠️ **无风险利率必须与 SSOT 默认一致才可用** ——
+           物化表是用 SSOT 默认无风险利率算的（`nav_metrics._default_risk_free()` =
+           `risk_free.RISK_FREE_ANNUAL`）。若本 `FundScreener` 被传了**别的**
+           `risk_free_rate`，用它就会让同一只基金的夏普**随调用方而变** →
+           此时返回 `{}`，全部走实时算（宁可慢，不可口径漂移）。
+        3. ⚠️ **SQLite 不存 NaN**：物化值里的 `None` 在语义上等于"实时算出的 NaN"
+           （见 `tests/test_fund_metrics_store.py` 的不变量）。调用方做
+           `np.isfinite()` 之前必须把 `None` 归一成 `nan`，否则 `TypeError`。
+           归一化放在 `_score_series` 里做（那里才知道要参与哪些判断）。
+        """
+        if not codes or self.db is None:
+            return {}
+        try:
+            if abs(float(self.risk_free_rate) - float(RISK_FREE_ANNUAL)) > 1e-12:
+                return {}
+        except (TypeError, ValueError):
+            return {}
+        return fund_metrics_store.load(self.db, codes)
 
     def _nav_values(self, fund_code: str) -> np.ndarray:
         """单只基金的**估值净值**序列（按日期升序的 numpy 数组）。
@@ -508,17 +565,26 @@ class FundScreener:
             return None
         return self._score_series(vals, fund_info)
 
-    def _score_series(self, vals, fund_info: dict, dates=None) -> dict:
+    def _score_series(self, vals, fund_info: dict, dates=None, materialized=None) -> dict:
         """对一段已排好序的净值序列做 6 维检查并给风险标签。
 
         批次 4.8：业务判定（fail/warn 计数）只读**结构化 level**
         （`check_levels`），`quality_checks` 里的 emoji 文本只用于展示 ——
         改一次展示符号不再会静默改变风险分级。
+
+        ⭐ E2（2026-10-03）：`materialized` 是 `fund_metrics` 物化指标（可为 None）。
+        此前三个检查**各自**调一次 `nav_metrics.compute`（同一份序列算 2~3 遍）；
+        现在统一在**这里算一次**并向下传：
+
+          · 命中物化 → **0 次**计算；
+          · 未命中   → **1 次**计算（原来是 2~3 次）。
         """
-        metrics = {}
         checks = {}
         levels = {}
         warnings = []
+        metrics = {}
+
+        series_metrics = self._prepare_metrics(vals, dates, materialized)
 
         # ---- 检查1: 成立时间 ----
         levels["成立时间"], checks["成立时间"], w = self._check_age(fund_info)
@@ -538,7 +604,8 @@ class FundScreener:
         metrics["total_fee"] = total_fee
 
         # ---- 检查4: 回撤 ----
-        levels["回撤控制"], checks["回撤控制"], w, max_dd = self._check_drawdown(vals, dates)
+        levels["回撤控制"], checks["回撤控制"], w, max_dd = self._check_drawdown(
+            vals, dates, series_metrics)
         if w:
             warnings.append(w)
         if max_dd is not None:
@@ -547,14 +614,15 @@ class FundScreener:
         # ---- 检查5: 动量(追涨风险) ----
         # 需要 fund_type 才能定位"同组"（阈值 = 该组 P90），故把类型传进去。
         levels["追涨风险"], checks["追涨风险"], w, mom = self._check_momentum(
-            vals, fund_info.get("fund_type"), dates)
+            vals, fund_info.get("fund_type"), dates, series_metrics)
         if w:
             warnings.append(w)
         if mom is not None:
             metrics["momentum_3m"] = mom
 
         # ---- 检查6: 夏普比率 ----
-        levels["风险调整收益"], checks["风险调整收益"], w, sharpe, ann_vol = self._check_sharpe(vals, dates)
+        levels["风险调整收益"], checks["风险调整收益"], w, sharpe, ann_vol = self._check_sharpe(
+            vals, dates, series_metrics)
         if w:
             warnings.append(w)
         if sharpe is not None:
