@@ -28,7 +28,10 @@ def _mk_db(tmp_path, n_days=None):
         d = d0 + timedelta(days=i)
         if d.weekday() >= 5:
             continue
-        v = 1.0 + 0.0004 * i
+        # 加**确定性摆动**：真实基金不可能零波动，而零波动下夏普/索提诺会被
+        # `MIN_ANN_VOL_FOR_RATIO` 守卫正确置为 NaN（2026-10-03）。
+        # 用 i%2 而非随机数，保证测试不 flaky。
+        v = (1.0 + 0.0004 * i) * (1.0 + (0.005 if i % 2 == 0 else -0.005))
         rows.append(("T1", d.isoformat(), round(v, 6), round(v, 6), 0.0))
     db.insert_nav_batch(rows)
     db.upsert_fund_info({"fund_code": "T1", "fund_name": "t", "fund_type": "混合型"})

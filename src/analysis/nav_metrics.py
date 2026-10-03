@@ -44,6 +44,16 @@ TRADING_DAYS = 244
 #: 计算所需的最少点数
 MIN_POINTS = 60
 
+#: 风险调整比率（夏普 / 索提诺）的**最小年化波动**（小数）。
+#: 低于此值时，比率的分母趋零 → 数值爆炸、**无经济含义**。实测（2026-10-03）：
+#: `007211 汇安中短债债券E` 年化波动仅 **0.019%**（净值几乎不动），
+#: 夏普算出 **−87.1**，凭一己之力把债券组夏普极差从 20.7 撑到 **98.0**。
+#:   · 只剔掉 2 只（vol<0.1%）→ 债券组 τ² 从 2.26 掉到 0.56、平均信度 80%→52%
+#:   · 剔除 vol<0.5% 的 858 只 → 信度降到 25%
+#: → 所以 0.5% 这个门槛不是拍的：**它是"这个数还能不能当比率用"的边界**。
+#: 低于门槛时 sharpe / sortino 返回 `NaN`（**显式缺失**，而不是给一个爆炸值）。
+MIN_ANN_VOL_FOR_RATIO = 0.005
+
 
 def clip_window(vals, dates=None, years: float = WINDOW_YEARS):
     """把序列截到**末尾 N 年**（按日期）。返回 (vals, dates)。
@@ -126,7 +136,9 @@ def compute(vals, dates=None, risk_free: float = None, years: float = WINDOW_YEA
     daily = daily[np.isfinite(daily)]
     ann_vol = float(daily.std(ddof=1) * np.sqrt(TRADING_DAYS)) if daily.size > 1 else np.nan
 
-    sharpe = float((ann_ret - risk_free) / ann_vol) if ann_vol and ann_vol > 0 and np.isfinite(ann_vol) else np.nan
+    sharpe = (float((ann_ret - risk_free) / ann_vol)
+              if ann_vol and ann_vol > 0 and np.isfinite(ann_vol)
+              and ann_vol >= MIN_ANN_VOL_FOR_RATIO else np.nan)
 
     # ---- 窗口内最大回撤 ----
     peak = np.maximum.accumulate(v)
@@ -156,8 +168,9 @@ def compute(vals, dates=None, risk_free: float = None, years: float = WINDOW_YEA
         dd = float(np.sqrt((_down ** 2).mean()) * np.sqrt(TRADING_DAYS))
     else:
         dd = np.nan
+    # 下行偏差与年化波动同量纲 → 用同一个门槛（分母趋零时比率同样无意义）
     sortino = (float((ann_ret - risk_free) / dd)
-               if dd and dd > 0 and np.isfinite(dd) else np.nan)
+               if dd and dd >= MIN_ANN_VOL_FOR_RATIO and np.isfinite(dd) else np.nan)
 
     # ---- 卡玛 = 年化收益 / 窗口内最大回撤（同一个回撤口径，避免跨口径混算）----
     calmar = (float(ann_ret * 100 / mdd_win)

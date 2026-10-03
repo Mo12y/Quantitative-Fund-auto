@@ -30,13 +30,25 @@ NAV_DAYS = 260          # >252 才进候选池；>60 才进筛选池
 
 
 def _seed(db, code, name, ftype, daily_ret=0.001, mgt_fee=None, purchase_status="开放申购"):
+    """造一只基金的净值序列。
+
+    ⚠️ **2026-10-03 修正**：原实现是**纯单调增长**（`nav *= (1+daily_ret)`），
+    日波动恒为 0 —— 只是浮点误差让它不是精确 0，于是夏普算出一个巨大值。
+    加入 `nav_metrics.MIN_ANN_VOL_FOR_RATIO`（分母趋零时比率无意义）后，
+    这类序列的夏普**正确地**变成 NaN，依赖"夏普能排序"的断言随之失效。
+
+    **真实基金不可能零波动**（实测：连中短债都有 0.5%+），所以这里补一个
+    **确定性**的 ±0.5% 摆动（用 `i % 2`，不用随机数 —— 避免 flaky）。
+    年化波动约 7.8%，远超门槛；因为**所有基金加同样的摆动**，相对排序不变。
+    """
     db.upsert_fund_info({"fund_code": code, "fund_name": name, "fund_type": ftype,
                          "mgt_fee": mgt_fee, "purchase_status": purchase_status,
                          "establish_date": "2015-01-01"})
     nav, rows = 1.0, []
     start = pd.Timestamp("2025-06-02")
     for i in range(NAV_DAYS):
-        nav *= (1 + daily_ret)
+        wobble = 0.005 if i % 2 == 0 else -0.005
+        nav *= (1 + daily_ret + wobble)
         d = (start + pd.Timedelta(days=i)).strftime("%Y-%m-%d")
         rows.append((code, d, round(nav, 6), round(nav, 6), 0.0))
     db.conn.executemany(
