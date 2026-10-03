@@ -46,9 +46,11 @@ from calibrate_thresholds import (          # noqa: E402
 )
 
 from . import fund_fee                          # noqa: E402  (TER 的单一实现)
+from .shrinkage import shrink_array             # noqa: E402  (M1 信度诊断)
 
 CACHE_PATH = os.path.join(_ROOT, "data", "peer_distributions.json")
-CACHE_VERSION = 1
+# 2（2026-10-03）：每组的 `shrink` 信度诊断（M1）；旧缓存无此字段 → 判过期重算
+CACHE_VERSION = 2
 DEFAULT_MIN_DAYS = 756                       # ≈3 年，与 fund_percentile 默认一致
 
 # 方向：True = 越大越好，False = 越小越好，None = 中性（只作"位置"展示）
@@ -139,7 +141,7 @@ def build_group_arrays(min_days: int = DEFAULT_MIN_DAYS, db_path: str = None,
 def build_distributions(min_days: int = DEFAULT_MIN_DAYS, db_path: str = None) -> dict:
     """按组装分布 → 落缓存用的分位网格。**重**，只在脚本/离线刷新时调用。
 
-    Returns {generated_at, min_days, unmapped_types, groups:{g:{n,quality_level,grid}}}
+    Returns {generated_at, min_days, unmapped_types, groups:{g:{n,quality_level,grid,shrink}}}
     """
     groups, unmapped, conn = build_group_arrays(min_days, db_path)
     if conn is not None:
@@ -157,7 +159,20 @@ def build_distributions(min_days: int = DEFAULT_MIN_DAYS, db_path: str = None) -
             if arr.size == 0:
                 continue
             grid[k] = {("p%d" % q): float(np.percentile(arr, q)) for q in GRID}
-        out["groups"][g] = {"n": n, "quality_level": lvl, "grid": grid}
+        # M1 信度诊断（2026-10-03）：夏普的横截面差异里，有多少是真信号。
+        # 只对 `sharpe` 做 —— Lo (2002) 的解析 SE 只适用于**比率型**统计量；
+        # 收益/波动是"均值/标准差"型，SE 公式不同，套用会给出错误的信度。
+        shrink = None
+        if "sharpe" in grid:
+            sarr = np.array([r["sharpe"] for r in rows], dtype=float)
+            sarr = sarr[np.isfinite(sarr)]
+            if sarr.size >= 2:
+                d = shrink_array(list(sarr), years=max(int(min_days) / 244.0, 1e-6))
+                shrink = {"mu": round(float(d["mu"]), 4),
+                          "tau2": round(float(d["tau2"]), 4),
+                          "mean_weight": round(float(d["mean_weight"]), 4),
+                          "n": int(d["n"])}
+        out["groups"][g] = {"n": n, "quality_level": lvl, "grid": grid, "shrink": shrink}
     return out
 
 
@@ -245,5 +260,16 @@ def describe(cache: dict, group: str, metric: str, value, nav_asof: str = None) 
     if p is None:
         return {"group": group, "group_n": e.get("n"), "percentile": None,
                 "insufficient_data": True, "reason": "该指标无数据", "nav_asof": nav_asof}
+    # M1：把该组的**信度**一并带出 —— 信度≈0 时，百分位虽能算，但排序不含统计信息。
+    # 调用方（报告/前端）应据此降权或标注，而不是拿一个"看起来精确"的百分位当真。
+    sh = e.get("shrink")
+    reliability = None
+    note = None
+    if metric == "sharpe" and sh and sh.get("mean_weight") is not None:
+        reliability = round(float(sh["mean_weight"]), 4)
+        if reliability < 0.10:
+            note = ("该组夏普的横截面差异基本全是噪音（信度 %.0f%%，组间真实方差 %.2f）"
+                    "—— 据此排序≈随机" % (reliability * 100, float(sh.get("tau2") or 0.0)))
     return {"group": group, "group_n": e.get("n"), "percentile": round(p, 1),
-            "insufficient_data": False, "reason": None, "nav_asof": nav_asof}
+            "insufficient_data": False, "reason": None, "nav_asof": nav_asof,
+            "reliability": reliability, "reliability_note": note}
