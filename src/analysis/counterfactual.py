@@ -213,6 +213,157 @@ def benchmark_return(conn, start_date: str, end_date: str, code: str = "000300")
         return None
 
 
+def _nav_path(conn, code, start_date, end_date):
+    """某基金在 `[start_date, end_date]` 的 `[(date, unit_nav), ...]`（升序）。
+
+    用于**同标的卖出规则**模拟：逐笔买入要跟踪它自己的净值路径。
+    """
+    rows = conn.execute(
+        "SELECT nav_date, unit_nav FROM fund_nav WHERE fund_code = ?"
+        " AND nav_date >= ? AND nav_date <= ? AND unit_nav IS NOT NULL"
+        " ORDER BY nav_date", (code, start_date, end_date)).fetchall()
+    return [(str(r[0]), float(r[1])) for r in rows if r[1]]
+
+
+#: 内置卖出规则：(键, 人类可读名, 判定函数)
+#: 判定函数签名 `(nav, buy_nav, date, temp) -> bool`；`temp` 为当日温度（可能 None）
+_BUILTIN_RULES = (
+    ("never", "从不卖（买入持到底）", lambda nav, b, d, t: False),
+    ("tp10", "涨 10% 止盈", lambda nav, b, d, t: nav >= b * 1.10),
+    ("tp20", "涨 20% 止盈", lambda nav, b, d, t: nav >= b * 1.20),
+    ("sl5", "跌 5% 止损", lambda nav, b, d, t: nav <= b * 0.95),
+    ("sl10", "跌 10% 止损", lambda nav, b, d, t: nav <= b * 0.90),
+    ("temp70", "温度 > 70° 时卖", lambda nav, b, d, t: (t is not None and t > 70.0)),
+)
+
+
+def simulate_sell_rules(db, *, rules=None, end_date=None) -> dict:
+    """**固定买入清单**，只变**卖出规则** —— 纯分离"卖出时机的价值"。
+
+    为什么需要它（`compare()` 的局限）：那四个情形**标的构成不同**
+    （定投笔偏纳斯达克 QDII、主动笔偏 A 股/黄金），差异里混着「策略」与「标的」两个因素，
+    无法判断"到底是我卖得好，还是我碰巧买到了好标的"。
+
+    本函数**冻结买入**（同一批基金、同一批日期、同一批金额），只让**卖出规则**变化：
+
+    | 规则 | 含义 |
+    |---|---|
+    | `never` | 从不卖（基准） |
+    | `tp10` / `tp20` | 单笔浮盈 ≥10% / ≥20% 就卖 |
+    | `sl5` / `sl10` | 单笔浮亏 ≥5% / ≥10% 就卖 |
+    | `temp70` | 当日市场温度 > 70° 就卖 |
+
+    实现：对每笔买入跟踪它**自己的净值路径**，规则首次触发即在该日卖出（按当日净值结算）；
+    到期末仍未卖出的，按期末净值估值。全程只读。
+
+    Returns:
+        `{end_date, n_buys, results: [{key, label, invested, end_value, pnl,
+          pnl_pct, xirr_pct, n_sold, first_sell_date}], notes: [...]}`
+    """
+    conn = db.conn
+    end = end_date or db.get_latest_nav_date()
+    buys = load_buy_flows(conn)
+    if not buys or not end:
+        return {"error": "无买入流水或最新净值日"}
+
+    # 温度查表（提前取一次，避免逐日查库）
+    temp_rows = conn.execute(
+        "SELECT trade_date, temperature FROM market_temperature"
+        " WHERE temperature IS NOT NULL ORDER BY trade_date").fetchall()
+    temps = [(str(r[0]), float(r[1])) for r in temp_rows]
+
+    def temp_on(d):
+        """当日或之前最近一次的温度（前向填充；没有更早的 → None）。"""
+        lo, hi, hit = 0, len(temps) - 1, None
+        while lo <= hi:
+            mid = (lo + hi) // 2
+            if temps[mid][0] <= d:
+                hit = temps[mid][1]
+                lo = mid + 1
+            else:
+                hi = mid - 1
+        return hit
+
+    # 预取每笔买入的净值路径。
+    # ⚠️ 缓存键必须是 `(code, date)` 而**不是** `code` ——
+    # 同一只基金常有多笔买入（定投），若按 code 缓存，后一笔会命中前一笔的路径，
+    # 于是 `path[0]` 取到**前一笔的日期**的净值，把买入成本算错。
+    # （2026-10-03 被测试抓到：两笔 100 元分别按 1.0 / 1.2 买入，市值却按 200 份算。）
+    cache = {}
+    prepared = []
+    for b in buys:
+        key = (b["code"], b["date"])
+        if key not in cache:
+            cache[key] = _nav_path(conn, b["code"], b["date"], end)
+        path = cache[key]
+        if not path:
+            continue
+        buy_nav = path[0][1]
+        if buy_nav <= 0:
+            continue
+        prepared.append((b, buy_nav, path))
+
+    if not prepared:
+        return {"error": "所有买入都取不到净值路径"}
+
+    use = rules or _BUILTIN_RULES
+    results = []
+    for key, label, decide in use:
+        cashflows, invested, end_value, proceeds = [], 0.0, 0.0, 0.0
+        n_sold, first_sell = 0, None
+        for b, buy_nav, path in prepared:
+            amt = b["amount"]
+            shares = amt / buy_nav
+            invested += amt
+            cashflows.append((b["date"], -amt))
+            sold = None
+            for d, nav in path:
+                if d == b["date"]:
+                    continue
+                if decide(nav, buy_nav, d, temp_on(d)):
+                    sold = (d, nav)
+                    break
+            if sold:
+                d, nav = sold
+                got = round(shares * nav, 2)
+                cashflows.append((d, got))
+                proceeds += got                 # ⚠️ 卖出回款必须累计
+                n_sold += 1
+                if first_sell is None:
+                    first_sell = d
+            else:
+                end_value += shares * path[-1][1]
+        cashflows.append((end, round(end_value, 2)))
+        r = xirr(cashflows)
+        # ⚠️ 「回收总额」= 未卖部分的期末市值 + 已卖部分的回款。
+        # 曾经只用 `end_value` 算 pnl → 卖得越多 pnl 越"惨"（回款没算进去），
+        # 会出现「XIRR 为正、pnl 为负」的自相矛盾。2026-10-03 修正。
+        total_value = end_value + proceeds
+        pnl = total_value - invested
+        results.append({
+            "key": key, "label": label, "invested": round(invested, 2),
+            "end_value": round(end_value, 2),           # 仍保留：未卖部分的期末市值
+            "proceeds": round(proceeds, 2),             # 已卖部分的回款
+            "total_value": round(total_value, 2),       # 回收总额（pnl 的口径）
+            "pnl": round(pnl, 2),
+            "pnl_pct": round(pnl / invested * 100, 2) if invested else None,
+            "xirr_pct": round(r * 100, 2) if r is not None else None,
+            "n_sold": n_sold, "n_buys": len(prepared), "first_sell_date": first_sell,
+        })
+    return {
+        "end_date": end, "n_buys": len(prepared),
+        "span": "%s ~ %s" % (prepared[0][0]["date"], end),
+        "results": results,
+        "notes": [
+            "**买入被冻结**（同一批基金/日期/金额），只有**卖出规则**在变 → "
+            "差异纯粹来自『卖出时机』，不再混入『标的构成』。",
+            "仍未卖出的部分按**期末净值**估值（视作清算），否则 XIRR 无解。",
+            "单笔规则按『该笔自己的买入净值』判断浮盈浮亏，不是组合整体。",
+            "未计申赎费（会让所有规则同向变差，不改相对排序）。",
+        ],
+    }
+
+
 def compare(db) -> dict:
     """四个情形并排（实际 / 完全不动 / 只定投 / 照温度信号动）。**只读**。"""
     from .portfolio import PortfolioTracker

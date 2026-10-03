@@ -575,6 +575,54 @@ def cmd_counterfactual():
     print("    差异里混着「策略」与「标的」两个因素，别把全部差距都算成操作能力。")
 
 
+def cmd_sell_rules():
+    """同标的卖出规则对比（P1 扩展）—— **冻结买入，只变卖出规则**。
+
+    与 `counterfactual` 的关键区别：那四个情形**标的构成不同**（定投偏纳斯达克、
+    主动偏 A 股/黄金），差异里混着「策略」与「标的」。本命令把**买入完全冻结**
+    （同一批基金/日期/金额），只让卖出规则变化 → 差异**纯粹来自卖出时机**。
+    """
+    from src.analysis.counterfactual import simulate_sell_rules
+    from src.data.database import Database
+
+    print("🔬 同标的卖出规则对比（买入已冻结，只变卖出规则）")
+    print("   （只读你的流水与净值，不改任何东西）")
+    print()
+    db = Database()
+    try:
+        r = simulate_sell_rules(db)
+    finally:
+        db.close()
+
+    if r.get("error"):
+        print("❌ %s" % r["error"])
+        return
+
+    print("区间 %s｜冻结买入 %d 笔（各规则投入完全相同）" % (r["span"], r["n_buys"]))
+    print()
+    print("%-22s %10s %11s %10s %10s %8s" % (
+        "卖出规则", "投入", "回收总额", "盈亏", "XIRR", "卖出笔数"))
+    print("-" * 78)
+    best = None
+    for x in r["results"]:
+        print("%-22s %10s %11s %10s %10s %8s" % (
+            x["label"][:20], x["invested"], x.get("total_value"), x["pnl"],
+            ("%+.2f%%" % x["xirr_pct"]) if x["xirr_pct"] is not None else "n/a",
+            "%d/%d" % (x["n_sold"], x["n_buys"])))
+        if x["xirr_pct"] is not None and (best is None or x["xirr_pct"] > best[1]):
+            best = (x["label"], x["xirr_pct"])
+    if best:
+        print()
+        print("这段区间里 XIRR 最好的规则：**%s**（%+.2f%%）" % best)
+    print()
+    for n in r["notes"]:
+        print("  · %s" % n)
+    print()
+    print("  ⚠️ **样本仍然很短** —— 结论只能读成『这段区间里哪条规则没吃亏』，")
+    print("     不能读成『这条规则长期有效』（参见 counterfactual 的样本充分性声明）。")
+    print("  ⚠️ 某条规则若『0 笔卖出』，那是**没机会触发**（如温度从没到过阈值），不是『无效』。")
+
+
 def cmd_precompute():
     """预计算并落 SQLite 快照（温度/筛选池/调仓/聚合总览/板块总榜）。
 
