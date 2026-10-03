@@ -269,7 +269,18 @@ def _summarize(windows: list) -> dict:
     labels = ["s1_vs_c1", "s1_vs_c2", "s2_vs_c1", "s2_vs_c2"]
     groups = [dif, dif2, s2m1, s2m2]
     p_raw = [_binom_p(sum(1 for x in g if x > 0), len(g)) for g in groups]
-    p_adj = _bh_adjust(p_raw)
+    # M3（2026-10-03）：这 4 个比较用的是**同一批窗口**、同一个策略族 → 彼此高度相关。
+    # 用**名义 N=4** 校正等于把它们当 4 个独立检验，门限偏松。
+    # 用 Cheverud–Nyholt 有效 N 校正 → 门限更严（审计 §2 推论 2 的直接落实）。
+    try:
+        from .multiple_testing import bh_adjust as _bh_eff
+        from .multiple_testing import cheverud_nyholt, corr_from_series
+        _C = corr_from_series(groups)
+        m_eff = cheverud_nyholt(_C) if _C is not None else None
+        p_adj = _bh_eff(p_raw, m_eff=m_eff)
+    except Exception:                                     # noqa: BLE001
+        m_eff = None
+        p_adj = _bh_adjust(p_raw)
     win_counts = {lb: {"win": sum(1 for x in g if x > 0), "n": len(g)}
                   for lb, g in zip(labels, groups)}
 
@@ -299,6 +310,10 @@ def _summarize(windows: list) -> dict:
         "p_raw": [round(p, 5) for p in p_raw],
         "p_adjusted": [round(p, 5) for p in p_adj],
         "p_labels": labels,
+        # M3：BH 的分母。`m_eff` < 名义个数（4）时说明这 4 个比较高度相关，
+        # 门限已按有效 N 收紧。`None` = 退回名义 N。
+        "m_nominal": len(groups),
+        "m_eff": (round(float(m_eff), 3) if m_eff is not None else None),
         "win_counts": win_counts,
         "alpha": alpha,          # {alpha, beta, t_alpha, r2, n} 或 None
         "market_windows": len(trip),
@@ -319,7 +334,10 @@ def _verdict(windows: list) -> str:
     # 判据：超额中位 > 0 **且** BH 校正后 p < 0.05 才算"有迹象"（单看未校正的 p 会误导）
     p_adj = s.get("p_adjusted") or [1.0]
     ok = bool(d and d["median"] > 0) and (p_adj[0] is not None and p_adj[0] < s.get("bh_alpha", 0.05))
-    parts.append("BH 校正后最小 p = %s（4 个比较）" % (min(p_adj) if p_adj else "n/a"))
+    parts.append("BH 校正后最小 p = %s（%s 个比较，有效 N = %s）"
+                 % (min(p_adj) if p_adj else "n/a",
+                    s.get("m_nominal", "?"),
+                    s.get("m_eff") if s.get("m_eff") is not None else "n/a（退回名义）"))
     a = s.get("alpha")
     if a:
         parts.append("因子中性 α（相对）= %+.2f%%（β=%.2f，t(α)=%s，R²=%.2f，n=%d）"
