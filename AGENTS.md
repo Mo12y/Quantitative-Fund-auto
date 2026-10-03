@@ -59,7 +59,8 @@
 | 预计算快照（让 Web 首屏免冷算） | `python src/main.py precompute` |
 
 其它 CLI（`python src/main.py <cmd>`）：`collect` `index` `nav` `snapshot` `calendar` `temp` `score`
-`sector` `sentiment` `recommend` `strategy` `portfolio` `buy` `sell` `rebalance` `dca` `plan` `report` `oos`。
+`sector` `sentiment` `recommend` `strategy` `portfolio` `buy` `sell` `rebalance` `dca` `plan` `report` `oos`
+`counterfactual` `sell_rules` `breakeven` `behavior`。
 
 ## 三、操作记忆：铁律
 

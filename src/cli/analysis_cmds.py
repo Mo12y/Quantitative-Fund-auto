@@ -673,6 +673,114 @@ def cmd_breakeven():
         print("  · %s" % n)
 
 
+def cmd_behavior():
+    """行为画像（P3）—— 「**这几笔操作，我到底是怎么做的**」。
+
+    与 `counterfactual`（P1，比**结果**）互补：本命令量的是**行为本身** ——
+      · 买入纪律：有没有追高（**带同基金同期对照**，不是只看绝对涨幅）；
+      · 卖出纪律：割肉（亏损卖出）与卖飞（卖后又涨）分开量；
+      · 频率 ↔ 持有期 ↔ 该档实现收益。
+    ⚠️ 样本不足时**明确不出行为结论**（区间只有数月时，读的是"发生了什么"）。
+    """
+    from src.analysis.behavior_profile import analyze
+    from src.data.database import Database
+
+    print("🧭 行为画像：这几笔操作，我到底是怎么做的")
+    print("   （只读你的流水与净值，不改任何东西）")
+    print()
+    db = Database()
+    try:
+        r = analyze(db)
+    finally:
+        db.close()
+
+    if r.get("error"):
+        print("❌ %s" % r["error"])
+        return
+
+    bench = r.get("benchmark_pct")
+    bench_txt = ("%+.2f%%" % bench) if bench is not None else "n/a"
+    print("区间 %s｜买入 %d 笔｜已卖批次 %d 个｜同期 %s %s"
+          % (r["span"], r["buy"]["n_buys"], r["sell"].get("n_lots", 0),
+             r.get("benchmark_name", "基准"), bench_txt))
+    print()
+
+    smp = r.get("sample") or {}
+    if smp.get("warning"):
+        print(smp["warning"])
+        print()
+
+    b = r["buy"]
+    print("─" * 66)
+    print("【买入纪律 · 追高】")
+    print("  买入前 20 个交易日涨幅（中位）：%s%%" % b.get("median_trail20"))
+    print("  对照 · 同基金同期**全部交易日**的中位：%s%%" % b.get("median_trail20_baseline"))
+    cs = b.get("chase_spread")
+    print("  → 追高差值 chase_spread = %s pp   %s" % (
+        ("%+.2f" % cs) if cs is not None else "n/a",
+        "（**正数 = 你买得比平常更「涨过」**）" if cs is not None else ""))
+    print("  买入价在自身历史中的分位（中位）：%s（对照 %s）"
+          % (b.get("median_pct"), b.get("median_pct_baseline")))
+    ps = b.get("pct_spread")
+    print("  → 分位差值 pct_spread = %s pp" % (("%+.2f" % ps) if ps is not None else "n/a"))
+    print("     ⚠️ 分位普遍高通常只是「这些基金本来就处在历史高位」——**差值**才说明你的行为。")
+    if b.get("trail_range"):
+        print("  极差：买入前 20 日涨幅从 %+.1f%% 到 %+.1f%%（买点差异很大，不是均匀买入）"
+              % (b["trail_range"][0], b["trail_range"][1]))
+    print()
+
+    s = r["sell"]
+    print("─" * 66)
+    print("【卖出纪律 · 割肉 / 卖飞】")
+    if not s.get("n_lots"):
+        print("  无已卖批次。")
+    else:
+        print("  已卖批次 %d 个（分布在 %d 个**卖出决策日**）｜实现收益中位 %+.2f%%｜亏损卖出 %d 笔（%.1f%%）"
+              % (s["n_lots"], s.get("n_distinct_sell_dates", 0),
+                 s["median_ret_pct"], s["n_loss"], s["frac_loss"] * 100))
+        print("  极差：最差 %s %+.1f%%（%s 买 → %s 卖）｜最好 %s %+.1f%%"
+              % (s["worst_code"], s["worst_pct"], s["worst_buy_date"], s["worst_sell_date"],
+                 s["best_code"], s["best_pct"]))
+        cov = "%d/%d" % (s["n_with_followup"], s["n_lots"])
+        if s.get("frac_sold_too_early") is not None:
+            print("  卖后 20 个交易日：可算 %s 笔｜其中 %d 笔（%.1f%%）**卖后又涨**（卖飞）｜按笔中位 %+.2f%%"
+                  % (cov, s["n_sold_too_early"], s["frac_sold_too_early"] * 100,
+                     s["median_after20_pct"]))
+            md = s.get("median_after20_pct_by_date")
+            if md is not None:
+                print("  ⚠️ 30 个批次其实只对应 %d 个**卖出决策日** → 按笔的中位会被某一天绑架。"
+                      % s.get("n_distinct_sell_dates", 0))
+                print("     按决策日中位 = %+.2f%%（下面的『决策日』一栏才是该读的口径）" % md)
+                print("     %-12s %5s %12s %12s" % ("卖出日", "批次", "实现收益中位", "卖后 20 日"))
+                for d in s.get("by_sell_date", []):
+                    a = ("%+.2f%%" % d["after20_pct"]) if d["after20_pct"] is not None else "n/a"
+                    print("     %-12s %5d %12s %12s"
+                          % (d["date"], d["n_lots"], "%+.2f%%" % d["median_ret_pct"], a))
+        else:
+            print("  卖后 20 个交易日：可算 %s 笔（不足，未推断）" % cov)
+    print()
+
+    f = r["frequency"]
+    print("─" * 66)
+    print("【交易频率 ↔ 持有期】")
+    print("  %.2f 个月：买 %.1f 笔/月、卖 %.1f 笔/月｜中位持有 %s 天"
+          % (f.get("months") or 0, f.get("buys_per_month") or 0,
+             f.get("sells_per_month") or 0, f.get("median_held_days")))
+    if f.get("n_under_7d"):
+        print("  ⚠️ %d 笔在 **7 天惩罚期内** 卖出（赎回费 1.5%%）" % f["n_under_7d"])
+    print("  持有期分档实现收益：")
+    for bk in f.get("hold_buckets", []):
+        med = ("%+.2f%%" % bk["median_ret_pct"]) if bk["median_ret_pct"] is not None else "n/a"
+        print("    %-22s %3d 笔   中位 %s" % (bk["label"], bk["n"], med))
+    print()
+
+    print("─" * 66)
+    print("【结论】%s" % r["verdict"])
+    print()
+    for n in r["notes"]:
+        print("  · %s" % n)
+
+
 def cmd_precompute():
     """预计算并落 SQLite 快照（温度/筛选池/调仓/聚合总览/板块总榜）。
 

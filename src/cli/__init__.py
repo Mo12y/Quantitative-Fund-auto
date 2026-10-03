@@ -25,6 +25,7 @@ from src.cli.analysis_cmds import (
     cmd_counterfactual,
     cmd_sell_rules,
     cmd_breakeven,
+    cmd_behavior,
     cmd_plan,
     cmd_precompute,
 )
@@ -68,6 +69,7 @@ COMMANDS = {
     "counterfactual": cmd_counterfactual,
     "sell_rules": cmd_sell_rules,
     "breakeven": cmd_breakeven,
+    "behavior": cmd_behavior,
     "plan": cmd_plan,
     "precompute": cmd_precompute,
     "backtest": cmd_backtest,
