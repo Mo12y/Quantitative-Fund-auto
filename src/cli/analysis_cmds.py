@@ -623,6 +623,56 @@ def cmd_sell_rules():
     print("  ⚠️ 某条规则若『0 笔卖出』，那是**没机会触发**（如温度从没到过阈值），不是『无效』。")
 
 
+def cmd_breakeven():
+    """回本门槛（P2）—— 「**这笔操作要涨多少才不亏**」。
+
+    费率在报告里通常只作为一个**数字**出现（"费率 1.5%"），
+    而真正影响决策的形式是**门槛**：
+      · "现在还亏 0.4%，但赎回费 1.5% → 现在卖是双重亏损"；
+      · "再持有 3 天赎回费就归零 → 别急着卖"。
+    费率**不重写**，一律委托 `portfolio` 的单一真源。
+    """
+    from src.analysis.breakeven import analyze
+    from src.data.database import Database
+
+    print("🧾 回本门槛：这笔操作要涨多少才不亏")
+    print("   （只读你的持仓与净值，不改任何东西）")
+    print()
+    db = Database()
+    try:
+        r = analyze(db)
+    finally:
+        db.close()
+    if r.get("error"):
+        print("❌ %s" % r["error"])
+        return
+
+    print("基准日 %s｜持仓批次 %d｜总市值 %s" % (r["today"], r["n_lots"], r["total_market_value"]))
+    if r["n_in_penalty"]:
+        print("⚠️ **惩罚期内 %d 笔**（市值 %s，现在卖要多付赎回费 %s）"
+              % (r["n_in_penalty"], r["penalty_value"], r["penalty_cost"]))
+    else:
+        print("✅ 没有持仓处在 7 天惩罚期内")
+    print()
+    print("%-8s %-18s %6s %8s %9s %10s %11s" % (
+        "代码", "基金", "持有天", "申购费%", "赎回费%", "门槛%", "扣费后收益%"))
+    print("-" * 76)
+    for x in sorted(r["lots"], key=lambda y: y["held_days"])[:12]:
+        print("%-8s %-18s %6s %8s %9s %10s %11s" % (
+            x["fund_code"], str(x["fund_name"])[:16], x["held_days"],
+            x["buy_fee_pct"], x["redeem_fee_pct"], x["threshold_pct"],
+            x["net_if_sell_pct"] if x["net_if_sell_pct"] is not None else "n/a"))
+    if r.get("next_free"):
+        print()
+        print("⏳ 最近会「免费」的批次：")
+        for n in r["next_free"]:
+            print("   %s %s → %s（还有 %d 天）"
+                  % (n["fund_code"], str(n["fund_name"])[:14], n["free_date"], n["days_to_free"]))
+    print()
+    for n in r["notes"]:
+        print("  · %s" % n)
+
+
 def cmd_precompute():
     """预计算并落 SQLite 快照（温度/筛选池/调仓/聚合总览/板块总榜）。
 

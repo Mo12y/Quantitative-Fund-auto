@@ -24,6 +24,7 @@ from src.cli.analysis_cmds import (
     cmd_oos,
     cmd_counterfactual,
     cmd_sell_rules,
+    cmd_breakeven,
     cmd_plan,
     cmd_precompute,
 )
@@ -66,6 +67,7 @@ COMMANDS = {
     "oos": cmd_oos,
     "counterfactual": cmd_counterfactual,
     "sell_rules": cmd_sell_rules,
+    "breakeven": cmd_breakeven,
     "plan": cmd_plan,
     "precompute": cmd_precompute,
     "backtest": cmd_backtest,
