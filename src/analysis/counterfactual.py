@@ -157,6 +157,62 @@ def simulate(buys, conn, end_date, scale=None, label=""):
             "first_date": first_d, "last_date": last_d, "missing_nav": missing}
 
 
+def sample_adequacy(start_date: str, end_date: str) -> dict:
+    """样本充分性声明 —— **这一节是给"别被短期数据迷惑"用的**。
+
+    用户 2026-10-03 的原话：「不要被短期数据迷惑了，只是市场正常波动，
+    只不过我开始投的时候刚好熊市亏钱」。**这条提醒是对的，而且与 M1 同源**：
+
+    · M1 实测：连 **3 年**夏普的组间真实方差都被估为 0（无排序信息）；
+    · 本模块的区间通常只有 **几个月** → 信噪比只会更低。
+
+    所以这里显式区分两件事：
+      ① 「这段时间**发生了什么**」—— 可观测量，本模块能给；
+      ② 「**我的操作好不好**」—— 需要长样本 + 剥离 beta，本模块**给不了**。
+    """
+    from datetime import date as _d
+
+    try:
+        d0 = _d.fromisoformat(str(start_date)[:10])
+        d1 = _d.fromisoformat(str(end_date)[:10])
+    except (TypeError, ValueError):
+        return {"years": None, "days": None, "sufficient": False,
+                "warning": "起止日期无法解析，无法判断样本充分性"}
+    days = max((d1 - d0).days, 0)
+    years = days / 365.25
+    if years >= 2.0:
+        return {"years": round(years, 2), "days": days, "sufficient": True,
+                "warning": None}
+    return {
+        "years": round(years, 2), "days": days, "sufficient": False,
+        "warning": (
+            "⚠️ 区间仅 **%.1f 个月（%.2f 年）** —— **不足以判断操作能力**。"
+            "理由有两条，都不靠直觉："
+            "① 单期收益的信噪比极低（M1 实测：连 3 年夏普的组间真实方差都是 0）；"
+            "② 起点若恰逢熊市/牛市，会把 **beta 记成 alpha**。"
+            "→ 本结果只能读「这段时间发生了什么」，**不能**读「我的操作好不好」。"
+            % (days / 30.0, years)),
+    }
+
+
+def benchmark_return(conn, start_date: str, end_date: str, code: str = "000300"):
+    """同期基准涨跌（%）。把 **beta** 从 **alpha** 里分出来读。
+
+    依据：如果区间内基准本身在跌，那"亏钱"首先是市场（beta），
+    不是操作（alpha）。不给基准就报绝对收益，等于把 beta 算进 alpha。
+    """
+    r0 = conn.execute("SELECT close FROM index_daily WHERE index_code = ? AND trade_date <= ?"
+                      " ORDER BY trade_date DESC LIMIT 1", (code, start_date)).fetchone()
+    r1 = conn.execute("SELECT close FROM index_daily WHERE index_code = ? AND trade_date <= ?"
+                      " ORDER BY trade_date DESC LIMIT 1", (code, end_date)).fetchone()
+    if not r0 or not r1 or not r0[0]:
+        return None
+    try:
+        return round((float(r1[0]) / float(r0[0]) - 1.0) * 100, 2)
+    except (TypeError, ValueError, ZeroDivisionError):
+        return None
+
+
 def compare(db) -> dict:
     """四个情形并排（实际 / 完全不动 / 只定投 / 照温度信号动）。**只读**。"""
     from .portfolio import PortfolioTracker
@@ -184,6 +240,10 @@ def compare(db) -> dict:
         "n_buys_total": len(buys),
         "n_buys_dca": len(dca_buys),
         "dca_rule": "notes 含「定投」或金额 == ¥%.2f（启发式，见模块 docstring）" % DCA_AMOUNT,
+        # ⭐ 这两项是「别被短期数据迷惑」的机制化落实（用户 2026-10-03 提醒）
+        "sample": sample_adequacy(buys[0]["date"], end_date),
+        "benchmark_pct": benchmark_return(conn, buys[0]["date"], end_date),
+        "benchmark_name": "沪深300",
         "cases": {
             "actual": {"label": "实际（你自己操作的）",
                        "n_buys": actual.get("n_flows"), "invested": actual.get("invested"),
@@ -200,5 +260,7 @@ def compare(db) -> dict:
             "四个情形**投入总额不同**，所以只能比 XIRR（资金加权年化），不能比盈亏额。",
             "未计申购费/赎回费 —— 会让所有情形同向变差，不改变相对排序。",
             "① 假设从不卖出（含那次转换）；它回答『操作本身有没有正贡献』，不是『你该不该卖』。",
+            "⭐ **先减掉 beta 再读 alpha**：若同期基准（沪深300）本身在跌，那『亏钱』首先是**市场**，"
+            "不是操作。只看绝对收益会把 beta 记成 alpha —— 这是本项目反复强调的读法纪律。",
         ],
     }

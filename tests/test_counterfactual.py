@@ -13,8 +13,67 @@ import pytest
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from src.analysis.counterfactual import (  # noqa: E402
-    DCA_AMOUNT, compare, is_dca, load_buy_flows, nav_lookup, simulate, temp_multiplier,
+    DCA_AMOUNT, benchmark_return, compare, is_dca, load_buy_flows, nav_lookup,
+    sample_adequacy, simulate, temp_multiplier,
 )
+
+
+# ── 样本充分性：把「别被短期数据迷惑」机制化 ────────────────────
+
+def test_sample_adequacy_flags_short_window():
+    """3.5 个月必须**报警** —— 这是用户 2026-10-03 的提醒，不能只写在文档里。"""
+    s = sample_adequacy("2026-06-15", "2026-09-24")
+    assert s["sufficient"] is False
+    assert s["warning"] and "不足以判断操作能力" in s["warning"]
+    assert "beta" in s["warning"], "必须点出『会把 beta 记成 alpha』"
+    assert s["years"] is not None and s["years"] < 1.0
+
+
+def test_sample_adequacy_passes_long_window():
+    assert sample_adequacy("2020-01-01", "2023-01-01")["sufficient"] is True
+    assert sample_adequacy("2020-01-01", "2023-01-01")["warning"] is None
+
+
+def test_sample_adequacy_bad_dates_is_explicit():
+    s = sample_adequacy(None, "2026-09-24")
+    assert s["sufficient"] is False and "无法解析" in s["warning"]
+
+
+def test_benchmark_return_needs_index_data(tmp_path):
+    """没有指数数据 → None（不编造基准）。"""
+    from src.data.database import Database
+
+    db = Database(str(tmp_path / "b.db"))
+    try:
+        assert benchmark_return(db.conn, "2026-06-15", "2026-09-24") is None
+    finally:
+        db.close()
+
+
+def test_benchmark_return_computes_change(tmp_path):
+    from src.data.database import Database
+
+    db = Database(str(tmp_path / "b2.db"))
+    try:
+        for d, v in (("2026-06-15", 4000.0), ("2026-09-24", 3800.0)):
+            db.conn.execute(
+                "INSERT OR REPLACE INTO index_daily (index_code, trade_date, close)"
+                " VALUES ('000300',?,?)", (d, v))
+        db.conn.commit()
+        assert benchmark_return(db.conn, "2026-06-15", "2026-09-24") == pytest.approx(-5.0)
+    finally:
+        db.close()
+
+
+def test_compare_includes_sample_and_benchmark(tmp_path):
+    """`compare()` 必须把样本与基准一并带出 —— 否则调用方又会只看绝对数。"""
+    db = _mk_db(tmp_path)
+    try:
+        r = compare(db)
+        assert "sample" in r and "benchmark_pct" in r, "缺这两项就等于默认读者会看 beta"
+        assert r["sample"]["sufficient"] in (True, False)
+    finally:
+        db.close()
 
 
 # ── 定投识别 ──────────────────────────────────────────────────────

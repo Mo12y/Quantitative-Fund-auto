@@ -542,7 +542,21 @@ def cmd_counterfactual():
 
     print("区间 %s｜买入 %d 笔（定投 %d 笔）" % (r["span"], r["n_buys_total"], r["n_buys_dca"]))
     print("定投规则：%s" % r["dca_rule"])
+    bench = r.get("benchmark_pct")
+    if bench is not None:
+        tone = "跌" if bench < 0 else "涨"
+        print("同期 %s：%+.2f%%（%s）" % (r.get("benchmark_name", "基准"), bench, tone))
     print()
+
+    # 「别被短期数据迷惑」—— 放在表格**之前**，因为它决定表格该怎么读
+    smp = r.get("sample") or {}
+    if smp.get("warning"):
+        print(smp["warning"])
+        print()
+    if bench is not None and bench < -1:
+        print("📌 区间内基准是**下跌**的 —— 组合的绝对亏损里，先有相当一部分是**市场（beta）**，")
+        print("   不是你的操作（alpha）。请对照上表『实际 vs 完全不动』看**相对差**。")
+        print()
     print("%-24s %5s %10s %11s %10s %11s" % ("情形", "笔数", "投入", "期末市值", "盈亏", "XIRR"))
     print("-" * 78)
     order = [("actual", "实际（你自己操作的）"), ("hold_all", "① 完全不动（买了就不卖）"),
