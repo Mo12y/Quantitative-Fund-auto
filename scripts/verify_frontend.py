@@ -69,14 +69,39 @@ def probe_server(base: str, tries: int = 40) -> None:
 
 
 # ── 页面内测量脚本 ────────────────────────────────────────────────────────
+# 移动端横向溢出。
+#
+# ⚠️ 判据改过一版（2026-10-04），旧版是 `scrollWidth - clientWidth > 2`，会**假红**：
+#   · `sr-only`（Tailwind 无障碍隐藏文本）= 1px 见方 + `overflow:hidden` + `white-space:nowrap`，
+#     内容不换行 → `scrollWidth` 很大而 `clientWidth` 只有 1 → 被算成"溢出"，
+#     但它的盒子只有 1px，**根本不参与布局撑宽**（而且预热态里「加载中」标签常驻 DOM）。
+#   · `animate-ping` 的装饰点 = `transform: scale(2)` 脉冲 → `getBoundingClientRect()`
+#     **含 transform**，看起来越界；但 transform **不影响布局**，是有意的动画出血。
+# 实测这两种情况下 `document.documentElement.scrollWidth == clientWidth == 375`
+# —— 页面**并没有**横向溢出（旧判据记在 `docs/审计修复记录.md` §24 第四节）。
+#
+# 新判据（两条，缺一不可）：
+#   ① 硬闸：文档级 `scrollWidth <= clientWidth + 1`（页面真的不能横向滚）；
+#   ② 诊断：只统计**布局盒越过视口**的元素 —— 跳过 a11y 隐藏盒（clip 到 1px 见方）、
+#      `aria-hidden` 子树、以及带 transform 的装饰元素。
 OVERFLOW_JS = r"""() => {
+  const vw = document.documentElement.clientWidth;
   const out = [];
   document.querySelectorAll('*').forEach(el => {
-    const o = el.scrollWidth - el.clientWidth;
-    if (o > 2 && el.clientWidth > 0) out.push({tag: el.tagName.toLowerCase(), over: o});
+    const cs = getComputedStyle(el);
+    if (cs.display === 'none' || cs.visibility === 'hidden') return;
+    if (el.closest('[aria-hidden="true"]')) return;          // 无障碍隐藏子树
+    if (el.clientWidth <= 1 || el.clientHeight <= 1) return; // sr-only 一类（裁剪成 1px）
+    if (cs.transform && cs.transform !== 'none') return;     // animate-ping 等动画出血
+    const r = el.getBoundingClientRect();
+    if (r.right > vw + 1 || r.left < -1) {
+      out.push({tag: el.tagName.toLowerCase(), right: Math.round(r.right),
+                left: Math.round(r.left), cls: (el.className || '').toString().slice(0, 40)});
+    }
   });
   return {doc: document.documentElement.scrollWidth,
-          client: document.documentElement.clientWidth, n: out.length};
+          client: document.documentElement.clientWidth, n: out.length,
+          worst: out.slice(0, 3)};
 }"""
 
 NAV_JS = r"""() => {

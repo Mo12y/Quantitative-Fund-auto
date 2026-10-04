@@ -420,7 +420,7 @@ def generate_report(universe_df, panel_by_threshold, all_preds_by_threshold,
                     metrics_by_threshold, perm_results_by_threshold,
                     data_info, thresholds,
                     val_metrics_by_threshold=None, test_metrics_by_threshold=None,
-                    split_by_threshold=None):
+                    split_by_threshold=None, risk_jump=None):
     val_metrics_by_threshold = val_metrics_by_threshold or {}
     test_metrics_by_threshold = test_metrics_by_threshold or {}
     split_by_threshold = split_by_threshold or {}
@@ -599,7 +599,33 @@ def generate_report(universe_df, panel_by_threshold, all_preds_by_threshold,
                      "不能等同于独立样本外验证。\n")
     lines.append("")
 
-    lines.append("## 七、已知局限与口径说明\n")
+    # ── 七、风险跃迁（M5 变点检测）—— 并排佐证，**不是**模型输入 ──────────
+    lines.append("## 七、风险跃迁（变点检测）\n")
+    if not risk_jump:
+        lines.append("> 本次未启用或扫描失败。该层是**只读**的加层，"
+                     "失败不影响上面任何模型结论。\n")
+    else:
+        lines.append("> **这一层查的是上面 15 个特征查不到的事。** 那些特征全是**滚动窗口**统计，"
+                     "默认「一只基金是一个稳定的过程」；但基金可以在**名称、类型都没变**的情况下"
+                     "把风险特征整体换掉，此时滚动特征会把新旧两段**平滑在一起** —— "
+                     "预警要么迟到、要么失效。\n")
+        lines.append("**扫描 %d 只，告警 %d 只。**\n" % (risk_jump["n"], risk_jump["alerts"]))
+        shown = 0
+        for r in risk_jump["results"]:
+            if not r.get("alerts"):
+                continue
+            who = ("%s %s" % (r.get("code") or "", r.get("name") or "")).strip()
+            lines.append("- **%s**：%s" % (who, "；".join(r["alerts"])))
+            shown += 1
+        if not shown:
+            lines.append("- 本轮**无告警**（判据一律要求**超额**变化达标，见下）。")
+        lines.append("")
+        lines.append("> ⚠️ **本节只做并排佐证，不进模型。** 把变点当第 16 个特征会让 AUC / 召回"
+                     "**全部变化**，那是一次研究级变更（需重跑 walk-forward + 置换检验并重新解释结论），"
+                     "属独立决策。判据、局限、以及「**变点不是结论、只是怀疑的入口**」的提醒，"
+                     "见 `src/analysis/changepoint.py` 模块 docstring。\n")
+
+    lines.append("## 八、已知局限与口径说明\n")
     lines.append("- **回撤标签口径**：月内最大回撤在**复权净值**上计算 —— 优先用累计净值 "
                  "`acc_nav`（除息日单位净值下挫、累计净值不动，分红不会被误判成回撤），"
                  "并复用 `clean_returns` 剔除 |日收益|>20% 的异常点。"
@@ -622,6 +648,41 @@ def generate_report(universe_df, panel_by_threshold, all_preds_by_threshold,
         f.write("\n".join(lines))
     print(f"\n[报告] 已生成: {report_path}")
     return report_path
+
+
+def scan_risk_jumps(db_path, codes=None, max_funds: int = 300) -> dict | None:
+    """给回撤预警**加一层「风险跃迁」**（M5 变点检测）。只读，失败返回 None。
+
+    ⚠️ **刻意只做"报告里加一节"，不改 15 特征、不重训模型。**
+    把变点当第 16 个特征会让 AUC / 召回全部变化 —— 那是**研究级变更**，
+    需要重跑 walk-forward + 置换检验并重新解释结论，属独立决策
+    （见 `docs/审计修复记录.md`）。本节给的是**并排的佐证**，不是模型输入。
+
+    为什么需要这一层：本模块的 15 个特征全是**滚动窗口**统计，隐含
+    「一只基金是一个稳定的过程」。而基金能在**不改名、不改类型**的情况下把风险特征整体换掉
+    （2026-10-03 实测：`018392` 波动 12.7% → 30.4%，超额 +139%），
+    此时滚动特征把新旧两段平滑在一起，预警要么迟到、要么失效。
+
+    `codes` 缺省 = 当前持仓（`changepoint.scan` 的默认行为）。
+    """
+    import os as _os
+    # ⚠️ **先验路径存在**：`Database(path)` 在路径不存在时会**静默新建一个空库**
+    #    （铁律·绝对路径记的就是这个坑）。不挡住的话，路径写错不会报错，
+    #    只会得到"全部历史不足"的假结果 —— 2026-10-04 实测踩到过一次。
+    if db_path and not _os.path.exists(db_path):
+        print(f"  ⚠ 风险跃迁扫描跳过：库不存在 {db_path}")
+        return None
+    try:
+        from src.analysis.changepoint import scan
+        from src.data.database import Database
+        db = Database(db_path)
+        try:
+            return scan(db, codes[:max_funds] if codes else None)
+        finally:
+            db.close()
+    except Exception as exc:          # 加层失败不能反过来弄挂主流程
+        print(f"  ⚠ 风险跃迁扫描跳过：{type(exc).__name__}: {exc}")
+        return None
 
 
 # =====================================================================
@@ -769,13 +830,20 @@ def main():
 
     # 5. 报告
     print(f"\n[5/5] 生成报告...")
+    # 加一层「风险跃迁」（M5）—— 只读、失败不影响主结论
+    print("\n[5/5] 风险跃迁扫描（M5 变点检测，只读加层）...")
+    risk_jump = scan_risk_jumps(args.db, universe["fund_code"].tolist())
+    if risk_jump:
+        print("  %d 只中 %d 只告警" % (risk_jump["n"], risk_jump["alerts"]))
+
     report_path = generate_report(
         universe, panel_by_threshold, all_preds_by_threshold,
         metrics_by_threshold, perm_results_by_threshold,
         data_info, thresholds,
         val_metrics_by_threshold=val_metrics_by_threshold,
         test_metrics_by_threshold=test_metrics_by_threshold,
-        split_by_threshold=split_by_threshold)
+        split_by_threshold=split_by_threshold,
+        risk_jump=risk_jump)
 
     # 保存 CSV
     rows = []
