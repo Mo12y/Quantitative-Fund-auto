@@ -113,7 +113,7 @@
 
 ```
 python -m pytest tests/ -q                    # 期望 0 failed / 0 error / 2 skipped
-python scripts/check_ledger_invariants.py     # 期望 13/13
+python scripts/check_ledger_invariants.py     # 期望 24/24，0 失败（E3 落地后从 13 项扩为 24 项）
 python scripts/verify_frontend.py             # 期望 32/32（需先起 web；改前端或 E2 接入时必跑）
 ```
 

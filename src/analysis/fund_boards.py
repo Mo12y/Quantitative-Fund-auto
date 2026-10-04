@@ -36,11 +36,45 @@ BOARDS: List[Tuple[str, Tuple[str, ...]]] = [
 ]
 
 _OTHER = "其他"
+#: 债务 / 货币类的固定板块名（**结构化字段派生**，不属于 `BOARDS` 的名称关键词表）
+BOND_BOARD = "债券固收"
+CASH_BOARD = "货币现金"
+
+#: 一级分类：`fund_type` 的**前缀**（结构化字段）
+_MONEY_TYPE_PREFIX = ("货币型",)
+_DEBT_TYPE_PREFIX = ("债券型", "指数型-固收", "混合型-偏债", "QDII-纯债", "QDII-混合债")
+
+#: 名称判据：识别债务/货币类。**必须在权益主题之前判** ——
+#: 这类基金的名字里常含权益关键词：「中债0-3年**政策性金融**债」「**银行**间中高等级信用债」
+#: 「中银**证券**安进债券」，纯子串匹配会把它们误判成权益主题。
+#: 2026-10-04 实测：9,082 只债务类里 **199 只**被误分进权益主题（**177 只落「金融地产」**）。
+_DEBT_KW = ("债", "固收", "货币", "利率", "存单", "短融", "票据", "存款", "现金", "理财")
 
 
-def classify(name: str) -> str:
-    """按基金名称判断板块；未命中返回“其他”。"""
+def classify(name: str, fund_type: str | None = None) -> str:
+    """按**类型字段 ∪ 名称**判断板块；未命中返回「其他」。
+
+    判据是「**任一命中即认**」，不是"类型优先"——因为**两个信号都会漏**，实测（2026-10-04）：
+
+    | 漏法 | 实例 | 只数 |
+    |---|---|---|
+    | 名称漏 | `QDII-纯债` / `QDII-混合债`（名字里没「债」字） | 77 |
+    | **类型漏** | `指数型-股票`（中证国债类 ETF）、`FOF-稳健型`（名字带「债」） | 179 |
+
+    所以只信一个都会误分：只用名称 → 199 只落权益主题；只信类型 → **260 只**（更差）。
+    取并集后 → **0 只**。
+
+    ⚠️ 并集**不会误伤权益**：「银行ETF」「证券公司指数」这类名字里没有债务关键词，
+    仍正常归「金融地产」（有专测钉住）。
+    """
+    t = str(fund_type or "").strip()
     s = str(name or "")
+
+    if t.startswith(_MONEY_TYPE_PREFIX) or "货币" in s:
+        return CASH_BOARD
+    if t.startswith(_DEBT_TYPE_PREFIX) or any(k in s for k in _DEBT_KW):
+        return BOND_BOARD
+
     for board, kws in BOARDS:
         for kw in kws:
             if kw in s:
@@ -48,8 +82,13 @@ def classify(name: str) -> str:
     return _OTHER
 
 
-def board_of_funds(holdings: Iterable[dict], name_key: str = "fund_name") -> Dict[str, float]:
-    """按板块统计**金额**（传入带金额的记录，金额键自动尝试 amount/current_value/buy_amount）。"""
+def board_of_funds(holdings: Iterable[dict], name_key: str = "fund_name",
+                   type_key: str = "fund_type") -> Dict[str, float]:
+    """按板块统计**金额**（传入带金额的记录，金额键自动尝试 amount/current_value/buy_amount）。
+
+    类型字段自动尝试 `type_key` 与 `"type"`（Web 层的池子把类型放在 `"type"` 键下）；
+    `holdings` 表（`SELECT *`）没有类型列 → 此时 `classify` 走名称兜底。
+    """
     out: Dict[str, float] = {}
     for h in holdings or []:
         amt = h.get("amount")
@@ -57,14 +96,16 @@ def board_of_funds(holdings: Iterable[dict], name_key: str = "fund_name") -> Dic
             amt = h.get("current_value")
         if amt is None:
             amt = h.get("buy_amount") or 0
-        board = classify(h.get(name_key) or h.get("name") or "")
+        ftype = h.get(type_key) or h.get("type") or ""
+        board = classify(h.get(name_key) or h.get("name") or "", ftype)
         out[board] = out.get(board, 0.0) + float(amt or 0)
     return out
 
 
-def board_allocation(holdings: Iterable[dict], name_key: str = "fund_name") -> Dict[str, float]:
+def board_allocation(holdings: Iterable[dict], name_key: str = "fund_name",
+                     type_key: str = "fund_type") -> Dict[str, float]:
     """按板块统计**占比(%)**（金额占比，保留 1 位小数）。"""
-    amts = board_of_funds(holdings, name_key)
+    amts = board_of_funds(holdings, name_key, type_key)
     total = sum(amts.values())
     if total <= 0:
         return {}

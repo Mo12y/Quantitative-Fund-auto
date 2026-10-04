@@ -354,7 +354,8 @@ def eval_holding_overlap(item: dict, params: dict, ctx: dict) -> tuple:
         if code in held:
             return False, "已持有该基金（%s）" % code
 
-    board = fund_boards.classify(item.get("name") or item.get("fund_name") or "")
+    board = fund_boards.classify(item.get("name") or item.get("fund_name") or "",
+                                 item.get("type") or item.get("fund_type"))
     if board == fund_boards._OTHER:
         return missing("候选板块未归类（名称关键词未命中，不猜重叠）")
     weight = fund_boards.board_allocation(holdings).get(board, 0.0)

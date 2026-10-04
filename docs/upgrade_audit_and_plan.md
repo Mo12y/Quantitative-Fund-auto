@@ -106,13 +106,17 @@
 3. ✅（已完成）**首屏“轻量总览先出”**：新增快速 `/api/overview`（温度+持仓+计划，并行 ~3.4s）+ 通用单飞缓存 `_cached_get`；
    新增懒加载 `/api/funds`、`/api/rebalance`（仅打开对应面板才触发）；前端 `boot()` 两阶段：总览 3.4s 先渲染，后台补齐完整数据再切完整布局。
    实测：总览冷载 3.4s（原 /api/all ~10s）/ 缓存 14ms；`/api/rebalance` 因离线温度降为 ~1.3s。node 端到端 harness 验证两阶段无错。
-4. ⬜ 底层明显问题按上表优先级修复（历史推荐 O(F²)/LIMIT、rebalance 单位、simulation 前视、upsert 批量、collector 布局、索引、lazy akshare 等）。
-5. ⬜ 浏览器端到端回归验证 + 回归测试（现有 34/9 用例不一致需核对）。
+4. ✅（**2026-10-04 回填**：早已完成，只是本文没勾）底层明显问题按上表优先级修复
+   —— 历史推荐 O(F²)/LIMIT、rebalance 单位、simulation 前视、upsert 批量、collector 布局、
+   索引、lazy akshare 等，均由 2026-09-11 的 A–D 四批与 2026-09-25 复核处理（见本文件顶部状态回填）。
+5. ✅（**2026-10-04 回填**）浏览器端到端回归验证 + 回归测试 —— 现已固定为两道常驻守卫：
+   `scripts/verify_frontend.py`（**32 项**真机验收）与全量 `pytest`（**815 passed / 2 skipped**，2026-10-04 实测）。
+   > 原文那句"34/9 用例不一致需核对"对应的是当时的 node harness，**已过时**，以现行守卫为准。
 
 ## 收尾与验证（round 7 实测）
 - 端到端（HTTP 冒烟，服务 http://127.0.0.1:5020 最新代码）：`/` 200、`/api/overview` 冷 3.15s/缓存、`/api/all` 冷 10.1s/缓存 45ms、`/api/quant_models` 33ms、`/api/recommend` 584ms。
 - 严格区分大小写探测：各端点 JSON **无 `NaN`/`Infinity`** token（早前 PowerShell `-match` 为大小写不敏感误报）。
-- 回归：`pytest -q tests` = **49 passed**。
+- 回归：`pytest -q tests` = **49 passed**（⚠️ 这是 round 7 当时的数字；**2026-10-04 已到 815 passed / 2 skipped** —— 本文件是历史计划，正文数字不回填，以现行 `AGENTS.md` 的基线为准）。
 - 前端两阶段启动 + 5 面板/异步卡用 Node DOM harness 端到端渲染验证通过（全部 PASS）。
 - 环境限制：真实浏览器截图/渲染受本沙箱限制（Chrome/Edge 无法启动子进程，Access denied），改用 HTTP + Node DOM harness 作浏览器端到端代理；已在真实服务器上人工可访问验证。
 - 改动范围：9 个 src 文件（app.py、dashboard.html、thermometer/database/collector/rebalance_advisor/historical_recommender/reporter/output_cmds）+ 本审计文档。

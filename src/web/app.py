@@ -2005,7 +2005,8 @@ def _compute_board_pool(size: int, limit: int) -> dict:
 
     groups = {}
     for f in funds:
-        b = fund_boards.classify(f.get("name") or f.get("code"))
+        # 传类型：结构化字段优先（只传名称会把「政策性金融债」误判成「金融地产」）
+        b = fund_boards.classify(f.get("name") or f.get("code"), f.get("type"))
         groups.setdefault(b, []).append(f)
     for g in groups.values():
         g.sort(key=lambda x: (0 if "稳健" in (x.get("risk") or "") else 1,
