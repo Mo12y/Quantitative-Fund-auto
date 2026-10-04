@@ -574,6 +574,40 @@ def cmd_counterfactual():
     print("  · ⚠️ 各情形的**标的构成不同**（定投笔偏纳斯达克、主动笔偏 A 股/黄金）——")
     print("    差异里混着「策略」与「标的」两个因素，别把全部差距都算成操作能力。")
 
+    # ── 同标的反事实：把「标的」这个混淆项去掉（B9）────────────────────
+    from src.analysis.counterfactual import same_fund_counterfactual
+    db2 = Database()
+    try:
+        sf = same_fund_counterfactual(db2)
+    finally:
+        db2.close()
+    if sf.get("error") or not sf.get("funds"):
+        return
+    print()
+    print("=" * 78)
+    print("🎯 同标的反事实：锁死**同一只基金 + 同一笔投入**，只变**买入时机**")
+    print("   （上面几个情形标的构成不同；这一节把「标的」这个混淆项去掉）")
+    print("=" * 78)
+    print("%-8s %-16s %4s %8s %9s %9s %10s %8s %9s" %
+          ("代码", "名称", "笔数", "投入", "实际%", "一次性%", "等额定投%", "vs一次", "vs定投"))
+    print("-" * 96)
+    for f in sf["funds"]:
+        ed = f.get("even_dca") or {}
+        print("%-8s %-16s %4d %8.0f %9.2f %9.2f %10s %8s %9s" % (
+            f["code"], (f["name"] or "")[:14], f["n_buys"], f["invested"],
+            f["actual"].get("pnl_pct") or 0, f["lump"].get("pnl_pct") or 0,
+            ("%.2f" % ed["pnl_pct"]) if ed.get("pnl_pct") is not None else "—",
+            f.get("vs_lump"), f.get("vs_even_dca")))
+    print()
+    for key, nm in (("vs_lump", "实际 − 一次性"), ("vs_even_dca", "实际 − 等额定投")):
+        a = sf["summary"].get(key)
+        if a:
+            print("  %s：中位 %+.2fpp ｜ 均值 %+.2fpp ｜ 实际更差 %d / 更好 %d（n=%d）" %
+                  (nm, a["median"], a["mean"], a["worse"], a["better"], a["n"]))
+    print()
+    for n in sf["notes"]:
+        print("  · %s" % n)
+
 
 def cmd_sell_rules():
     """同标的卖出规则对比（P1 扩展）—— **冻结买入，只变卖出规则**。

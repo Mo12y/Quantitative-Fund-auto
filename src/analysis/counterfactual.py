@@ -34,6 +34,8 @@
 """
 from __future__ import annotations
 
+import statistics
+
 from .xirr import xirr
 
 #: 定投识别（启发式，见模块 docstring「口径与局限」）
@@ -413,5 +415,127 @@ def compare(db) -> dict:
             "① 假设从不卖出（含那次转换）；它回答『操作本身有没有正贡献』，不是『你该不该卖』。",
             "⭐ **先减掉 beta 再读 alpha**：若同期基准（沪深300）本身在跌，那『亏钱』首先是**市场**，"
             "不是操作。只看绝对收益会把 beta 记成 alpha —— 这是本项目反复强调的读法纪律。",
+            "⚠️ **归因局限**：各情形**标的构成不同**（定投笔偏 QDII、主动笔偏 A 股/黄金）→ "
+            "差异里混着「策略」与「标的」两个因素。要纯分离请看 `same_fund_counterfactual()`。",
+        ],
+    }
+
+
+def same_fund_counterfactual(db, end_date=None, min_buys: int = 3,
+                             min_amount: float = 100.0) -> dict:
+    """**同标的**反事实：锁死**同一只基金**与**总投入**，只变**买入时机**。
+
+    ## 为什么需要它（`docs/审计修复记录.md` §19 的归因局限）
+
+    `compare()` 的四个情形**标的构成不同** —— 定投笔偏纳斯达克 QDII、主动笔偏 A 股 / 黄金，
+    所以它们的差异里混着「**策略**」与「**标的**」两个因素，无法归因给哪一个。
+    本函数把两个混淆项都锁死：**同一只基金、同一笔总投入**，于是三者唯一的差别是**时机**：
+
+      ① **实际操作** —— 真实的分笔日期与金额
+      ② **一次性**   —— 首笔日把总额一次投入
+      ③ **等额定投** —— 首笔日 ~ 末笔日之间，按该基金**真实交易日**等额 N 笔（N = 实际笔数）
+
+    于是 `实际 − 一次性` 就是"**分期 vs 一次**"的时机价值，`实际 − 等额定投` 是
+    "**随意择时 vs 机械定投**"的差异 —— 都**不含标的因素**。
+
+    ⚠️ 仍然**不含费率**（会让三者同向变差、不改相对排序）；
+    ⚠️ 仍然是**持有到期末不卖**（回答的是"买入时机"，不是"该不该卖"）。
+
+    Returns: `{end_date, funds: [...], summary: {...}, notes: [...]}`。**只读。**
+    """
+    conn = db.conn
+    end_date = end_date or db.get_latest_nav_date()
+    buys = load_buy_flows(conn)
+    if not buys or not end_date:
+        return {"error": "无买入流水或最新净值日，无法做同标的反事实"}
+
+    by_code: dict = {}
+    for b in buys:
+        by_code.setdefault(b["code"], []).append(b)
+
+    funds = []
+    n_skip_buys = n_skip_amt = 0
+    for code, bs in sorted(by_code.items()):
+        if len(bs) < min_buys:
+            n_skip_buys += 1
+            continue
+        total = round(sum(x["amount"] for x in bs), 2)
+        if total < min_amount:
+            n_skip_amt += 1
+            continue
+        d0, d1 = bs[0]["date"], bs[-1]["date"]
+        row = conn.execute("SELECT fund_name FROM fund_info WHERE fund_code = ?",
+                           (code,)).fetchone()
+        name = (row[0] if row else "") or ""
+
+        # ② 一次性：首笔日一次投入总额
+        lump = [{"code": code, "date": d0, "amount": total, "note": "lump", "is_dca": False}]
+
+        # ③ 等额定投：用**该基金真实交易日**等间隔取 N 个日期（避免落在非交易日）
+        n = len(bs)
+        path = _nav_path(conn, code, d0, d1)
+        even_dca = None
+        if len(path) >= n:
+            idx = [round(i * (len(path) - 1) / (n - 1)) for i in range(n)]
+            even_dca = [{"code": code, "date": path[j][0], "amount": round(total / n, 2),
+                         "note": "even_dca", "is_dca": True} for j in idx]
+
+        a = simulate(bs, conn, end_date, label="实际操作")
+        l = simulate(lump, conn, end_date, label="一次性")
+        d = simulate(even_dca, conn, end_date, label="等额定投") if even_dca else None
+
+        row_out = {
+            "code": code, "name": name, "n_buys": n, "invested": total,
+            "span": "%s ~ %s" % (d0, d1),
+            "actual": a, "lump": l, "even_dca": d,
+        }
+        for key, other in (("vs_lump", l), ("vs_even_dca", d)):
+            row_out[key] = (round((a["pnl_pct"] or 0) - (other["pnl_pct"] or 0), 2)
+                            if other and a.get("pnl_pct") is not None
+                            and other.get("pnl_pct") is not None else None)
+        funds.append(row_out)
+
+    if not funds:
+        return {"end_date": end_date, "funds": [],
+                "summary": {"n_funds": 0, "n_funds_total_bought": len(by_code),
+                            "skipped_few_buys": n_skip_buys,
+                            "skipped_small_amount": n_skip_amt},
+                "notes": ["没有满足条件的基金（需 ≥%d 笔买入且总额 ≥ ¥%.0f）："
+                          "买入过的 %d 只里，%d 只笔数不足、%d 只总额太小。"
+                          % (min_buys, min_amount, len(by_code), n_skip_buys, n_skip_amt)]}
+
+    def _agg(key):
+        vals = [f[key] for f in funds if f.get(key) is not None]
+        if not vals:
+            return None
+        vals_sorted = sorted(vals)
+        return {"n": len(vals), "median": round(statistics.median(vals), 2),
+                "mean": round(statistics.fmean(vals), 2),
+                "worse": sum(1 for v in vals if v < 0),
+                "better": sum(1 for v in vals if v > 0)}
+
+    return {
+        "end_date": end_date,
+        "funds": funds,
+        "summary": {
+            "n_funds": len(funds),
+            "invested_total": round(sum(f["invested"] for f in funds), 2),
+            # ⚠️ 样本局限**必须可见**：n 很小，结论不能推广（本项目读法纪律）
+            "n_funds_total_bought": len(by_code),
+            "skipped_few_buys": n_skip_buys,
+            "skipped_small_amount": n_skip_amt,
+            "vs_lump": _agg("vs_lump"),
+            "vs_even_dca": _agg("vs_even_dca"),
+        },
+        "notes": [
+            "锁死了**同一只基金 + 同一笔总投入**，所以差异**只来自买入时机**，不含标的因素。",
+            "（对照）`compare()` 的四个情形标的构成不同 —— 那才是它无法归因的原因。",
+            "⚠️ 仍未计申购费/赎回费；⚠️ 仍是**持有到期末不卖** → 回答的是「买入时机」，"
+            "不是「该不该卖」。卖出规则的价值见 `simulate_sell_rules()`。",
+            "⭐ 读法：`vs_lump` 为正 = 「分期买」比「一次买」好；`vs_even_dca` 为正 = "
+            "「你的随意择时」比「机械等额定投」好。两者都为正才说明**择时**真有价值。",
+            "⚠️ **样本很小，结论不可推广** —— 计入 %d 只，另有 %d 只因买入笔数不足、"
+            "%d 只因总额太小被排除。单只基金的 pp 差异受区间影响极大，只看中位数会over-read。"
+            % (len(funds), n_skip_buys, n_skip_amt),
         ],
     }

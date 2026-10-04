@@ -3,6 +3,7 @@ import { endpoints } from '../api/endpoints'
 import type { GetOptions } from '../api/client'
 import { Bento, span } from '../components/Bento'
 import { Card } from '../components/Card'
+import { DrillDown } from '../components/DrillDown'
 import { PageHead } from '../components/PageHead'
 import { PoolBoard } from '../components/PoolBoard'
 import { SectorTable } from '../components/SectorTable'
@@ -47,13 +48,15 @@ function fallback(title: string, st: { error: string | null }, className = ''): 
 export default function Research() {
   const board = useApi(loadBoard)
   const sectors = useApi(endpoints.sectors)
+  const explain = useApi(endpoints.explain)
 
-  const busy = board.loading || sectors.loading
-  const wait = Math.max(board.warmingWait, sectors.warmingWait)
+  const busy = board.loading || sectors.loading || explain.loading
+  const wait = Math.max(board.warmingWait, sectors.warmingWait, explain.warmingWait)
 
   const refreshAll = () => {
     board.refresh({ fresh: true })
     sectors.refresh({ fresh: true })
+    explain.refresh({ fresh: true })
   }
 
   return (
@@ -77,6 +80,20 @@ export default function Research() {
           fallback('筛选池', board, span(7))
         )}
       </Bento>
+
+      {/* 数据链路下钻 —— **复用**「今天」页那一个 `DrillDown` 组件（不是复制一份），
+          所以只有一份实现、两处消费，不存在"两处维护、两处漂移"。
+          （计划书 §6 原本就写了要接到更多卡片；§9 当初搁置它的理由是"避免两处维护"，
+            而那个顾虑针对的是**复制标记**，复用同一组件即已解决。） */}
+      <Card title="数据链路" note="· 采集 → 清洗 → 特征 → 建模 → 评估">
+        {explain.data ? (
+          <DrillDown explain={explain.data} />
+        ) : explain.error ? (
+          <div className="text-sm text-fg-2">读取失败：{explain.error}</div>
+        ) : (
+          <Skeleton lines={4} />
+        )}
+      </Card>
     </>
   )
 }
