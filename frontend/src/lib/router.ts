@@ -5,8 +5,8 @@
  * 无嵌套路由、无路径参数、无 loader —— 一个 `useState` + `hashchange` 就够（30 行）。
  * 引一个路由库只为这点需求，是拿依赖换零收益。
  *
- * **为什么用 hash 而不是 History API**：Flask 的 `/v2` 只是静态托管（`frontend/dist`），
- * 直接请求 `/v2/research` 会 404。`#/research` 永远只请求 `/v2`，刷新、分享、前进后退都天然可用。
+ * **为什么用 hash 而不是 History API**：Flask 的 `/` 只是静态托管（`frontend/dist`），
+ * 直接请求 `/research` 会 404。`#/research` 永远只请求 `/`，刷新、分享、前进后退都天然可用。
  */
 import { useEffect, useState } from 'react'
 

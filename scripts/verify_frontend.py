@@ -1,6 +1,9 @@
 # -*- coding: utf-8 -*-
 """
-新前端（`/v2`）真机验收 —— 把散在仓库外的 Playwright 检查固化下来。
+新前端（Flask `/` 上的 React 构建产物）真机验收 —— 把散在仓库外的 Playwright 检查固化下来。
+
+⚠️ 2026-10-05 B-5 切换后：新前端挂在 **`/`**（原 `/v2` 已 301 到 `/`）。
+   本脚本原先硬编码 `/v2`，已全部改为 `/`；`--base` 仍可指向别的端口。
 
 为什么要固化：这些断言原本只存在于 `D:\\DSH\\scratch_hold\\_v3_entries.py` 之类的临时脚本里，
 **scratch 目录一清就全没了**，下次改前端就得从头重写。前端没有单元测试框架，
@@ -160,13 +163,13 @@ def probe_server(base: str, tries: int = 40) -> None:
     opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
     for _ in range(tries):
         try:
-            with opener.open(base + "/v2", timeout=5) as r:
+            with opener.open(base + "/", timeout=5) as r:
                 if r.status == 200:
                     return
         except Exception:
             pass
         time.sleep(1)
-    raise SystemExit(f"{base}/v2 不可达 —— 先启动服务：python src/main.py web")
+    raise SystemExit(f"{base}/ 不可达 —— 先启动服务：python src/main.py web")
 
 
 # ── 页面内测量脚本 ────────────────────────────────────────────────────────
@@ -463,7 +466,7 @@ def main() -> int:
     except SystemExit:
         up = False
     if not up:
-        skip("全部动态项", f"{base}/v2 不可达（先 `python src/main.py web`）")
+        skip("全部动态项", f"{base}/ 不可达（先 `python src/main.py web`）")
         run_static_checks()
         return _summary(args.json)
 
@@ -479,7 +482,7 @@ def main() -> int:
         page.on("console", lambda m: console.append(m.text) if m.type == "error" else None)
         page.on("pageerror", lambda e: console.append(str(e)))
 
-        page.goto(base + "/v2", wait_until="domcontentloaded")
+        page.goto(base + "/", wait_until="domcontentloaded")
         page.wait_for_selector("text=今天要做什么", timeout=40000)
         page.wait_for_timeout(3000)
 
@@ -526,15 +529,15 @@ def main() -> int:
             check(f"「{label}」无 markdown 记号泄漏", "**" not in body)
 
         # ── ② hash 路由 ───────────────────────────────────────────────
-        page.goto(base + "/v2#/research", wait_until="domcontentloaded")
+        page.goto(base + "/#/research", wait_until="domcontentloaded")
         page.wait_for_timeout(4000)
         check("hash 深链 #/research 直达研究页", "行业板块" in page.inner_text("body"))
-        page.goto(base + "/v2#/nonsense", wait_until="domcontentloaded")
+        page.goto(base + "/#/nonsense", wait_until="domcontentloaded")
         page.wait_for_timeout(3500)
         check("未知 hash 回落「今天」", "今天要做什么" in page.inner_text("body"))
 
         # ── ⑥ 图表参考系 ──────────────────────────────────────────────
-        page.goto(base + "/v2#/today", wait_until="domcontentloaded")
+        page.goto(base + "/#/today", wait_until="domcontentloaded")
         # 绘图区现在是**懒加载**（Recharts 不进首屏）→ 必须等它到位再量，
         # 否则会误报"没有网格"。（这也是这条断言存在的意义：拆包别把图拆没了。）
         page.wait_for_selector(".recharts-surface", timeout=20000)
@@ -554,7 +557,7 @@ def main() -> int:
         check("动效：进度条生长动画已绑定",
               page.evaluate("() => { const e=document.querySelector('.grow-x'); "
                             "return e ? getComputedStyle(e).animationName : null; }") == "qfa-grow")
-        page.goto(base + "/v2#/today", wait_until="domcontentloaded")
+        page.goto(base + "/#/today", wait_until="domcontentloaded")
         page.wait_for_timeout(3800)
         check("动效：温度指针滑入已绑定",
               page.evaluate("() => { const e=document.querySelector('.slide-thumb'); "
@@ -567,7 +570,7 @@ def main() -> int:
         for w, want_side in ((1440, True), (1024, True), (1023, False), (375, False)):
             c2 = browser.new_context(viewport={"width": w, "height": 900})
             pg2 = c2.new_page()
-            pg2.goto(base + "/v2", wait_until="domcontentloaded")
+            pg2.goto(base + "/", wait_until="domcontentloaded")
             pg2.wait_for_timeout(3200)
             n = pg2.evaluate(NAV_JS)
             check(f"断点 {w}：{'侧栏' if want_side else '顶部条'}生效且只有一套可见",
@@ -579,7 +582,7 @@ def main() -> int:
         for label, h in HASHES.items():
             c3 = browser.new_context(viewport={"width": 375, "height": 812})
             pg3 = c3.new_page()
-            pg3.goto(f"{base}/v2#/{h}", wait_until="domcontentloaded")
+            pg3.goto(f"{base}/#/{h}", wait_until="domcontentloaded")
             pg3.wait_for_timeout(4200)
             r = pg3.evaluate(OVERFLOW_JS)
             check(f"移动端 375 · {label} 无横向溢出",
@@ -593,7 +596,7 @@ def main() -> int:
             pg4.route(f"**/api/{ep}*", lambda r: r.fulfill(
                 status=200, content_type="application/json",
                 body=json.dumps({"ok": True, "data": None, "status": "warming", "retry_in": 10})))
-        pg4.goto(base + "/v2#/research", wait_until="domcontentloaded")
+        pg4.goto(base + "/#/research", wait_until="domcontentloaded")
         pg4.wait_for_timeout(2600)
         sk = pg4.evaluate("() => document.querySelectorAll('.skeleton').length")
         check("加载中显示骨架屏（非白屏）", sk > 0, f"{sk} 块")
@@ -602,7 +605,7 @@ def main() -> int:
         # ── prefers-reduced-motion：全部动效关闭 ──────────────────────
         c5 = browser.new_context(viewport={"width": 1440, "height": 900}, reduced_motion="reduce")
         pg5 = c5.new_page()
-        pg5.goto(base + "/v2#/today", wait_until="domcontentloaded")
+        pg5.goto(base + "/#/today", wait_until="domcontentloaded")
         pg5.wait_for_timeout(3500)
         rm = pg5.evaluate("() => { const e=document.querySelector('.rise-in'); "
                           "return e ? getComputedStyle(e).animationName : null; }")

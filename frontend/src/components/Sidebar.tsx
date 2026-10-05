@@ -48,19 +48,13 @@ export function Sidebar({ entry, onGo }: { entry: Entry; onGo: (e: Entry) => voi
         })}
       </nav>
 
-      {/* 页脚：说清"数据在哪"，并给旧仪表盘留一个入口（两套界面并存过渡期） */}
+      {/* 页脚：说清"数据在哪"。旧仪表盘入口已随 B-5 切换移除（它已不在 `/` 上）。 */}
       <div className="mt-auto border-t border-line px-5 py-4">
         <div className="text-[10.5px] leading-relaxed text-fg-4">
           本地账本 · 数据只在本机
           <br />
           data/fund_quant.db
         </div>
-        <a
-          href="/"
-          className="mt-2 inline-block text-[11px] text-fg-3 underline decoration-dotted underline-offset-2 hover:text-fg-2"
-        >
-          旧仪表盘 ↗
-        </a>
       </div>
     </aside>
   )

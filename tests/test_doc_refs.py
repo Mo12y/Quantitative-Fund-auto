@@ -29,7 +29,14 @@ EXTS = ('.md', '.py', '.ts', '.tsx', '.js', '.css', '.json', '.yaml', '.html', '
 #: （未入库的本机速记与生成稿不算权威文档）。
 
 #: 已登记的例外：有意不存在 / 待创建 / 属其他项目。**每一条都要写理由。**
-EXCEPTIONS: set[str] = set()
+#:
+#: · `src/web/templates/dashboard.html` —— `docs/前端展示优化任务书.md` 提到它。
+#:   那是 **2026-09 的历史任务书**，描述的是当时的状态（当时该文件确实在 `templates/`）。
+#:   2026-10-05 的 B-5 把旧仪表盘退役、文件已 `git mv` 到 `src/web/_archive/dashboard.html`。
+#:   **不改历史任务书**（那是篡改记录），也**不删它**（它是审计线索）—— 只在此登记。
+EXCEPTIONS: set[str] = {
+    "src/web/templates/dashboard.html",
+}
 
 #: 含这些标记的行直接跳过（跨项目路径 / 通配符 / 命令 / 占位符 / 举例）
 SKIP_MARKERS = ('D:\\', 'D:/', '*', '…', '<', '（待', '将新增', '例如', 'grep ', 'python ', 'git ', 'pip ')

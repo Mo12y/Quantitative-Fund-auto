@@ -7,20 +7,21 @@ import tailwindcss from '@tailwindcss/vite'
 const API_TARGET = process.env.QFA_API_TARGET || 'http://localhost:5020'
 
 export default defineConfig({
-  // 生产构建挂在 Flask 的 /v2 下 —— 资源引用必须是 /v2/assets/...（默认 '/' 会 404）
-  base: '/v2/',
+  // 生产构建挂在 Flask 的 **`/`**（方案 B，B-5 切换）—— 资源引用为 /assets/...
+  // ⚠️ 改这里之后**必须重建 dist**，否则 index.html 里仍是旧的 /v2/assets/... → 白屏。
+  base: '/',
   plugins: [react(), tailwindcss()],
   server: {
     port: 5173,
-    // 注意：base=/v2/ 后 dev server 也在 /v2 下服务 → 开发时访问 http://localhost:5173/v2/
+    // base='/' 后 dev server 也在根路径下服务 → 开发时直接访问 http://localhost:5173/
     proxy: {
       '/api': { target: API_TARGET, changeOrigin: true },
     },
   },
   build: {
     outDir: 'dist',
-    // 构建产物由 Flask 的 /v2 路由托管（见 src/web/app.py）——
-    // 旧仪表盘（/ 上的 app.js）保持可用，两者并存、可对照，不推倒线上可用界面。
+    // 构建产物由 Flask 的 `/` 路由托管（见 src/web/app.py::index）。
+    // 旧仪表盘（原 `/` 上的 app.js）已于 B-5 退役，`/v2` 保留 301 重定向。
     sourcemap: true,
     rollupOptions: {
       output: {

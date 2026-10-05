@@ -8,7 +8,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspa
 # 联网刷新请用 CLI：python src/main.py temp（此时不设此变量，默认 live）。
 os.environ.setdefault("QFA_MARKET_LIVE", "0")
 
-from flask import Flask, jsonify, render_template, request, send_from_directory
+from flask import Flask, jsonify, redirect, render_template, request, send_from_directory
 from flask.json.provider import DefaultJSONProvider
 from src.data.database import Database
 from src.analysis.fund_scorer import FundScreener, type_bucket
@@ -51,8 +51,11 @@ app.json = _SafeJSONProvider(app)
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
 DB_PATH = os.path.join(BASE_DIR, "data", "fund_quant.db")
 SECTORS_CACHE_FILE = os.path.join(BASE_DIR, "data", "sectors_cache.json")
+# 旧前端的静态资源目录（app.js / app.css / favicon.svg）。
+# ⚠️ B-5 后 `/` 已改挂新前端，这里的 `app.js`/`app.css` 不再被任何页面引用；
+# 它们与 `templates/dashboard.html` 一起在 **B-6** 删除，届时本常量一并清理。
 STATIC_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
-# 新前端（React）构建产物；由下方 /v2 路由托管，与旧仪表盘并存
+# 新前端（React）构建产物；由 `/` 路由托管（B-5 切换后旧仪表盘退役）
 FRONTEND_DIST = os.path.join(BASE_DIR, "frontend", "dist")
 
 # 板块数据缓存（启动时预计算）
@@ -202,34 +205,44 @@ def get_db():
 
 @app.route("/")
 def index():
-    """仪表盘首页（渲染前端模板）。静态资源带 mtime 版本号，避免浏览器用旧缓存。"""
-    try:
-        v = int(max(os.path.getmtime(os.path.join(STATIC_DIR, f))
-                    for f in ("app.css", "app.js")))
-    except Exception:
-        # 改不动静态资源版本号时，宁可让浏览器每次都回源，也不要它继续用旧 JS
-        v = int(time.time())
-    return render_template("dashboard.html", v=v)
+    """应用首页 —— **新前端（React 构建产物）**。
+
+    方案 B（2026-10-04 用户拍板、B-5 切换）：新前端挂 `/`，旧仪表盘退役。
+    产物由 `frontend/` 构建（`npm run build`，vite `base='/'`）；
+    未构建时给**明确提示**（503 + 怎么修），而不是让浏览器拿到一个 404 空白页。
+    """
+    if not os.path.exists(os.path.join(FRONTEND_DIST, "index.html")):
+        return jsonify({"ok": False,
+                        "error": "前端尚未构建：在 frontend/ 下执行 npm run build 后重启"}), 503
+    return send_from_directory(FRONTEND_DIST, "index.html")
+
+
+@app.route("/assets/<path:filename>")
+def frontend_assets(filename):
+    """新前端的静态资源。
+
+    ⚠️ 必须有这条路由：vite `base='/'` 后，`index.html` 里引用的是 `/assets/index-xxx.js`
+    （不是 `/v2/assets/...`）—— 少了它页面会白屏（只有 HTML、没有 JS）。
+    """
+    return send_from_directory(os.path.join(FRONTEND_DIST, "assets"), filename)
 
 
 @app.route("/v2")
 @app.route("/v2/")
-def index_v2():
-    """新前端（React 构建产物）—— 挂在 /v2，与旧仪表盘（/）并存对照跑。
-
-    产物由 `frontend/` 构建（npm run build，base=/v2/）；未构建时给明确提示而不是 404。
-    """
-    if not os.path.exists(os.path.join(FRONTEND_DIST, "index.html")):
-        return jsonify({"ok": False, "error": "新前端尚未构建：在 frontend/ 下执行 npm run build"}), 503
-    return send_from_directory(FRONTEND_DIST, "index.html")
-
-
 @app.route("/v2/<path:filename>")
-def v2_static(filename):
-    """静态资源（assets/*）；未命中的路径回落 index.html（SPA 语义）。"""
-    if os.path.isfile(os.path.join(FRONTEND_DIST, filename)):
-        return send_from_directory(FRONTEND_DIST, filename)
-    return send_from_directory(FRONTEND_DIST, "index.html")
+def legacy_v2_redirect(filename=None):
+    """旧地址 `/v2*` → **301 到 `/`**（B-5 切换后旧路径不再服务）。
+
+    `<path>` 部分映射到 `/#/<path>` 以**保留深链**（新前端是 hash 路由）。
+    ⚠️ 用 301 而非 302：让浏览器与书签把新地址记下来，之后不再多一跳。
+
+    ⚠️ 关于"旧标签页要不要提示升级"：**本实现下不会出现 404** ——
+    旧前端仍挂在 `/` 上，刷新即得新界面；它的 `app.js` 也还在（B-6 才删）。
+    所以这里不额外造一个提示页（那需要先制造一个 404 才有位置放它）。
+    """
+    if filename:
+        return redirect("/#/" + filename, code=301)
+    return redirect("/", code=301)
 
 
 def _all_plan():
