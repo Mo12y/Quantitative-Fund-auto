@@ -3,7 +3,9 @@ import { Card } from '../components/Card'
 import { CurveChart } from '../components/CurveChart'
 import { HoldingsTable } from '../components/HoldingsTable'
 import { KpiRow } from '../components/KpiRow'
+import { LiveQuoteCard } from '../components/LiveQuoteCard'
 import { PageHead } from '../components/PageHead'
+import { SentimentCard } from '../components/SentimentCard'
 import { Skeleton } from '../components/Skeleton'
 import { SourceTag } from '../components/SourceTag'
 import { VerdictCard } from '../components/VerdictCard'
@@ -196,6 +198,15 @@ export default function Today() {
                 </div>
               )}
             </Card>
+          </div>
+
+          {/* 行情 + 消息面（B-3 补的两个独占展示块）。
+              两者都是"市场当下状态"，并排放；温度卡在上一行右侧，同属"市场位置"一族。
+              ⚠️ 子项必须给 `min-w-0`：grid/flex 子项默认 `min-width: auto`，
+                 内容（长基金名 / 行情 chip）的 min-content 宽会把卡片顶破 → 375 下横向溢出。 */}
+          <div className="grid items-start gap-4 md:grid-cols-2">
+            <LiveQuoteCard className="min-w-0" />
+            <SentimentCard className="min-w-0" />
           </div>
         </>
       )}

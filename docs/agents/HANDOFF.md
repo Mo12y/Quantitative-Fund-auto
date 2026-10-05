@@ -23,43 +23,45 @@
 
 ## 交接记录
 
-### 交接：2026-10-05（DSH 会话五 → 下一个智能体）—— ⭐ **B-0 / B-1 / B-2 已落地**
+### 交接：2026-10-05（DSH 会话五 → 下一个智能体）—— ⭐ **B-0 ~ B-3 已落地**
 
 > **状态来源（本轮实测）**：工作树干净（本块提交后）、已推送、
-> 门禁 **833 passed / 2 skipped**、前端真机 **40/40**（33 原有 + B-0 新增 7）、
+> 门禁 **833 passed / 2 skipped**、前端真机 **43/43**（33 原有 + B-0 的 7 + B-3 的 3）、
 > 数据契约 **24 项 0 失败**、前端 `tsc --noEmit` 0、`vite build` 成功。
->
-> ⚠️ **测试基线随 B-2 增长**：B-1 时 820 passed / 2 skipped，B-2 新增
-> `test_ledger_write.py` 13 个 → **833 passed / 2 skipped**。
 >
 > ⚠️ **跑测试/Playwright 一律用系统 Python**：
 > `C:/Users/m1309/AppData/Local/Programs/Python/Python313/python.exe`（托管那个没有 pytest）。
 
-#### 一、本轮完成：B-0（视觉判据）+ B-1（API 客户端）+ B-2（写门面）
+#### 一、本轮完成：B-0（视觉判据）+ B-1（API 客户端）+ B-2（写门面）+ B-3（3 个展示块）
 
-**B-0**：`scripts/verify_frontend.py` 追加 7 条静态判据（原 33 项未动），抓出并修掉 5 处真实违规。
+**B-0**：`scripts/verify_frontend.py` 追加 7 条静态判据，抓出并修掉 5 处真实违规。
 
-**B-1**（`docs/前端重构计划书.md` §12，详见该节「落地记录」）：
-`client.ts` 加 `apiPost`/`apiEnvelope` + `ApiResult.envelope`；`endpoints.ts` 补 5 个纯读端点
-（`sentiment` 三态专用）；`types.ts` 补对应类型。5 端点与真实响应核对 0 处不符。
-⚠️ 写端点（`holdings`/`holdingsRefresh`/`navUpdate`/`reconcile`）**留给 B-4**。
+**B-1**：`client.ts` 加 `apiPost`/`apiEnvelope` + `ApiResult.envelope`；补 5 个纯读端点
+（`sentiment` 三态专用）；`types.ts` 补类型。5 端点与真实响应核对 0 处不符。
 
-**B-2**（§12 B-2，⚠️ 唯一碰账本，已快照保护）：
-1. `scripts/snapshot_before_write.py` 快照工具 + 真实账本快照 `_snapshot_20261005_131223_pre_write.db`
-2. `src/analysis/ledger_write.py` 统一写门面（`_WRITE_LOCK` + `db.immediate()`，直接 SQL 不调会 commit 的方法）
-3. 修两个口径缺陷：`update` 改 `buy_amount` 同步 `transactions`；`delete` 备份两张表 + 连带删流水
-4. `Database.__init__` 路径守卫 `allow_create=None`（读 `QFA_DB_ALLOW_CREATE`，默认拒绝）；
-   `tests/conftest.py` 设环境变量放行测试建临时库；采集命令显式 `allow_create=True`
+**B-2**（⚠️ 唯一碰账本，已快照保护）：快照工具 `snapshot_before_write.py`；
+写门面 `ledger_write.py`；修两个口径缺陷（update 同步 transactions / delete 备份两张表 + 连带删流水）；
+`Database.__init__` 路径守卫 + `tests/conftest.py` 放行测试建临时库。
 
-#### 二、下一步：B-3（补齐 3 个独占展示块）
+**B-3**（§12 B-3，详见该节「落地记录」）：
+`LiveQuoteCard`（行情，`available=false` 是降级）、`SentimentCard`（三态自管轮询 + 旧值标注）、
+`BacktestRec`（折叠 + 引用信封层 `purpose`/`methodology_note`）；
+`useApi` 加 `envelope` 字段；`verify_frontend.py` 加 3 条断言（第 41~43 项）。
+⚠️ 首轮真机验收**抓到 375 横向溢出 2px**（grid 子项缺 `min-w-0`）→ 已修并转绿。
 
-`docs/前端重构计划书.md` §12 B-3，照做：
-1. `components/LiveQuoteCard.tsx` → 「今天」页（`/api/market/live`，`available=false` 是降级不是错误）
-2. `components/SentimentCard.tsx` → 「今天」页（`/api/sentiment`，三态 `ok`/`scanning`/`error`）
-3. `components/BacktestRec.tsx` → 「研究」页筛选池下方（`/api/recommend`，可折叠；文案写明"辅助参考，非推荐"）
+#### 二、下一步：B-4（写操作接进新前端，⚠️ 唯一不可回退的一步）
 
-验收：`verify_frontend.py` 40 + B-3 新增项全绿；375 视口零溢出；console 无 error。
-⚠️ `/api/recommend` 15~20s → 骨架 + 加载态；`/api/sentiment` 首扫可能很久 → 与 `Warming` 交互单独处理。
+`docs/前端重构计划书.md` §12 B-4，照做：
+1. **确认流**：加仓/减仓先出确认卡（日期 / 基金 / 金额 / 预估份额 + T+1 + 15:00 后提示），确认后才 POST
+2. **撤销**：写操作返回 `commit_id` + 可读 `before/after` diff；成功后显示「撤销」
+   → `POST /api/holdings/rollback`（凭 `commit_id` 反向重放，同样走锁 + 事务，只允许回滚最近 N 次）
+3. 写入点接入：持仓页（买/卖/改/删/分红策略）、设置页（计划增删改 / 定投 / 净值更新 / 对账）
+
+⚠️ **B-4 的前提**：B-1 补的 4 个**写端点封装**（`holdings` / `holdingsRefresh` / `navUpdate` / `reconcile`）
+才是 B-4 的输入 —— **先补这 4 个**，再接界面。
+⚠️ `/api/dca action=sync` 与 `/api/reconcile` 是**幂等自动补录**，会**自己产生真实买入**
+（`auto_executed`）→ 必须先归到 B-2 门面里再上界面，否则点一下就是若干笔真账。
+⚠️ **B-4 未过之前不进 B-5**。
 
 #### 三、注意事项（本轮新增的坑，别重复踩）
 
@@ -109,6 +111,11 @@
 | `src/web/app.py` / `src/cli/output_cmds.py` | update/delete/dividend_policy 改走门面 |
 | `tests/conftest.py` | 设 `QFA_DB_ALLOW_CREATE=1` 放行测试建临时库 |
 | `tests/test_ledger_write.py` | 路径守卫 + 口径①② + 孤儿流水（13 个用例） |
+| `frontend/src/components/LiveQuoteCard.tsx` | B-3：行情快照 + 时滞（`available=false` 是降级） |
+| `frontend/src/components/SentimentCard.tsx` | B-3：消息面三态自管轮询 + 旧值标注 |
+| `frontend/src/components/BacktestRec.tsx` | B-3：历史回测折叠块（引用信封层 `purpose`） |
+| `frontend/src/lib/useApi.ts` | B-3：加 `envelope` 字段（带出信封层文案） |
+| `frontend/src/routes/Today.tsx` / `Research.tsx` | B-3：接入三个块（子项给 `min-w-0`） |
 
 **回滚**：`git revert <本块提交>`。⚠️ B-2 是唯一碰账本的一步 —— 若需回滚**账本数据**，
 用快照 `data/_snapshot_20261005_131223_pre_write.db` 还原（先停服务）：`cp <快照> data/fund_quant.db`。

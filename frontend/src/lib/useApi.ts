@@ -8,7 +8,7 @@
  *  · 失败时带**后端给的中文原因**（不是"网络错误"这种无信息量的话）。
  */
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { ApiError, type ApiResult, type GetOptions } from '../api/client'
+import { ApiError, type ApiEnvelope, type ApiResult, type GetOptions } from '../api/client'
 
 export interface ApiState<T> {
   data: T | null
@@ -18,6 +18,9 @@ export interface ApiState<T> {
   warming: boolean
   warmingWait: number
   error: string | null
+  /** 原始信封。少数端点把**免责/口径文案放在信封层**（`/api/recommend` 的
+   *  `purpose` / `methodology_note`），界面要用它而不是自己编 —— 否则两边说法会漂移。 */
+  envelope: ApiEnvelope<T> | null
   refresh: (opts?: GetOptions) => void
 }
 
@@ -31,6 +34,7 @@ export function useApi<T>(
   const [warming, setWarming] = useState(false)
   const [warmingWait, setWarmingWait] = useState(0)
   const [error, setError] = useState<string | null>(null)
+  const [envelope, setEnvelope] = useState<ApiEnvelope<T> | null>(null)
 
   // 防竞态：只有最后一次请求的结果能落地（"重算"按钮连点时不至于旧结果盖新结果）
   const seq = useRef(0)
@@ -60,6 +64,7 @@ export function useApi<T>(
         if (!mounted.current || my !== seq.current) return
         setData(res.data)
         setSource(res.source)
+        setEnvelope(res.envelope ?? null)
       } catch (e) {
         if (!mounted.current || my !== seq.current) return
         setError(e instanceof ApiError ? e.message : String(e))
@@ -79,5 +84,5 @@ export function useApi<T>(
   }, [run])
 
   const refresh = useCallback((opts?: GetOptions) => void run(opts), [run])
-  return { data, source, loading, warming, warmingWait, error, refresh }
+  return { data, source, loading, warming, warmingWait, error, envelope, refresh }
 }

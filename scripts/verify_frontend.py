@@ -485,6 +485,10 @@ def main() -> int:
 
         check("导航含四个入口", all(e in page.inner_text("nav") for e in ENTRIES))
         check("「今天」页渲染", "总资产" in page.inner_text("body"))
+        # B-3：行情 + 消息面（两个独占展示块）
+        t0 = page.inner_text("body")
+        check("「今天」页：指数行情块已接入", "指数行情" in t0)
+        check("「今天」页：消息面块已接入", "消息面" in t0)
 
         def go(label: str) -> str:
             page.get_by_role("button", name=label, exact=True).click()
@@ -497,6 +501,10 @@ def main() -> int:
         t = go("研究")
         check("「研究」页：行业板块 + 筛选池", "行业板块" in t and "筛选池" in t)
         check("「研究」页：量化模型已移出", "量化模型" not in t)
+        # B-3：历史回测验证块。⚠️ 必须同时含「非推荐」字样 —— 那是最容易漂移的一条文案
+        # （后端 §4.4 明确它不是推荐；只断言"块存在"会漏掉文案被改回"推荐"的情况）。
+        check("「研究」页：历史回测验证已接入且标注非推荐",
+              "历史回测验证" in t and "非推荐" in t)
         # 数据链路下钻（2026-10-04 接进「研究」）—— 复用「今天」页同一个 DrillDown 组件
         check("「研究」页：数据链路下钻已接入",
               "数据链路" in t and "采集" in t and "评估" in t)

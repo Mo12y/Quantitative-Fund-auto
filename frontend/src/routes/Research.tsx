@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react'
 import { endpoints } from '../api/endpoints'
 import type { GetOptions } from '../api/client'
+import { BacktestRec } from '../components/BacktestRec'
 import { Bento, span } from '../components/Bento'
 import { Card } from '../components/Card'
 import { DrillDown } from '../components/DrillDown'
@@ -80,6 +81,10 @@ export default function Research() {
           fallback('筛选池', board, span(7))
         )}
       </Bento>
+
+      {/* 历史回测验证（B-3 补的独占展示块）—— 挂在**筛选池下方**，默认折叠、展开才加载。
+          ⚠️ 它**不是推荐**（详见该组件注释）：标题已写明「辅助参考，非推荐」。 */}
+      <BacktestRec />
 
       {/* 数据链路下钻 —— **复用**「今天」页那一个 `DrillDown` 组件（不是复制一份），
           所以只有一份实现、两处消费，不存在"两处维护、两处漂移"。
