@@ -403,3 +403,142 @@ export interface PlanPayload {
   plan: InvestmentPlan | null
   error?: string
 }
+
+/* ── 盘中行情（/api/market/live） ─────────────────────────────── */
+
+/** 单个指数盘中报价（东财 push2 快照）。
+ *  ⚠️ `price` 缺失的条目后端**直接跳过**（不填 0）—— 填 0 会被读成"平盘"。 */
+export interface MarketQuote {
+  code: string
+  name: string
+  price: number
+  /** 涨跌幅 %。缺失为 `null`（停牌等），**不是 0** */
+  pct: number | null
+  /** 报价时间，形如 `MM-DD HH:MM` */
+  asof: string | null
+}
+
+export interface MarketLive {
+  /** ⚠️ **出网失败不算错误**：`available=false` + `reason` 是**正常降级结果**。
+   *  界面要如实显示"盘中行情不可用"，而不是报错、也不能拿旧值冒充实时。 */
+  available: boolean
+  reason: string | null
+  quotes: MarketQuote[]
+  /** 是否在交易时段（仅 `available=true` 时有意义） */
+  trading?: boolean
+  asof?: string | null
+  /** 本地净值的最新日期（T+1 数据的实际截止日） */
+  local_nav_latest?: string | null
+  /** 本地净值落后多少天的一句话 —— 时滞要**量化**，不能只说"可能偏旧" */
+  lag_note?: string
+}
+
+/* ── 消息面（/api/sentiment） ─────────────────────────────────── */
+
+export interface SentimentAlert {
+  level: string
+  category: string
+  title: string
+  detail: string
+  timestamp: string
+}
+
+export interface SentimentData {
+  all_clear: boolean
+  signal_summary: string
+  alerts: SentimentAlert[]
+}
+
+/** 消息面**三态**结果。
+ *
+ *  ⚠️ 与 `warming` 是**两件事**（见 `client.ts` 的 `apiEnvelope` 注释）：
+ *   - `ok`       命中成功缓存，`data` 有值
+ *   - `scanning` 后台**正在联网扫描**；`data` 可能是**上一次的旧值**，也可能为 `null`
+ *   - `error`    扫描失败（后端 3 分钟内不再重扫，避免反复出网）
+ */
+export type SentimentState =
+  | { phase: 'ok'; data: SentimentData; cached: boolean }
+  | { phase: 'scanning'; data: SentimentData | null; retryInSec: number }
+  | { phase: 'error'; message: string }
+
+/* ── 历史回测验证（/api/recommend） ───────────────────────────── */
+
+/** ⚠️ 命名纪律（后端 `api_recommend` docstring 原文）：本端点**不是"推荐"**，
+ *  而是**历史回测验证** —— 回答"过去哪些基金被反复选中且真的赚了钱"。
+ *  主推荐是温度驱动的实时筛选（`/api/strategy`）。**界面文案不得混称"推荐"。** */
+export interface RecommendStats {
+  total_months: number
+  total_candidates: number
+  candidates_equity: number
+  candidates_bond: number
+  funds_ever_picked: number
+  funds_with_proven_record: number
+  proven_good: number
+  proven_bad: number
+  top10_avg_3m_return: number
+  date_range: string
+  proven_type_dist: { equity: number; bond: number }
+  current_type_dist: { equity: number; bond: number }
+  [k: string]: unknown
+}
+
+/** 「反复入选且后续赚钱」的基金 —— **样本内**统计（存在同义反复，见 `purpose`） */
+export interface RecommendWinner {
+  code: string
+  name: string
+  type: string
+  bucket: string
+  composite_score: number
+  times_picked: number
+  pick_rate: number
+  avg_score: number
+  avg_return_1m: number
+  avg_return_3m: number
+  avg_return_6m: number
+  win_rate_1m: number
+  win_rate_3m: number
+  first_pick: string
+  last_pick: string
+}
+
+/** 最新一期的入选基金（`app.py` 会补同侪块 —— 与筛选池同一套口径） */
+export interface RecommendPick {
+  code: string
+  name: string
+  type: string
+  bucket: string
+  score: number
+  times_picked: number
+  hist_avg_3m: number | null
+  hist_win_3m: number | null
+  group?: string
+  group_n?: number
+  percentiles?: Record<string, number | null>
+  nav_asof?: string | null
+  insufficient_data?: boolean
+  reason?: string | null
+  metrics?: Record<string, number | null>
+}
+
+export interface RecommendPayload {
+  stats: RecommendStats
+  proven_winners: RecommendWinner[]
+  current_picks: RecommendPick[]
+  constraint_review?: ConstraintReview | null
+}
+
+/* ── 聚合端点（/api/all） ─────────────────────────────────────── */
+
+/** 旧前端的"一次拉全量"端点。新前端按页拆分请求，**原则上不用它** ——
+ *  封装它是为了补齐 §10.3 的双向差集（B-1 的验收项之一）。
+ *  字段与 `/api/overview` + `/api/funds` + `/api/rebalance` 的组合一致。 */
+export interface AllDashboard {
+  plan: InvestmentPlan | null
+  temp: Temperature
+  funds: FundsPayload
+  portfolio: Portfolio
+  rebalance: Rebalance
+  stats: Stats
+  curve: PortfolioCurve
+  error?: string
+}

@@ -11,15 +11,24 @@
  *     （用户拿它判断"我看到的数字是不是刚算的"）。
  */
 
-export type ApiSource = 'cache' | 'snapshot' | 'fresh' | 'warming' | (string & {})
+export type ApiSource = 'cache' | 'snapshot' | 'fresh' | 'warming' | 'live' | (string & {})
 
 export interface ApiEnvelope<T> {
   ok: boolean
   data: T | null
   source?: ApiSource
-  status?: 'warming'
+  /** ⚠️ **不止 `warming`**：`/api/sentiment` 还会回 `ok` / `scanning`（联网扫描中）。
+   *  别把非 `warming` 的状态当成"没有状态"。 */
+  status?: 'warming' | 'scanning' | 'ok' | (string & {})
   retry_in?: number
   error?: string
+  /** `/api/sentiment` 命中成功缓存时为 true */
+  cached?: boolean
+  /** ⚠️ `/api/recommend` 把**免责说明放在信封层**（与 `ok`/`data` 平级，不在 `data` 里）：
+   *  `purpose` / `methodology_note` 是"这不是推荐、是历史回测"的文案来源，
+   *  界面必须能拿到 —— 否则只能自己编，容易把回测验证说成"推荐"。 */
+  purpose?: string
+  methodology_note?: string
 }
 
 export class ApiError extends Error {
@@ -33,6 +42,9 @@ export interface ApiResult<T> {
   data: T
   /** 数据来源（用于界面标注"缓存/快照/刚算"） */
   source: ApiSource
+  /** 原始信封。少数端点把文案放在信封层（如 `/api/recommend` 的 `purpose`），
+   *  调用方需要时从这里取；不需要就忽略。 */
+  envelope?: ApiEnvelope<T>
 }
 
 export interface GetOptions {
@@ -42,6 +54,12 @@ export interface GetOptions {
   onWarming?: (retryInSec: number) => void
   /** 预热最多轮询多少次（默认 40 —— 足够覆盖最慢的 110s 首算） */
   maxWarming?: number
+  signal?: AbortSignal
+}
+
+/** `apiEnvelope` / `apiPost` 用得上的最小选项（它们都不轮询，故无 warming 相关项） */
+export interface EnvelopeOptions {
+  fresh?: boolean
   signal?: AbortSignal
 }
 
@@ -78,8 +96,72 @@ export async function apiGet<T>(path: string, opts: GetOptions = {}): Promise<Ap
     if (env.data == null) {
       throw new ApiError('后端返回了空数据（非预热）')
     }
-    return { data: env.data, source: env.source ?? 'fresh' }
+    return { data: env.data, source: env.source ?? 'fresh', envelope: env }
   }
+}
+
+/**
+ * 取**原始信封**，不做任何解释 —— 供**多态端点**使用。
+ *
+ * 为什么需要它：`/api/sentiment` 有**三态**（`ok` / `scanning` / `ok:false`），
+ * 其中 `scanning` 允许 `data` 为 `null`。走 `apiGet` 会被判成"后端返回了空数据"而抛错，
+ * 于是"正在联网扫描"被误报成"出错了"。这里只负责网络层与 HTTP 层，**语义交给调用方**。
+ *
+ * ⚠️ `scanning` **不是** `warming`：前者是"后台在联网抓取"，后者是"服务端在本地重算"，
+ *    等待时长与界面提示都不同 —— **不要复用同一套分支**（计划书 §12 B-1 已知坑）。
+ *
+ * 不抛 `ok:false`（调用方必须自己判断 `env.ok`）；网络 / HTTP 错误照抛。
+ */
+export async function apiEnvelope<T>(
+  path: string,
+  opts: EnvelopeOptions = {},
+): Promise<ApiEnvelope<T>> {
+  const url = new URL(path, window.location.origin)
+  if (opts.fresh) url.searchParams.set('fresh', '1')
+  const res = await fetch(url.toString(), { signal: opts.signal })
+  if (!res.ok) {
+    throw new ApiError(`HTTP ${res.status}`, res.status)
+  }
+  return (await res.json()) as ApiEnvelope<T>
+}
+
+/**
+ * POST 一个**写**端点（对齐后端 `{ok, data, source}` 信封）。
+ *
+ * ⚠️ 与 `apiGet` 两处**刻意**的不同：
+ *  1. **不做 warming 轮询** —— 写操作不存在"正在算"这一态；真收到 `warming` 说明服务端
+ *     把这个端点接到了预热路径上，属实现错误。直接抛出来比静默等待好：否则用户点了
+ *     「记买入」却一直没反应，分不清是慢还是失败。
+ *  2. `data == null` 也抛错 —— 写操作要么改了账本、要么报错，不存在"成功但没结果"。
+ *
+ * 写端点本身（`/api/holdings` 等）在 **B-4** 才接进界面，这里先把通道铺好。
+ */
+export async function apiPost<T>(
+  path: string,
+  body: unknown = {},
+  opts: EnvelopeOptions = {},
+): Promise<ApiResult<T>> {
+  const url = new URL(path, window.location.origin)
+  const res = await fetch(url.toString(), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body ?? {}),
+    signal: opts.signal,
+  })
+  if (!res.ok) {
+    throw new ApiError(`HTTP ${res.status}`, res.status)
+  }
+  const env = (await res.json()) as ApiEnvelope<T>
+  if (env.status === 'warming') {
+    throw new ApiError('写端点返回了预热态 —— 写操作不应走预热路径')
+  }
+  if (!env.ok) {
+    throw new ApiError(env.error || '后端返回 ok=false')
+  }
+  if (env.data == null) {
+    throw new ApiError('写操作返回了空数据')
+  }
+  return { data: env.data, source: env.source ?? 'fresh', envelope: env }
 }
 
 /** 来源标签 → 中文（界面标注用，避免各页面自己乱写） */
@@ -88,4 +170,5 @@ export const SOURCE_LABEL: Record<string, string> = {
   snapshot: '本地快照',
   fresh: '刚刚重算',
   warming: '正在计算',
+  live: '刚刚计算',
 }
