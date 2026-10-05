@@ -474,6 +474,23 @@ class Database:
 
         self.conn.commit()
 
+        # ── 写操作提交日志（B-4b-1 撤销机制，2026-10-05）──────────────────
+        # 每笔写账本的操作记一条：写前的行快照 + 写后的行快照 + 定位用的 where 片段。
+        # 「撤销」= 按 where 删掉当前行、再把写前的行插回去（所以新增/修改/删除都能还原）。
+        # ⚠️ 只记录**结构性**信息（表名/主键/整行），不记录任何凭据。
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS ledger_commits (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                created_at TEXT NOT NULL,
+                action TEXT NOT NULL,
+                label TEXT,
+                payload TEXT NOT NULL,
+                rolled_back_at TEXT
+            )
+        """)
+
+        self.conn.commit()
+
         # 兼容迁移：给 holdings 补 T+1/T+2 相关列（老库自动升级，不重建表）
         self._migrate_holdings_t1()
         self._migrate_dividend()
@@ -484,6 +501,7 @@ class Database:
             "CREATE INDEX IF NOT EXISTS idx_fund_info_mgt_fee ON fund_info(mgt_fee)",
             "CREATE INDEX IF NOT EXISTS idx_fund_nav_date ON fund_nav(nav_date)",
             "CREATE INDEX IF NOT EXISTS idx_transactions_holding ON transactions(holding_id)",
+            "CREATE INDEX IF NOT EXISTS idx_ledger_commits_created ON ledger_commits(created_at)",
         ):
             try:
                 self.conn.execute(ddl)

@@ -557,6 +557,15 @@ class PortfolioTracker:
                     "status": "confirmed" if status == "holding" else "pending_confirm",
                     "notes": notes,
                 })
+                # 撤销记录（B-4b-1）：买入是**新增**语义 → `before` 为空，撤销即删掉这两行。
+                # ⚠️ 函数内 import：`ledger_write` 反向 import 了本模块的 `_WRITE_LOCK`，模块级 import 会成环。
+                from src.analysis import ledger_write
+                ledger_write.record(
+                    self.db, action="buy",
+                    label="记买入 %s(%s) ¥%s" % (fund_name, fund_code, format(amount, ",.2f")),
+                    spec={"holdings": ("id = ?", (hid,)),
+                          "transactions": ("holding_id = ?", (hid,))},
+                    before={"holdings": [], "transactions": []})
         return hid
 
     def record_sell(
@@ -604,10 +613,23 @@ class PortfolioTracker:
         }
         with _WRITE_LOCK:
             with self.db.immediate():       # 流水 + 持仓 + 状态必须一起落，避免只写一半
+                # 撤销记录（B-4b-1）：**写前**取快照（下面各分支都会改 holdings / transactions）
+                from src.analysis import ledger_write
+                _spec = {"holdings": ("id = ?", (holding_id,)),
+                         "transactions": ("holding_id = ?", (holding_id,))}
+                _before = ledger_write.snap(self.db, _spec)
+                _label = "记卖出 %s(%s) %s" % (
+                    h.get("fund_name") or "", h.get("fund_code") or "", sell_date)
+
+                def _done():
+                    ledger_write.record(self.db, action="sell", label=_label,
+                                        spec=_spec, before=_before)
+                    return True
+
                 tx_id = self.db.add_transaction(tx)
                 if pending:
                     self.db.update_holding(holding_id, status="sell_pending")
-                    return True
+                    return _done()
                 # 已确认：立刻落账（含赎回费）
                 nav_used = float(confirm_nav) if confirm_nav else (
                     (float(sell_amount) / sell_shares) if (sell_amount and sell_shares) else 0.0)
@@ -615,13 +637,13 @@ class PortfolioTracker:
                     # 生效日净值未公布 → 不猜净值、不落账，留在待确认等对账
                     self.db.update_transaction(tx_id, status="pending_confirm")
                     self.db.update_holding(holding_id, status="sell_pending")
-                    return True
+                    return _done()
                 tx["id"] = tx_id
                 res = self._apply_sell(h, tx, nav_used)
                 if res:
                     self.db.update_transaction(tx_id, status="confirmed",
                                                confirm_nav=nav_used, fee=res["fee"])
-                return True
+                return _done()
 
     def get_portfolio_curve(self) -> dict:
         """

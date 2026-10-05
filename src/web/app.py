@@ -1716,6 +1716,46 @@ def api_holdings_action():
         _invalidate_caches("rebalance")     # 持仓变了 → 聚合缓存/总览/调仓建议都失效
 
 
+@app.route("/api/holdings/rollback", methods=["POST"])
+def api_holdings_rollback():
+    """撤销最近一次写账本的操作（B-4b-1）。
+
+    body: `{commit_id}`。
+    只允许撤销**最近 `ledger_write.COMMIT_RETENTION` 条**内的提交，且不能重复撤销 ——
+    撤销是"手滑兜底"，不是版本管理（允许回滚很久以前的，会把之后所有正确操作一起抹掉）。
+    失败用 400 + 中文原因（界面直接显示）。
+    """
+    q = _api_req()
+    cid = int(q.get("commit_id") or 0)
+    if not cid:
+        return jsonify({"ok": False, "error": "缺少 commit_id"}), 400
+    db = get_db()
+    try:
+        r = ledger_write.rollback(db, cid)
+        return jsonify({"ok": True, "data": r,
+                        "message": "已撤销：%s" % (r.get("label") or "该次操作")})
+    except ValueError as e:
+        return jsonify({"ok": False, "error": str(e)}), 400
+    except Exception as e:
+        return jsonify({"ok": False, "error": "撤销失败: %s" % e}), 500
+    finally:
+        db.close()
+        _invalidate_caches("rebalance")
+
+
+@app.route("/api/holdings/commits")
+def api_holdings_commits():
+    """最近的可撤销操作（只读）。前端写操作成功后用它取 `commit_id`。"""
+    db = get_db()
+    try:
+        return jsonify({"ok": True, "data": {
+            "retention": ledger_write.COMMIT_RETENTION,
+            "commits": ledger_write.recent_commits(db, 10),
+        }})
+    finally:
+        db.close()
+
+
 def _dca_serialize(plans, db=None) -> list:
     from datetime import date
     from src.analysis import trade_rules

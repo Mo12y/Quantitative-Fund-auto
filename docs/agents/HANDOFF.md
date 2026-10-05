@@ -23,11 +23,13 @@
 
 ## 交接记录
 
-### 交接：2026-10-05（DSH 会话五 → 下一个智能体）—— ⭐ **B-0 ~ B-3 已落地 + B-4a（通道）**
+### 交接：2026-10-05（DSH 会话五 → 下一个智能体）—— ⭐ **B-0 ~ B-3 已落地；B-4 进行中（a + b-1 完成）**
 
 > **状态来源（本轮实测）**：工作树干净（本块提交后）、已推送、
-> 门禁 **833 passed / 2 skipped**、前端真机 **43/43**（33 原有 + B-0 的 7 + B-3 的 3）、
+> 门禁 **841 passed / 2 skipped**、前端真机 **43/43**（33 原有 + B-0 的 7 + B-3 的 3）、
 > 数据契约 **24 项 0 失败**、前端 `tsc --noEmit` 0、`vite build` 成功。
+> ⚠️ **账本已新增一张表** `ledger_commits`（撤销日志，B-4b-1）；动它之前已快照
+> `data/_snapshot_20261005_173940_pre_write.db`。
 >
 > ⚠️ **跑测试/Playwright 一律用系统 Python**：
 > `C:/Users/m1309/AppData/Local/Programs/Python/Python313/python.exe`（托管那个没有 pytest）。
@@ -57,26 +59,28 @@
 
 #### 二、下一步：B-4（写操作接进新前端，⚠️ 唯一不可回退的一步）
 
-#### 二、下一步：B-4b（写操作接进界面）—— ⚠️ 动界面前有 3 个设计点待定
+#### 二、B-4 进度：B-4a + B-4b-1 已完成，剩 B-4b-2/3（前端）
 
-**B-4a 已完成**（提交 `9605181`）：只铺通道 —— 修了 `apiPost` 契约缺陷（后端写端点
-**返回形状不统一**，`/api/holdings` 成功时只有 `message` 没有 `data`，原设计会把它判成
-"空数据"而报错），补了 6 个写端点封装（`holdings`/`reconcile`/`holdingsRefresh`/`navUpdate`/
-`planAction`/`dcaAction`）。界面未动。
+**B-4a ✅**（`9605181`，只铺通道）：修了 `apiPost` 契约缺陷（后端写端点**返回形状不统一**，
+`/api/holdings` 成功时只有 `message` 没有 `data`，原设计会把它判成"空数据"而报错）；
+补 6 个写端点封装（`holdings`/`reconcile`/`holdingsRefresh`/`navUpdate`/`planAction`/`dcaAction`）。
 
-**B-4b 待做**：确认流 UI + 撤销机制 + 双界面手工走查。**动界面前需先定 3 个设计点**
-（详见计划书 §12 B-4「B-4b 待确认的三个设计点」）：
+**B-4b-1 ✅**（后端撤销机制，本轮提交）：新表 `ledger_commits` + `ledger_write` 的
+`snap`/`record`/`rollback`/`recent_commits`（`COMMIT_RETENTION = 20`）+ 端点
+`POST /api/holdings/rollback`、`GET /api/holdings/commits` + `tests/test_ledger_rollback.py`（8 例）。
+撤销 = 按 `spec` 删当前行、插回写前快照 → 新增/修改/删除**三种语义都能还原**。
+⚠️ 定位一律用主键/外键（`id`/`holding_id`），**不用 `fund_code`**（同基金多批次会被卷进来）。
+⚠️ 覆盖范围只含**用户主动的写操作**；`reconcile` 的到期结算与分红自动落账**不记提交**（幂等、可重跑）。
 
-1. **撤销机制的落点** —— 计划书原文是"返回 `commit_id` + `before/after` diff，
-   `POST /api/holdings/rollback` 反向重放，只允许回滚最近 N 次"。这需要**新建提交日志表**
-   （schema 变更 → 要迁移 + 快照）。需定：表结构、保留次数 N、diff 的可读形态。
-2. **确认流的粒度** —— 所有写操作都确认，还是只有"改账本金额"的（买/卖/改/删）要？
-   幂等类（对账 / 刷新净值）是否也要二次确认？
-3. **高危操作的特殊处理** —— `/api/dca action=sync|backfill|run` 与 `/api/reconcile`
-   会**自己产生真实买入**（`auto_executed`）→ 是否只做二次确认，还是需要更强的闸？
+**B-4b-2/3 ⬜ 待做**（前端，用户已定案）：
+1. 通用**确认流组件**（确认卡：日期/基金/金额/预估份额 + T+1 + 15:00 后提示）
+2. Position 页接入 buy/sell/update/delete/dividend_policy —— **全部写操作二次确认**
+3. Settings 页接入计划增删改 / 定投 / 净值更新 / 对账 —— 同上；
+   ⚠️ 高危（`dca sync|backfill|run`、`reconcile`）确认卡要**明示"将产生 N 笔、合计 ¥X"**
+4. **撤销 UI**：写操作成功后显示「撤销」→ `POST /api/holdings/rollback`
+5. 删掉两页的「本页只读」注释
 
 ⚠️ **B-4 未过之前不进 B-5**。
-⚠️ 界面接入后，「持仓」「设置」两页的 `⚠️ 本页只读` 注释要一并删掉。
 
 #### 三、注意事项（本轮新增的坑，别重复踩）
 
