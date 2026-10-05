@@ -25,6 +25,9 @@ export interface ApiEnvelope<T> {
   /** ⚠️ **写端点成功时常常只有 `message`、没有 `data`**（如 `/api/holdings` 返回
    *  `{ok:true, message:"已记录买入…"}`）—— 所以 `apiPost` 返回整个信封而不是只返回 `data`。 */
   message?: string
+  /** 写端点返回：本次操作的提交 id（用于「撤销」，见 `endpoints.rollback`）。
+   *  `/api/holdings` 的各 action 都会带；失败或未产生提交时为 `null`。 */
+  commit_id?: number | null
   /** `/api/sentiment` 命中成功缓存时为 true */
   cached?: boolean
   /** ⚠️ `/api/recommend` 把**免责说明放在信封层**（与 `ok`/`data` 平级，不在 `data` 里）：

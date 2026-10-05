@@ -2,6 +2,7 @@ import { endpoints } from '../api/endpoints'
 import type { DcaPlan, InvestmentPlan } from '../api/types'
 import { Card } from '../components/Card'
 import { HoldingsTable } from '../components/HoldingsTable'
+import { LedgerActions } from '../components/LedgerActions'
 import { PageHead } from '../components/PageHead'
 import { Skeleton } from '../components/Skeleton'
 import { SourceTag } from '../components/SourceTag'
@@ -128,10 +129,11 @@ function DcaList({ plans }: { plans: DcaPlan[] }) {
 
 /**
  * 持仓入口（计划书 §6）—— 收敛旧前端的 position 视图。
- * 调仓结论 → 持仓明细 + 建仓计划 → 定投执行，按"先看结论、再看构成、最后看执行"排。
+ * 调仓结论 → 持仓明细 + 建仓计划 → 记一笔 → 定投执行，按"先看结论、再看构成、最后看执行"排。
  *
- * ⚠️ 本页**只读**：加仓/减仓/对账等写操作仍在旧仪表盘（`/`）完成。
- * 写入口涉及改账本，按项目铁律要先有整库快照与回滚点，单独一批再迁（见计划书 §9）。
+ * ⚠️ 写操作（买/卖/改/删/分红）自 B-4b 起**已接进本页**（`LedgerActions`）：
+ * 每个写操作先出确认卡，成功后可用「撤销」还原（后端 `ledger_commits`）。
+ * 其余写入口（计划 / 定投 / 净值 / 对账）在「设置」页。
  */
 export default function Position() {
   const overview = useApi(endpoints.overview)
@@ -188,6 +190,10 @@ export default function Position() {
             <HoldingsTable holdings={ov.portfolio.holdings} />
             <PlanProgress plan={plan.data?.plan ?? ov.plan} />
           </div>
+
+          {/* 写操作面板（B-4b）：所有写操作先出确认卡；成功后带「撤销」。
+              ⚠️ 写完必须 refresh —— 否则页面还显示旧持仓（后端已失效聚合缓存）。 */}
+          <LedgerActions holdings={ov.portfolio.holdings} onDone={refreshAll} />
 
           {dca.data ? (
             <DcaList plans={dca.data} />

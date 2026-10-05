@@ -1648,8 +1648,9 @@ def api_holdings_action():
             notes = (str(q.get("notes") or "").strip()) or ""
             after = bool(q.get("after_cutoff"))
             _pf(db).add_buy_transaction(code, name, date_, amount, notes, after_cutoff=after)
-            return jsonify({"ok": True, "message": f"已记录买入：{date_} {name}({code}) ¥{amount:,.2f}"
-                                                   + ("（15:00 后提交，按下一交易日确认）" if after else "")})
+            return jsonify({"ok": True, "commit_id": ledger_write.latest_commit_id(db),
+                            "message": f"已记录买入：{date_} {name}({code}) ¥{amount:,.2f}"
+                                       + ("（15:00 后提交，按下一交易日确认）" if after else "")})
 
         if action == "sell":
             hid = int(q.get("id") or 0)
@@ -1660,7 +1661,8 @@ def api_holdings_action():
                 return jsonify({"ok": False, "error": "卖出金额需大于 0"}), 400
             date_ = (str(q.get("date") or "").strip()) or _today()
             _pf(db).record_sell(hid, date_, amount)
-            return jsonify({"ok": True, "message": f"已记录卖出：持仓ID={hid} {date_} ¥{amount:,.0f}"})
+            return jsonify({"ok": True, "commit_id": ledger_write.latest_commit_id(db),
+                            "message": f"已记录卖出：持仓ID={hid} {date_} ¥{amount:,.0f}"})
 
         if action == "update":
             hid = int(q.get("id") or 0)
@@ -1680,13 +1682,15 @@ def api_holdings_action():
                 return jsonify({"ok": False, "error": "未提供要修改的字段"}), 400
             # 口径缺陷① 已修在门面：改 buy_amount 会同步 transactions 的 amount/fee/shares
             ok = ledger_write.update_holding(db, hid, buy_amount=amt, buy_date=date_)
-            return jsonify({"ok": ok, "message": f"已更新持仓ID={hid}" if ok else f"未找到持仓ID={hid}"})
+            return jsonify({"ok": ok, "commit_id": ledger_write.latest_commit_id(db) if ok else None,
+                            "message": f"已更新持仓ID={hid}" if ok else f"未找到持仓ID={hid}"})
 
         if action == "delete":
             hid = int(q.get("id") or 0)
             # 口径缺陷② 已修在门面：备份 holdings + transactions 两张表，并连带删流水
             ok = ledger_write.delete_holding(db, hid)
-            return jsonify({"ok": ok, "message": f"已删除持仓ID={hid}" if ok else f"未找到持仓ID={hid}"})
+            return jsonify({"ok": ok, "commit_id": ledger_write.latest_commit_id(db) if ok else None,
+                            "message": f"已删除持仓ID={hid}" if ok else f"未找到持仓ID={hid}"})
 
         if action == "dividend_policy":
             # 分红策略切换（设计稿 §7 第 6 步）：reinvest（红利再投，默认）| cash（现金分红）
@@ -1703,6 +1707,7 @@ def api_holdings_action():
                 return jsonify({"ok": False, "error": "未找到对应持仓（需提供 code 或 id）"}), 400
             label = "红利再投" if pol == "reinvest" else "现金分红"
             return jsonify({"ok": True, "changed": changed,
+                            "commit_id": ledger_write.latest_commit_id(db),
                             "message": (f"{code} 的 {changed} 笔已改为{label}" if code
                                         else f"持仓ID={hid} 分红方式已改为{label}")})
 

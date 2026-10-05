@@ -151,3 +151,84 @@ def test_recent_commits_lists_newest_first(tmp_path):
     rows = ledger_write.recent_commits(db, 10)
     assert rows[0]["action"] == "delete"              # 最新在最前
     assert rows[1]["action"] == "update"
+
+
+# ── 端到端（走 HTTP）：买入 → 拿 commit_id → 撤销 ──────────────
+
+@pytest.fixture()
+def client(tmp_path, monkeypatch):
+    """临时库 + Flask test client。库内容与 `test_web_api.py` 的 fixture 同构。"""
+    from src.web import app as webapp
+
+    dbp = str(tmp_path / "api.db")
+    db = Database(dbp)
+    db.upsert_fund_info({"fund_code": "000011", "fund_name": "测试混合C", "fund_type": "混合型"})
+    db.conn.execute(
+        "INSERT OR REPLACE INTO fund_nav (fund_code, nav_date, unit_nav, acc_nav, daily_return) "
+        "VALUES ('000011', '2026-01-05', 2.0, 2.0, 0)")
+    db.conn.executemany(
+        "INSERT OR REPLACE INTO trade_calendar (trade_date, is_open) VALUES (?, 1)",
+        [("2026-01-05",), ("2026-01-06",), ("2026-01-07",), ("2026-01-08",)])
+    db.conn.commit()
+    db.close()
+
+    monkeypatch.setattr(webapp, "DB_PATH", dbp)
+    with webapp._slot_lock:
+        webapp._slot_store.clear()
+    webapp._dash_cache = None
+    with webapp.app.test_client() as c:
+        yield c, dbp
+
+
+def _count_in(dbp, table, where="1=1"):
+    db = Database(dbp)
+    n = db.conn.execute(f"SELECT COUNT(*) c FROM {table} WHERE {where}").fetchone()["c"]
+    db.close()
+    return n
+
+
+def test_api_buy_returns_commit_id_and_rollback_undoes_it(client):
+    c, dbp = client
+    body = c.post("/api/holdings", json={
+        "action": "buy", "code": "000011", "date": "2026-01-05", "amount": 1000,
+    }).get_json()
+    assert body["ok"], body
+    assert body.get("commit_id"), "写端点必须回 commit_id —— 前端的「撤销」靠它"
+    assert _count_in(dbp, "holdings") == 1
+    assert _count_in(dbp, "transactions") == 1
+
+    r = c.post("/api/holdings/rollback", json={"commit_id": body["commit_id"]})
+    assert r.get_json()["ok"], r.get_json()
+    assert _count_in(dbp, "holdings") == 0            # 持仓与流水一起回滚
+    assert _count_in(dbp, "transactions") == 0
+
+
+def test_api_rollback_rejects_second_time(client):
+    c, dbp = client
+    body = c.post("/api/holdings", json={
+        "action": "buy", "code": "000011", "date": "2026-01-05", "amount": 500,
+    }).get_json()
+    cid = body["commit_id"]
+    assert c.post("/api/holdings/rollback", json={"commit_id": cid}).get_json()["ok"]
+
+    r = c.post("/api/holdings/rollback", json={"commit_id": cid})
+    assert r.status_code == 400
+    assert "已经撤销过" in r.get_json()["error"]
+
+
+def test_api_rollback_requires_commit_id(client):
+    c, _ = client
+    r = c.post("/api/holdings/rollback", json={})
+    assert r.status_code == 400
+    assert "commit_id" in r.get_json()["error"]
+
+
+def test_api_commits_endpoint_lists_recent(client):
+    c, _ = client
+    c.post("/api/holdings", json={
+        "action": "buy", "code": "000011", "date": "2026-01-05", "amount": 500,
+    })
+    j = c.get("/api/holdings/commits").get_json()
+    assert j["ok"]
+    assert j["data"]["retention"] == ledger_write.COMMIT_RETENTION
+    assert j["data"]["commits"][0]["action"] == "buy"

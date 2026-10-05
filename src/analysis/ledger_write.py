@@ -27,7 +27,7 @@ from src.data.database import Database
 
 __all__ = [
     "set_dividend_policy", "update_holding", "delete_holding",
-    "snap", "record", "rollback", "recent_commits", "COMMIT_RETENTION",
+    "snap", "record", "rollback", "recent_commits", "latest_commit_id", "COMMIT_RETENTION",
 ]
 
 # ── 撤销机制（B-4b-1）────────────────────────────────────────────────────
@@ -89,6 +89,16 @@ def recent_commits(db: Database, limit: int = 10) -> list:
         "SELECT id, created_at, action, label, rolled_back_at FROM ledger_commits "
         "ORDER BY id DESC LIMIT ?", (limit,)).fetchall()
     return [dict(r) for r in rows]
+
+
+def latest_commit_id(db: Database) -> Optional[int]:
+    """最新一条提交的 id —— 写操作**紧接其后**调用即可拿到"本次"的 id，供界面显示「撤销」。
+
+    ⚠️ 前提：同一连接、且在写操作的 `_WRITE_LOCK` 临界区内（本项目的写都串行化，
+    所以"最新一条"就是"本次那条"）。
+    """
+    row = db.conn.execute("SELECT MAX(id) AS m FROM ledger_commits").fetchone()
+    return int(row["m"]) if row and row["m"] is not None else None
 
 
 def rollback(db: Database, commit_id: int, retention: int = COMMIT_RETENTION) -> dict:

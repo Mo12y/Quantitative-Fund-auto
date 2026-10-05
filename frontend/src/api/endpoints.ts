@@ -127,6 +127,10 @@ export const endpoints = {
   /** 投资计划维护：action = update / add_item / update_item / delete_item / delete_plan */
   planAction: (body: PlanAction, o?: EnvelopeOptions) => apiPost('/api/plan', body, o),
 
+  /** 撤销一次写操作（凭 `commit_id`）。只允许撤销**最近 N 条**、且不能重复撤销。 */
+  rollback: (commitId: number, o?: EnvelopeOptions) =>
+    apiPost('/api/holdings/rollback', { commit_id: commitId }, o),
+
   /**
    * 定投维护：action = sync / backfill / add / run / pause / resume / delete。
    * ⚠️ `sync` / `backfill` / `run` 会**自己产生真实买入**（`auto_executed`）——
