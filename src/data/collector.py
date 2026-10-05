@@ -743,7 +743,7 @@ def quick_test():
     print(f"   akshare 版本: {ak.__version__}")
     print("=" * 60)
 
-    db = Database("data/fund_quant.db")
+    db = Database("data/fund_quant.db", allow_create=True)
     collector = DataCollector(db)
 
     results = collector.test_connection()

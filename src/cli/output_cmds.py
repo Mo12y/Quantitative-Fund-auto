@@ -9,6 +9,7 @@ import webbrowser
 from src.analysis.fund_scorer import FundScreener
 from src.analysis.dca import DcaManager
 from src.analysis.portfolio import PortfolioTracker
+from src.analysis import ledger_write
 from src.analysis.sentiment_monitor import SentimentMonitor
 from src.analysis.thermometer import MarketThermometer
 from src.data.database import Database
@@ -159,39 +160,25 @@ def cmd_update():
     new_amount = input("新的投入金额（元，直接回车跳过）: ").strip()
     new_date = input("新的买入日期（YYYY-MM-DD，直接回车跳过）: ").strip()
 
-    fields = {}
+    amt = None
     if new_amount:
         try:
-            fields["buy_amount"] = float(new_amount)
+            amt = float(new_amount)
         except ValueError:
             print("❌ 金额格式错误")
             db.close()
             return
-    if new_date:
-        fields["buy_date"] = new_date
+    date_ = new_date or None
 
-    if not fields:
+    if amt is None and not date_:
         print("ℹ️ 未输入任何修改，已取消")
         db.close()
         return
 
-    # 修改金额时，按记录的买入净值重算份额
-    if "buy_amount" in fields:
-        row = db.conn.cursor().execute("SELECT buy_nav FROM holdings WHERE id = ?", (holding_id,)).fetchone()
-        if not row:
-            print("❌ 未找到 ID=", holding_id)
-            db.close()
-            return
-        buy_nav = row["buy_nav"]
-        if buy_nav and buy_nav > 0:
-            fields["shares"] = round(fields["buy_amount"] / buy_nav, 2)
-        else:
-            # 买入净值未知(录入时可能缺净值)：不能可靠重算份额，避免把份额清成 0
-            print("⚠️ 该持仓买入净值未知，无法重算份额；已只更新金额")
-
-    ok = db.update_holding(holding_id, **fields)
+    # 口径缺陷① 已修在门面：改 buy_amount 会同步 transactions 的 amount/fee/shares
+    ok = ledger_write.update_holding(db, holding_id, buy_amount=amt, buy_date=date_)
     db.close()
-    print(f"\n✅ 已更新持仓 ID={holding_id}: {fields}" if ok else f"❌ 未找到 ID={holding_id}")
+    print(f"\n✅ 已更新持仓 ID={holding_id}" if ok else f"❌ 未找到 ID={holding_id}")
 
 
 def cmd_delete():
@@ -222,7 +209,8 @@ def cmd_delete():
         db.close()
         return
 
-    ok = db.delete_holding(holding_id)
+    # 口径缺陷② 已修在门面：备份 holdings + transactions 两张表，并连带删流水
+    ok = ledger_write.delete_holding(db, holding_id)
     db.close()
     print(f"\n✅ 已删除持仓 ID={holding_id}" if ok else f"❌ 未找到 ID={holding_id}")
 

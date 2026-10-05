@@ -14,6 +14,7 @@ from src.data.database import Database
 from src.analysis.fund_scorer import FundScreener, type_bucket
 from src.analysis.thermometer import MarketThermometer
 from src.analysis.portfolio import PortfolioTracker
+from src.analysis import ledger_write
 from src.analysis.dca import DcaManager
 from src.analysis.sentiment_monitor import SentimentMonitor
 from src.analysis.rebalance_advisor import RebalanceAdvisor
@@ -1663,59 +1664,46 @@ def api_holdings_action():
 
         if action == "update":
             hid = int(q.get("id") or 0)
-            fields = {}
+            if not hid:
+                return jsonify({"ok": False, "error": "缺少持仓ID"}), 400
+            amt = None
             raw_amt = q.get("amount")
             if raw_amt not in (None, ""):
                 amt = float(raw_amt)
                 if amt <= 0:
                     return jsonify({"ok": False, "error": "金额需大于 0"}), 400
-                fields["buy_amount"] = amt
+            date_ = None
             raw_date = q.get("date")
             if raw_date:
-                fields["buy_date"] = str(raw_date).strip()
-            if not fields:
+                date_ = str(raw_date).strip()
+            if amt is None and not date_:
                 return jsonify({"ok": False, "error": "未提供要修改的字段"}), 400
-            if "buy_amount" in fields:
-                row = db.conn.cursor().execute("SELECT buy_nav FROM holdings WHERE id=?", (hid,)).fetchone()
-                if not row:
-                    return jsonify({"ok": False, "error": f"未找到持仓ID={hid}"})
-                bnav = row["buy_nav"]
-                if bnav and bnav > 0:
-                    fields["shares"] = round(fields["buy_amount"] / bnav, 2)
-            ok = db.update_holding(hid, **fields)
+            # 口径缺陷① 已修在门面：改 buy_amount 会同步 transactions 的 amount/fee/shares
+            ok = ledger_write.update_holding(db, hid, buy_amount=amt, buy_date=date_)
             return jsonify({"ok": ok, "message": f"已更新持仓ID={hid}" if ok else f"未找到持仓ID={hid}"})
 
         if action == "delete":
             hid = int(q.get("id") or 0)
-            ok = db.delete_holding(hid)
+            # 口径缺陷② 已修在门面：备份 holdings + transactions 两张表，并连带删流水
+            ok = ledger_write.delete_holding(db, hid)
             return jsonify({"ok": ok, "message": f"已删除持仓ID={hid}" if ok else f"未找到持仓ID={hid}"})
 
         if action == "dividend_policy":
             # 分红策略切换（设计稿 §7 第 6 步）：reinvest（红利再投，默认）| cash（现金分红）
-            # 两种定位方式：
-            #   · `code` → 该基金**全部**持仓（前端按基金分组展示，与用户认知一致）
-            #   · `id`   → 单笔持仓（细粒度，供脚本/调试用）
-            # 只改**以后**检测到的除息日怎么入账；已入账历史不动（不重算、不回填）。
+            # 已收进门面（原为绕开锁与事务的裸 SQL，见 ledger_write.set_dividend_policy）
             hid = int(q.get("id") or 0)
             code = str(q.get("code") or "").strip()
             pol = str(q.get("policy") or "").strip().lower()
-            if pol not in ("reinvest", "cash"):
-                return jsonify({"ok": False, "error": "policy 只能是 reinvest 或 cash"}), 400
-            cur = db.conn.cursor()
-            if code:
-                rows = cur.execute("SELECT id FROM holdings WHERE fund_code=?", (code,)).fetchall()
-            elif hid:
-                rows = cur.execute("SELECT id FROM holdings WHERE id=?", (hid,)).fetchall()
-            else:
-                rows = []
-            if not rows:
+            try:
+                changed = ledger_write.set_dividend_policy(db, code=code or None,
+                                                           holding_id=hid or None, policy=pol)
+            except ValueError as e:
+                return jsonify({"ok": False, "error": str(e)}), 400
+            if not changed:
                 return jsonify({"ok": False, "error": "未找到对应持仓（需提供 code 或 id）"}), 400
-            cur.executemany("UPDATE holdings SET dividend_policy=? WHERE id=?",
-                            [(pol, r["id"]) for r in rows])
-            db.conn.commit()
             label = "红利再投" if pol == "reinvest" else "现金分红"
-            return jsonify({"ok": True, "changed": len(rows),
-                            "message": (f"{code} 的 {len(rows)} 笔已改为{label}" if code
+            return jsonify({"ok": True, "changed": changed,
+                            "message": (f"{code} 的 {changed} 笔已改为{label}" if code
                                         else f"持仓ID={hid} 分红方式已改为{label}")})
 
         return jsonify({"ok": False, "error": "未知操作: %s" % (action or "(空)")}), 400

@@ -23,45 +23,43 @@
 
 ## 交接记录
 
-### 交接：2026-10-05（DSH 会话五 → 下一个智能体）—— ⭐ **B-0 + B-1 已落地**
+### 交接：2026-10-05（DSH 会话五 → 下一个智能体）—— ⭐ **B-0 / B-1 / B-2 已落地**
 
 > **状态来源（本轮实测）**：工作树干净（本块提交后）、已推送、
-> 门禁 **820 passed / 2 skipped**（`--collect-only` 报 822 collected）、
-> 前端真机 **40/40**（33 原有 + B-0 新增 7）、数据契约 24 项、
-> 前端 `tsc --noEmit` 0、`vite build` 成功；B-1 的 5 个纯读端点已与真实响应逐个核对（0 处不符）。
+> 门禁 **833 passed / 2 skipped**、前端真机 **40/40**（33 原有 + B-0 新增 7）、
+> 数据契约 **24 项 0 失败**、前端 `tsc --noEmit` 0、`vite build` 成功。
 >
-> ⚠️ **测试基线口径更正**：此前文档写「822 passed / 2 skipped」是**把收集总数当成了 passed**。
-> 实测 `pytest tests/ -q` = **`820 passed, 2 skipped`**。本块起统一用 820/2。
+> ⚠️ **测试基线随 B-2 增长**：B-1 时 820 passed / 2 skipped，B-2 新增
+> `test_ledger_write.py` 13 个 → **833 passed / 2 skipped**。
 >
 > ⚠️ **跑测试/Playwright 一律用系统 Python**：
 > `C:/Users/m1309/AppData/Local/Programs/Python/Python313/python.exe`（托管那个没有 pytest）。
 
-#### 一、本轮完成：B-0（视觉判据）+ B-1（API 客户端补齐）
+#### 一、本轮完成：B-0（视觉判据）+ B-1（API 客户端）+ B-2（写门面）
 
-**B-0**：`scripts/verify_frontend.py` 追加 7 条静态判据（原 33 项未动），当场抓出并修掉 5 处真实违规
-（`SourceTag` 的 `py-[3px]`×2、`KpiRow`/`Settings`/`CurveChart` 缺 `.num`）。负对照证明判据会红。
+**B-0**：`scripts/verify_frontend.py` 追加 7 条静态判据（原 33 项未动），抓出并修掉 5 处真实违规。
 
 **B-1**（`docs/前端重构计划书.md` §12，详见该节「落地记录」）：
+`client.ts` 加 `apiPost`/`apiEnvelope` + `ApiResult.envelope`；`endpoints.ts` 补 5 个纯读端点
+（`sentiment` 三态专用）；`types.ts` 补对应类型。5 端点与真实响应核对 0 处不符。
+⚠️ 写端点（`holdings`/`holdingsRefresh`/`navUpdate`/`reconcile`）**留给 B-4**。
 
-1. `client.ts` 新增 **`apiPost<T>()`**（不预热，写端点走它）+ **`apiEnvelope<T>()`**（原始信封，
-   供 `sentiment` 三态用）+ `ApiResult.envelope`（`/api/recommend` 把 `purpose`/`methodology_note`
-   放在**信封层**不在 data 里，必须带出）。
-2. `endpoints.ts` 补**批 1 的 5 个纯读**：`portfolioCurve` / `marketLive` / `sentiment` / `recommend` / `all`。
-   `sentiment` 走 `apiEnvelope` 映射成三态 `SentimentState`（`ok` / `scanning` / `error`），
-   **不复用 warming 分支**（`scanning` 允许 `data=null`）。
-3. `types.ts` 补 `MarketLive` / `SentimentData`+`SentimentState` / `Recommend*` / `AllDashboard`。
+**B-2**（§12 B-2，⚠️ 唯一碰账本，已快照保护）：
+1. `scripts/snapshot_before_write.py` 快照工具 + 真实账本快照 `_snapshot_20261005_131223_pre_write.db`
+2. `src/analysis/ledger_write.py` 统一写门面（`_WRITE_LOCK` + `db.immediate()`，直接 SQL 不调会 commit 的方法）
+3. 修两个口径缺陷：`update` 改 `buy_amount` 同步 `transactions`；`delete` 备份两张表 + 连带删流水
+4. `Database.__init__` 路径守卫 `allow_create=None`（读 `QFA_DB_ALLOW_CREATE`，默认拒绝）；
+   `tests/conftest.py` 设环境变量放行测试建临时库；采集命令显式 `allow_create=True`
 
-⚠️ **批 2 的 4 个写端点**（`holdings` / `holdingsRefresh` / `navUpdate` / `reconcile`）**留给 B-4**。
+#### 二、下一步：B-3（补齐 3 个独占展示块）
 
-#### 二、下一步：B-2（写操作后端门面，⚠️ 唯一碰账本，铁律最重）
+`docs/前端重构计划书.md` §12 B-3，照做：
+1. `components/LiveQuoteCard.tsx` → 「今天」页（`/api/market/live`，`available=false` 是降级不是错误）
+2. `components/SentimentCard.tsx` → 「今天」页（`/api/sentiment`，三态 `ok`/`scanning`/`error`）
+3. `components/BacktestRec.tsx` → 「研究」页筛选池下方（`/api/recommend`，可折叠；文案写明"辅助参考，非推荐"）
 
-`docs/前端重构计划书.md` §12 B-2，照做：
-1. **先整库快照**（铁律·写库先快照）：`scripts/snapshot_before_write.py` → `data/_snapshot_<ts>_pre_write.db`，stdout 打印回滚命令原文
-2. 新建 `src/analysis/ledger_write.py` 统一写门面（`_WRITE_LOCK` + `db.immediate()`），收纳 buy / sell / `dividend_policy`（现为**绕开锁的裸 SQL**）/ `update_holding` / `delete_holding`
-3. 修两个口径缺陷：`update` 改 `buy_amount` 不同步 `transactions`；`delete_holding` 不备份对应 `transactions` 行
-4. `Database.__init__` 加路径守卫 `allow_create=False`（默认拒绝，采集/测试/首次初始化显式传 True）
-
-验收：新增 `tests/test_ledger_write.py`；全量 pytest 不回归（820/2）；`check_ledger_invariants.py` 24 项 0 失败。
+验收：`verify_frontend.py` 40 + B-3 新增项全绿；375 视口零溢出；console 无 error。
+⚠️ `/api/recommend` 15~20s → 骨架 + 加载态；`/api/sentiment` 首扫可能很久 → 与 `Warming` 交互单独处理。
 
 #### 三、注意事项（本轮新增的坑，别重复踩）
 
@@ -105,8 +103,15 @@
 | `frontend/src/api/types.ts` | 补 `MarketLive` / `Sentiment*` / `Recommend*` / `AllDashboard` |
 | `docs/前端重构计划书.md` | §10.3 差集进度、§10.4 施工表、§11.3/§11.4、§12.0 基线更正、§12 B-0/B-1 标完成 |
 | `frontend/src/components/SourceTag.tsx` 等 4 个 tsx | B-0 判据抓出的 5 处真实违规修复 |
+| `scripts/snapshot_before_write.py` | 整库快照工具（backup API，含 WAL 合并，打印回滚命令） |
+| `src/analysis/ledger_write.py` | 写门面：`set_dividend_policy` / `update_holding`（同步 tx）/ `delete_holding`（备份两张表） |
+| `src/data/database.py` | `__init__` 路径守卫 `allow_create`（默认读 `QFA_DB_ALLOW_CREATE`） |
+| `src/web/app.py` / `src/cli/output_cmds.py` | update/delete/dividend_policy 改走门面 |
+| `tests/conftest.py` | 设 `QFA_DB_ALLOW_CREATE=1` 放行测试建临时库 |
+| `tests/test_ledger_write.py` | 路径守卫 + 口径①② + 孤儿流水（13 个用例） |
 
-**回滚**：`git revert <本块提交>`（B-0 + B-1 只碰 `scripts/` + `docs/` + `frontend/src/api/` + 4 个 tsx 小改，无账本改动）。
+**回滚**：`git revert <本块提交>`。⚠️ B-2 是唯一碰账本的一步 —— 若需回滚**账本数据**，
+用快照 `data/_snapshot_20261005_131223_pre_write.db` 还原（先停服务）：`cp <快照> data/fund_quant.db`。
 
 ---
 

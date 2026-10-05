@@ -91,7 +91,7 @@ def cmd_init():
 def cmd_index():
     """采集指数PE/PB估值历史（独立运行，不依赖基金数据）"""
     import time
-    db = Database("data/fund_quant.db")
+    db = Database("data/fund_quant.db", allow_create=True)
     collector = DataCollector(db)
 
     print("📡 采集指数PE/PB估值...")
@@ -150,7 +150,7 @@ def cmd_index():
 
 def cmd_collect():
     """采集数据（基金列表+指数估值）"""
-    db = Database("data/fund_quant.db")
+    db = Database("data/fund_quant.db", allow_create=True)
     collector = DataCollector(db)
 
     print("📡 正在采集数据...")
@@ -219,7 +219,7 @@ def cmd_nav():
     采集净值历史+基金详情: 从各类型基金中分层采样。
     同时获取基金详细信息(规模/经理/成立日)以支撑质量筛选。
     """
-    db = Database("data/fund_quant.db")
+    db = Database("data/fund_quant.db", allow_create=True)
     collector = DataCollector(db)
     cur = db.conn.cursor()
 
@@ -308,7 +308,7 @@ def cmd_snapshot():
       说明中间漏跑了，打印缺口清单——快照只含最近 2 个交易日，
       缺口不会靠重跑 snapshot 自动补齐，需走历史采集路径回填。
     """
-    db = Database("data/fund_quant.db")
+    db = Database("data/fund_quant.db", allow_create=True)
 
     print("📡 全市场当日快照（1 次请求，约 10 秒）...")
     try:
@@ -363,7 +363,7 @@ def cmd_enrich():
     快速补充: 为已有净值的基金补充详细信息(规模/经理/成立日)。
     只采集profile不重新采集净值，速度快。
     """
-    db = Database("data/fund_quant.db")
+    db = Database("data/fund_quant.db", allow_create=True)
     collector = DataCollector(db)
     cur = db.conn.cursor()
 
@@ -404,7 +404,7 @@ def cmd_enrich():
 
 def cmd_calendar():
     """刷新交易日历（T+1 确认 / 定投跳过节假日用）"""
-    db = Database("data/fund_quant.db")
+    db = Database("data/fund_quant.db", allow_create=True)
     dates, src = [], None
     try:
         import akshare as ak
@@ -519,7 +519,7 @@ def cmd_fees():
     nums = [a for a in args if a.isdigit()]
     limit = int(nums[0]) if nums else None
 
-    db = Database("data/fund_quant.db")
+    db = Database("data/fund_quant.db", allow_create=True)
     if not force:
         todo = [r[0] for r in db.conn.execute(
             "SELECT fund_code FROM fund_info WHERE mgt_fee IS NULL OR mgt_fee = 0")]

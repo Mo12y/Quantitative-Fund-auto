@@ -19,14 +19,32 @@ class Database:
     _OPEN_TRIES = 4
     _OPEN_BACKOFF_MS = (0, 2, 5, 10)
 
-    def __init__(self, db_path: str = "data/fund_quant.db"):
+    def __init__(self, db_path: str = "data/fund_quant.db", allow_create: Optional[bool] = None):
         """
         初始化数据库连接。
 
         Args:
             db_path: 数据库文件路径
+            allow_create: 路径不存在时是否允许新建。
+                - `None`（默认）→ 读环境变量 `QFA_DB_ALLOW_CREATE`（`"1"` 为允许，未设则**拒绝**）
+                - `False` → 拒绝（路径不存在即抛错）
+                - `True`  → 允许（采集 / 首次初始化 / 测试建临时库用）
+
+        ⚠️ 路径守卫（铁律·绝对路径的系统性修法，2026-10-05）：
+        旧行为是"路径不存在就静默 `makedirs` + 建空库"，于是**路径写错不报错**，
+        只会得到一个空库、返回"持仓=0 / 历史不足"的假结果（极易误判成数据丢失）。
+        现在默认**拒绝**，把"路径写错"和"首次建库"分开：前者报错、后者显式 `allow_create=True`。
         """
         self.db_path = db_path
+
+        if allow_create is None:
+            allow_create = os.environ.get("QFA_DB_ALLOW_CREATE") == "1"
+        if not allow_create and not os.path.exists(db_path):
+            raise FileNotFoundError(
+                f"数据库文件不存在：{db_path}\n"
+                f"  · 若路径写错，请核对（Database 不会在错误路径上静默建空库）。\n"
+                f"  · 若为首次建库，请显式传 allow_create=True，"
+                f"或先运行 `python src/main.py init` / `collect`。")
 
         # 确保数据目录存在
         db_dir = os.path.dirname(db_path)
