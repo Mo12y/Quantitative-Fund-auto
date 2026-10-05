@@ -2,6 +2,7 @@ import { endpoints } from '../api/endpoints'
 import { Bento, span } from '../components/Bento'
 import { Card } from '../components/Card'
 import { ConstraintNote } from '../components/ConstraintNote'
+import { OpsActions } from '../components/OpsActions'
 import { PageHead } from '../components/PageHead'
 import { QuantPanel } from '../components/QuantPanel'
 import { Skeleton } from '../components/Skeleton'
@@ -24,12 +25,8 @@ const CMDS: { cmd: string; use: string }[] = [
 const TH = 'field pb-2.5 text-left'
 
 /**
- * 设置入口（计划书 §6）—— **首版只读**，另含「量化模型」对照（用户 2026-09-30 指定移入）。
- *
- * ⚠️ 为什么不做写操作：本页对应的旧视图含计划增删改、画像编辑、净值更新等
- * **会改账本/画像**的动作。按项目铁律，写 `data/fund_quant.db` 前必须先做整库快照并留回滚点，
- * 这类交互要单独一批迁移（含确认流、失败回滚、并发锁），不能顺手塞进这一轮。
- * 界面如实标注"维护在旧仪表盘"，不假装这里能改。
+ * 设置入口（计划书 §6）—— 投资计划 / 用户画像 / 量化模型 / 数据源与运维，
+ * 并含**写操作面板**（B-4b-3：计划增删改、定投、净值更新、对账 —— 全部先出确认卡）。
  *
  * 布局：宽屏走 **Bento 2×2**（计划/模型 7 栏、画像/运维 5 栏），窄屏自动退回单列堆叠。
  */
@@ -39,17 +36,20 @@ export default function Settings() {
   const plan = useApi(endpoints.plan)
   const sectors = useApi(endpoints.sectors)
   const quant = useApi(endpoints.quantModels)
+  const dca = useApi(endpoints.dca)
 
   const ov = overview.data
   const rb = rebalance.data
   const pl = plan.data?.plan ?? ov?.plan ?? null
-  const busy = overview.loading || rebalance.loading || plan.loading || sectors.loading || quant.loading
+  const busy = overview.loading || rebalance.loading || plan.loading || sectors.loading
+    || quant.loading || dca.loading
   const wait = Math.max(
     overview.warmingWait,
     rebalance.warmingWait,
     plan.warmingWait,
     sectors.warmingWait,
     quant.warmingWait,
+    dca.warmingWait,
   )
 
   const refreshAll = () => {
@@ -58,6 +58,7 @@ export default function Settings() {
     plan.refresh({ fresh: true })
     sectors.refresh({ fresh: true })
     quant.refresh({ fresh: true })
+    dca.refresh({ fresh: true })
   }
 
   return (
@@ -69,8 +70,9 @@ export default function Settings() {
       <Warming seconds={busy ? wait : 0} />
 
       <div className="rounded-[var(--radius-md)] border border-line bg-inset px-3.5 py-2.5 text-[11.5px] leading-relaxed text-fg-3">
-        本页<b className="font-semibold text-fg-2">只读</b>。计划维护（增删改）、用户画像编辑、净值/持仓更新等写操作仍在旧仪表盘
-        （<span className="mono">/</span>）完成 —— 写账本需要先留整库快照与回滚点，单独一批迁移。
+        写操作（投资计划维护 / 定投 / 净值更新 / 对账）已接进本页，每个操作都会先出确认卡；
+        会自己产生真实买入的操作（对账、定投同步 / 补录 / 执行）在确认卡里明示笔数与金额。
+        「持仓」页的买卖改删支持撤销（保留最近 20 次）；本页操作不记提交、不提供撤销。
       </div>
 
       {/* 宽屏 Bento 2×2：计划与模型是主体（7 栏），画像与运维是辅助（5 栏）——
@@ -240,11 +242,20 @@ export default function Settings() {
           </table>
 
           <div className="mt-3 border-t border-line pt-2 text-[11.5px] leading-relaxed text-fg-4">
-            净值刷新走 CLI（Web 端只读账本）。盘中行情端点（
+            净值刷新也可走 CLI（下方命令表）；盘中行情端点（
             <span className="mono">/api/market/live</span>）在抓不到时
             <b className="font-semibold text-fg-3">如实返回不可用</b>，不会拿旧值冒充实时。
           </div>
         </Card>
+
+        {/* ── 写操作面板（B-4b-3）：计划 / 定投 / 净值 / 对账，全部先出确认卡 ── */}
+        <OpsActions
+          className={span(12)}
+          holdings={ov?.portfolio.holdings ?? []}
+          plans={dca.data ?? []}
+          plan={pl}
+          onDone={refreshAll}
+        />
       </Bento>
     </>
   )

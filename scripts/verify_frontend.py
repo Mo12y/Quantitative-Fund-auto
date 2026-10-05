@@ -516,6 +516,9 @@ def main() -> int:
         check("「设置」页：计划 + 画像 + 运维", "投资计划" in t and "用户画像与生效约束" in t and "数据源与运维" in t)
         check("「设置」页：量化模型已移入", "量化模型" in t and "波动率预测模型" in t)
         check("「设置」页：运维命令表", "python src/main.py snapshot" in t)
+        # B-4b-3：写操作面板（设置页不再是"只读"）
+        check("「设置」页：写操作面板已接入（含高危笔数明示）",
+              "数据运维与写入" in t and "确认卡" in t and "待确认" in t)
 
         # ③ 文案卫生：JSX 文本节点里的 `**粗体**` 会被原样渲染
         for label in ENTRIES:
