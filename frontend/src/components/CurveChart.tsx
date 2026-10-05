@@ -140,7 +140,11 @@ export function CurveChart({ curve }: { curve: PortfolioCurve }) {
       {excluded > 0 && (
         <div className="mt-2 text-[11px] text-fg-4">
           另有 {excluded} 笔未入仓
-          {curve.excluded_amount ? `（约 ${fmtMoney(curve.excluded_amount)}）` : ''}
+          {curve.excluded_amount ? (
+            <span className="num">{`（约 ${fmtMoney(curve.excluded_amount)}）`}</span>
+          ) : (
+            ''
+          )}
           未计入
         </div>
       )}

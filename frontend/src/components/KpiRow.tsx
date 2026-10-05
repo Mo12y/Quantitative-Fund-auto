@@ -74,7 +74,11 @@ export function KpiRow({
           )}
         </div>
       )}
-      {base != null && <div className="text-fg-4">基数 {fmtMoney(base)}（持仓市值+现金）</div>}
+      {base != null && (
+        <div className="text-fg-4">
+          基数 <span className="num">{fmtMoney(base)}</span>（持仓市值+现金）
+        </div>
+      )}
     </>
   ) : (
     '—'

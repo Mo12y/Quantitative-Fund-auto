@@ -28,26 +28,41 @@
   ⑤ 导航断点：lg 起侧栏 / 以下顶部条，且任意视口**只有一套可见**
   ⑥ 交互动效已绑定（错峰入场 / 条形生长 / 指针滑入 / 骨架屏 shimmer）
   ⑦ console 无 error
+
+B-0 追加（2026-10-04，计划书 §11.3 的 ⬜ 三项 → ✅；见 §11.4 的判据取舍）：
+  ⑧ **排版**：`text-[Npx]` 裸字号落在 token 阶梯内；TSX 里无裸色值（唯一例外见 `_CSS_ALLOW`）
+  ⑨ **留白**：`Card` 自身零 margin；间距只走 4px-grid（**含 Tailwind 半档**，见 `_SPACING_GRID_PX`）
+  ⑩ **视觉层级**：无 `h1 > h2 > h3` 倒挂；页面头层字号高于卡标题
+  ⑪ **数字等宽**：货币/百分比/份额格式化值必须挂 `.num`/`.mono`
+
+⚠️ 静态扫描项（⑧⑨⑩⑪）**不需要起服务**：`--static-only` 可单独跑。
+   默认模式下若服务不可达，静态项仍会跑并计入结果，动态项才降级为 SKIP。
 """
 from __future__ import annotations
 
 import argparse
 import json
+import os
+import re
 import sys
 import time
 import urllib.error
 import urllib.request
+from pathlib import Path
 
-try:
-    from playwright.sync_api import sync_playwright
-except ImportError:  # pragma: no cover
-    sys.exit("缺少 playwright。请用装了它的 Python 运行：\n"
-             "  pip install playwright && python -m playwright install chrome")
+# ⚠️ playwright 在 `main()` 里**延迟导入**（见那里的注释）—— 静态判据（B-0）不需要它，
+#    没装 playwright 的机器也应能跑 `--static-only`。
 
 ENTRIES = ["今天", "持仓", "研究", "设置"]
 HASHES = {"今天": "today", "持仓": "position", "研究": "research", "设置": "settings"}
 
+# 仓库根（本文件在 <root>/scripts/ 下）
+ROOT = Path(__file__).resolve().parent.parent
+SRC = ROOT / "frontend" / "src"
+INDEX_CSS = SRC / "index.css"
+
 RESULTS: list[dict] = []
+SKIPPED: list[str] = []
 
 
 def check(name: str, ok: bool, detail: object = "") -> None:
@@ -55,11 +70,97 @@ def check(name: str, ok: bool, detail: object = "") -> None:
     print(("[PASS] " if ok else "[FAIL] ") + name + (("  | " + str(detail)[:160]) if detail else ""))
 
 
+def skip(name: str, why: str) -> None:
+    """动态项在服务不可达时**降级**而不是判红 —— 静态判据仍要能跑（B-0 的可跑性要求）。
+
+    ⚠️ 刻意不写进 RESULTS（否则 `ok == len(RESULTS)` 永远成立 → 退出码骗人）。
+    SKIP 会在汇总里显式列出，CI 上看到 SKIP 就说明动态覆盖这一轮没生效。
+    """
+    SKIPPED.append(name)
+    print(f"[SKIP] {name}  | {why}")
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# B-0 · 静态视觉判据（不依赖服务 / 浏览器）
+#
+# 设计原则（计划书 §11.4）：**判据与真实观感冲突时先改判据**。这里的三条都按
+# 「能抓到现存问题、又不逼着页面写出夸张数值」来定，取舍逐条写在下面。
+# ══════════════════════════════════════════════════════════════════════════
+
+# ── 排版 1：裸字号阶梯 ────────────────────────────────────────────────────
+# ⚠️ `@theme` 里**没有 `--text-*` token**（index.css 只有色/圆角/字体族），
+#    所以"不出现裸值"这条判据**在本项目无法字面成立** —— 见 §11.4 的裁决。
+#    折中：裸字号必须落在 **0.5px 网格**上（离散化），且种类数有上限。
+#    抓的是 `13.7px` / `10.2px` 这种随手拟的散落值。
+_FONT_STEP = 0.5
+_FONT_MAX_DISTINCT = 16        # 现状 14 种；留 2 档余量做"定型"
+
+# ── 排版 1b：裸色值 ──────────────────────────────────────────────────────
+# 唯一现存例外：PoolBoard 的「低估」标签边框 `#3d3117`（warn 暗化变体，token 里没有）。
+# 列入白名单并在 §11.4 记名，**不再新增**。
+# 键 = 相对 `frontend/src` 的 POSIX 路径，值 = 允许出现的裸色字面量。
+_BARE_COLOR_ALLOW: dict[str, set[str]] = {
+    "components/PoolBoard.tsx": {"#3d3117"},
+}
+
+# ── 留白 1：Card 自身零 margin ───────────────────────────────────────────
+# 纪律是「块间距由父级给」（App 的 `main flex flex-col gap-4`）。
+# ⚠️ `Card` 的**内**元素（header 的 `mb-3.5`）不在此列 —— 那是卡内节奏，不是块间距。
+_MARGIN_CLS = re.compile(r"\b(?:m|mt|mb|ml|mr|mx|my)-")
+
+# ── 留白 2：4px 网格 ─────────────────────────────────────────────────────
+# ⚠️ 计划书原文写「间距值 ∈ 4 的倍数」= 只认 4/8/12/16…，但那会把 Tailwind 的
+#    **半档**（`-0.5`=2px / `-1.5`=6px / `-2.5`=10px / `-3.5`=14px）全判红：
+#    现状 217 处间距里 95 处用了半档 —— 那是**有意的**细分节奏
+#    （卡内 `p-3.5`、标题 `mb-1.5`），不是"随机 13px/17px"。
+#    真正要抓的是**离开 2px 网格**的值（如 `13px` / `17px`）。
+#    故判据收紧为「**2px 网格**」，并把取舍记进 §11.4。这是"先改判据"的实例。
+_SPACING_GRID_PX = 2
+
+# ⚠️ 两条写法都要管（负对照实测过）：
+#    · `p-3` / `gap-1.5` —— Tailwind 档位，px = n × 4
+#    · `p-[13px]` / `gap-[17px]` —— 任意值写法，`-[13px]` 直接就是 13px
+#    只写第一条会漏掉任意值（那是"随手拟一个数"的**主要**写法）。
+_CLS_SP_STEP = re.compile(
+    r"\b(?:(?:m|p)[trblxy]?|gap(?:-[xy])?|space-[xy])-(\d+(?:\.\d+)?)\b")
+_CLS_SP_ARB = re.compile(
+    r"\b(?:(?:m|p)[trblxy]?|gap(?:-[xy])?|space-[xy])-\[(\d+(?:\.\d+)?)px\]")
+
+# ── 视觉层级 ─────────────────────────────────────────────────────────────
+# ⚠️ 原判据「同页字号种类 ≤4 档」按"每个 .tsx 文件"量 → 现状最坏 6 档
+#    （`routes/Settings.tsx`：11/11.5/12/12.5/13/16）。但这个数字**量错了对象**：
+#    4 档讲的是"信息层级"（页标题 → 卡标题 → 正文 → 注脚），而 11/11.5/12/12.5 全在
+#    "正文/注脚"这同一层里做微调 —— 它不是层级扁平化，是**同为最小可读尺寸档**的细分。
+#    按文件扫会把"一张表里三种列宽字号"直接判成"层级失控"，属于判据与观感冲突。
+#    故拆成两条**可判定且指向真问题**的：
+#      ⑩a `h1..h6` 字号必须严格递减（现在 h1=24 / h2=12，安全）；
+#      ⑩b 页面头层（h1）字号 > 卡标题（Card 的 h2）字号（防"标题比卡标题还小"）。
+#    "每页字号种类"改为**诊断输出**（进 detail，不参与成败），保留可见性。
+_H_TAG = re.compile(r"<(h[1-6])\b[^>]*?className=\"([^\"]*)\"[^>]*>", re.S)
+_FONT_SZ = re.compile(r"text-\[(\d+(?:\.\d+)?)px\]")
+
+# ── 数字等宽 ─────────────────────────────────────────────────────────────
+# 抓"货币/百分比/份额的格式化值直接裸渲染在无 `num`/`mono` 的容器里"。
+# 判据只看**格式化函数**（`fmtMoney`/`fmtPct`/… 与 `toFixed`），不看普通计数/序号 ——
+# 后者本来就不要求等宽。
+_MONEY_EXPR = re.compile(r"\{(?:[^{}]*?)(?:toFixed\(|fmt[A-Z]\w*\()")
+_NUM_TAGS = ("span", "td", "div", "b", "strong", "em", "p")
+
+
 def probe_server(base: str, tries: int = 40) -> None:
-    """等服务就绪；顺带给出"服务没起"的明确指引，而不是让 Playwright 报超时。"""
+    """等服务就绪；顺带给出"服务没起"的明确指引，而不是让 Playwright 报超时。
+
+    ⚠️ **必须绕过环境代理**（2026-10-05 踩到）：本机沙箱导出了
+    `HTTP_PROXY/HTTPS_PROXY=http://127.0.0.1:<port>`（WorkBuddy 自己的代理），
+    `urllib` 默认**会读这两个变量**，于是连 `http://localhost:5020` 都被转发到代理上
+    → 返回 502 → 探针判"服务不可达" → 动态项被静默 `[SKIP]`。
+    **假绿比假红危险**：看起来"跑过了"。故显式用空 ProxyHandler。
+    （Playwright 不走这套环境变量，所以只有这里的探针会中招。）
+    """
+    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
     for _ in range(tries):
         try:
-            with urllib.request.urlopen(base + "/v2", timeout=5) as r:
+            with opener.open(base + "/v2", timeout=5) as r:
                 if r.status == 200:
                     return
         except Exception:
@@ -140,14 +241,232 @@ CHART_JS = r"""() => ({
 })"""
 
 
+# ══════════════════════════════════════════════════════════════════════════
+# B-0 · 静态扫描实现
+# ══════════════════════════════════════════════════════════════════════════
+
+def _tsx_files() -> list[Path]:
+    """所有 `.tsx`（`main.tsx` 是 Vite 入口壳，无视觉决策 → 排除）。"""
+    return sorted(p for p in SRC.rglob("*.tsx") if p.name != "main.tsx")
+
+
+def _rel(p: Path) -> str:
+    return p.relative_to(SRC).as_posix()
+
+
+def _strip_comments(src: str) -> str:
+    """去 `/* */` 与 `//` 注释 —— 注释里引用 `text-[13.5px]` 是在解释判据，不是违规。
+
+    ⚠️ 粗粒度但够用：本项目 TSX 里没有正则/字符串含 `//` 的写法（模板串内的 URL 已由
+       先剥块注释、且 `//` 只在行首或空格后才剥来规避）。宁可漏判也不误伤。
+    """
+    src = re.sub(r"/\*.*?\*/", " ", src, flags=re.S)
+    src = re.sub(r"(?m)(?<![:/])//[^\n]*$", " ", src)
+    return src
+
+
+def _class_attrs(src: str) -> list[str]:
+    """抓 className 的值（两/单引号 + 模板串的静态部分）。"""
+    out = re.findall(r"className=(?:\"([^\"]*)\"|'([^']*)'|\{`([^`]*)`\})", src)
+    return [a or b or c for a, b, c in out]
+
+
+# ── ⑧ 排版 1：裸字号阶梯 + 裸色值 ─────────────────────────────────────────
+def static_typography() -> None:
+    files = _tsx_files()
+    if not files:
+        check("排版：`.tsx` 源文件可读", False, f"未找到源文件：{SRC}")
+        return
+
+    # 读 `@theme` —— 色 token 白名单 + 确认字号 token 的**缺失**
+    css = INDEX_CSS.read_text(encoding="utf-8") if INDEX_CSS.exists() else ""
+    theme = re.search(r"@theme\s*\{(.*?)\n\}", css, re.S)
+    tokens = re.findall(r"(--[\w-]+)\s*:", theme.group(1)) if theme else []
+    color_tokens = {t for t in tokens if t.startswith("--color-")}
+
+    seen_sizes: dict[str, int] = {}
+    off_grid: list[tuple[str, str]] = []
+    bare_colors: list[tuple[str, str]] = []
+    for f in files:
+        src = _strip_comments(f.read_text(encoding="utf-8"))
+        rel = _rel(f)
+        for s in _FONT_SZ.findall(src):
+            seen_sizes[s] = seen_sizes.get(s, 0) + 1
+            if (float(s) / _FONT_STEP) % 1 != 0:
+                off_grid.append((rel, s))
+        # 裸色值：只查 `#hex` / `rgb()` / `hsl()` 这类"硬编码颜色"，
+        # 不查 `w-[212px]` 这种尺寸（那是布局测量值，不是设计 token 的职责）
+        for m in re.finditer(r"\[(#[0-9a-fA-F]{3,8}|rgba?\([^\]]*\)|hsla?\([^\]]*\))\]", src):
+            lit = m.group(1)
+            if lit in _BARE_COLOR_ALLOW.get(rel, set()):
+                continue
+            bare_colors.append((rel, lit))
+
+    check(
+        f"排版：裸字号落在 {_FONT_STEP}px 阶梯上（{len(seen_sizes)} 种 / 上限 {_FONT_MAX_DISTINCT}）",
+        not off_grid and len(seen_sizes) <= _FONT_MAX_DISTINCT,
+        (f"离格 {off_grid[:5]}" if off_grid else "") +
+        (f" 种类超限 {len(seen_sizes)}>{_FONT_MAX_DISTINCT}：{sorted(seen_sizes, key=float)}"
+         if len(seen_sizes) > _FONT_MAX_DISTINCT else "") or f"{len(seen_sizes)} 种",
+    )
+    check(
+        f"排版：TSX 无裸色值（白名单 {sum(len(v) for v in _BARE_COLOR_ALLOW.values())} 处，token {len(color_tokens)} 个）",
+        not bare_colors,
+        bare_colors[:5] or "全部走 token",
+    )
+
+
+# ── ⑨ 留白：Card 零 margin + 4px(含半档) 网格 ─────────────────────────────
+def static_spacing() -> None:
+    files = _tsx_files()
+    card = SRC / "components" / "Card.tsx"
+    if not card.exists():
+        check("留白：`Card.tsx` 存在", False, str(card))
+        return
+
+    # ① Card 自身的 margin（根 `<section>` 与内部 `<header>` 之外的元素）
+    card_src = _strip_comments(card.read_text(encoding="utf-8"))
+    sec = re.search(r"<section\s+className=\{(.*?)\}\s*>", card_src, re.S)
+    sec_cls = " ".join(re.findall(r"'([^']*)'", sec.group(1))) if sec else ""
+    card_margin = _MARGIN_CLS.findall(sec_cls)
+
+    # ② 全站间距网格（档位写法 + 任意值写法）
+    off_grid: list[tuple[str, str, float]] = []
+    total = 0
+    for f in files:
+        rel = _rel(f)
+        src = _strip_comments(f.read_text(encoding="utf-8"))
+        for cls in _class_attrs(src):
+            for n in _CLS_SP_STEP.findall(cls):
+                total += 1
+                px = float(n) * 4
+                if px % _SPACING_GRID_PX != 0:
+                    off_grid.append((rel, f"-{n}", px))
+            for v in _CLS_SP_ARB.findall(cls):
+                total += 1
+                px = float(v)
+                if px % _SPACING_GRID_PX != 0:
+                    off_grid.append((rel, f"-[{v}px]", px))
+
+    check("留白：`Card` 自身无 margin（块间距由父级 gap 统一给）",
+          not card_margin, f"根 section 命中 {card_margin}" if card_margin else "0 处")
+    check(f"留白：间距落在 {_SPACING_GRID_PX}px 网格（{total} 处）",
+          not off_grid, off_grid[:6] or f"{total} 处全在网格内")
+
+
+# ── ⑩ 视觉层级：h 标签 + 页头 > 卡标题 ───────────────────────────────────
+def static_hierarchy() -> None:
+    files = _tsx_files()
+    ranks: dict[str, list[tuple[str, float, int]]] = {}
+    missing_size: list[tuple[str, str]] = []
+    for f in files:
+        rel = _rel(f)
+        src = _strip_comments(f.read_text(encoding="utf-8"))
+        for line_no, line in enumerate(src.splitlines(), 1):
+            for m in _H_TAG.finditer(line):
+                tag, cls = m.group(1), m.group(2)
+                sz = _FONT_SZ.search(cls)
+                if not sz:
+                    missing_size.append((rel, f"<{tag}>"))
+                    continue
+                ranks.setdefault(tag, []).append((rel, float(sz.group(1)), line_no))
+
+    order = ["h1", "h2", "h3", "h4", "h5", "h6"]
+    vals = {k: sorted({v for _, v, _ in ranks[k]}) for k in order if k in ranks}
+
+    # ① 同标签多值 → 报出（不算红：那是"档内细分"，见 §11.4）
+    multi = {k: v for k, v in vals.items() if len(v) > 1}
+
+    # ② 相邻层级必须严格递减（h1 > h2 > h3…）
+    inversion: list[str] = []
+    present = [k for k in order if k in vals]
+    for a, b in zip(present, present[1:]):
+        if min(vals[a]) <= max(vals[b]):
+            inversion.append(f"{a}({vals[a]}) ≤ {b}({vals[b]})")
+
+    # ③ 页面头层 > 卡标题层
+    head_gt_card = True
+    note = "无 h2 或未取到字号"
+    if "h1" in vals and "h2" in vals:
+        head_gt_card = min(vals["h1"]) > max(vals["h2"])
+        note = f"h1={vals['h1']} vs h2={vals['h2']}"
+
+    check(f"层级：h 标签字号严格递减（{' > '.join(present) or '无'}）",
+          not inversion, inversion or note)
+    check("层级：页面头层字号 > 卡标题字号", head_gt_card, note)
+    # 诊断（不参与成败）：无字号 h 标签 + 同标签多档
+    if missing_size:
+        print(f"        · 诊断：{len(missing_size)} 处 h 标签未显式给字号 {missing_size[:3]}")
+    for k, v in multi.items():
+        print(f"        · 诊断：<{k}> 有 {len(v)} 档字号 {v}（档内细分，非层级倒挂）")
+
+
+# ── ⑪ 数字等宽：格式化值必须挂 .num / .mono ─────────────────────────────
+def static_numeral() -> None:
+    files = _tsx_files()
+    # ⚠️ 判据用**正则近似**而非 AST：只找"单行内 `{fmtXxx(...)}` 直接坐落在无 num/mono 的
+    #    元素里"这一种形态。多行 JSX 或 `{cond ? fmtA() : fmtB()}` 会漏 ——
+    #    故意的：漏判（假绿）比误判（假红）可接受，误判会让人把判据当噪音关掉。
+    TAG_RE = re.compile(
+        r"<(" + "|".join(_NUM_TAGS) + r")\s+className=\"([^\"]*)\"[^>]*>([^<>{}]*?\{[^{}]*?" +
+        r"(?:toFixed\(|fmt[A-Z]\w*\()[^{}]*\}[^<>{}]*?)</\1>"
+    )
+    unreachable: list[tuple[str, str]] = []
+    checked = 0
+    for f in files:
+        rel = _rel(f)
+        src = _strip_comments(f.read_text(encoding="utf-8"))
+        for m in TAG_RE.finditer(src):
+            cls, body = m.group(2), m.group(3)
+            checked += 1
+            if "num" in cls or "mono" in cls or "field" in cls:
+                continue
+            # 例外：`text-fg-4` 的"另有 N 笔"这类附注 —— 仍要求 num（见 §11.4）
+            unreachable.append((rel, (cls[:48] + " :: " + body[:44]).replace("\n", " ")))
+
+    check(f"数字等宽：格式化值挂 `.num`/`.mono`（扫到 {checked} 处）",
+          not unreachable, unreachable[:5] or "全部命中")
+
+
+def run_static_checks() -> None:
+    static_typography()
+    static_spacing()
+    static_hierarchy()
+    static_numeral()
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--base", default="http://localhost:5020")
     ap.add_argument("--json", default=None, help="把结果另存为 JSON")
+    ap.add_argument("--static-only", action="store_true",
+                    help="只跑 B-0 的静态视觉判据（无需起服务 / 不需要 playwright）")
     args = ap.parse_args()
     base = args.base.rstrip("/")
 
-    probe_server(base)
+    if args.static_only:
+        print("静态视觉判据（B-0）—— 不需要服务\n" + "=" * 72)
+        run_static_checks()
+        return _summary(args.json)
+
+    # ── 动态部分需要 playwright；静态部分不依赖它 ─────────────────────
+    try:
+        from playwright.sync_api import sync_playwright  # noqa: F401
+    except ImportError:
+        skip("全部动态项", "未安装 playwright")
+        run_static_checks()
+        return _summary(args.json)
+
+    try:
+        probe_server(base, tries=8)
+        up = True
+    except SystemExit:
+        up = False
+    if not up:
+        skip("全部动态项", f"{base}/v2 不可达（先 `python src/main.py web`）")
+        run_static_checks()
+        return _summary(args.json)
+
     print(f"服务就绪：{base}\n" + "=" * 72)
 
     with sync_playwright() as p:
@@ -278,18 +597,30 @@ def main() -> int:
 
         browser.close()
 
-    ok = sum(1 for r in RESULTS if r["ok"])
+    # ── B-0 静态视觉判据（不需要浏览器，但并入同一份结果 / 退出码）──────
+    print("-" * 72)
+    run_static_checks()
+    return _summary(args.json)
+
+
+def _summary(json_path: str | None) -> int:
     print("\n" + "=" * 72)
+    ok = sum(1 for r in RESULTS if r["ok"])
     print("汇总：%d/%d 通过" % (ok, len(RESULTS)))
+    if SKIPPED:
+        print("跳过（服务/依赖不可达，退出码不计入）：")
+        for s in SKIPPED:
+            print("  - " + s)
     failed = [r["check"] for r in RESULTS if not r["ok"]]
     if failed:
         print("失败项：")
         for f in failed:
             print("  - " + f)
-    if args.json:
-        with open(args.json, "w", encoding="utf-8") as fh:
-            json.dump(RESULTS, fh, ensure_ascii=False, indent=2)
-        print("结果已写入 " + args.json)
+    if json_path:
+        with open(json_path, "w", encoding="utf-8") as fh:
+            json.dump({"results": RESULTS, "skipped": SKIPPED}, fh,
+                      ensure_ascii=False, indent=2)
+        print("结果已写入 " + json_path)
     return 0 if ok == len(RESULTS) else 1
 
 

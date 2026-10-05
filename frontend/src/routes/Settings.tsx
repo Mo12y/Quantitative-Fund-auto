@@ -135,7 +135,7 @@ export default function Settings() {
                       <td className="py-2.5 pr-3 text-[12px] text-fg-3">{plainText(f.role)}</td>
                       <td className="num py-2.5 text-right text-[12.5px] text-fg-2">
                         {fmtMoney(f.target)}
-                        <span className="ml-1 text-fg-4">{fmtPct(f.target_pct)}</span>
+                        <span className="num ml-1 text-fg-4">{fmtPct(f.target_pct)}</span>
                       </td>
                       <td className="num py-2.5 text-right text-[12.5px] text-fg-2">{fmtMoney(f.invested)}</td>
                       <td className="num py-2.5 text-right text-[12.5px] text-fg-3">{fmtPct(f.progress_pct)}</td>
