@@ -438,6 +438,49 @@ def run_static_checks() -> None:
     static_numeral()
 
 
+# ══════════════════════════════════════════════════════════════════════════
+# DESIGN §5.2 信息密度 —— 用「基线上限」起步
+#
+# ⚠️ 为什么是基线而不是直接卡 DESIGN 的目标值：
+#   2026-10-05 实测现状**全部超标**（今天 80 个数字节点 / 目标 ≤40）。若直接卡目标，
+#   这个守卫一上线就是红的，等于没上线（红着的守卫没人看）。
+#   所以先把**当前值**钉成上限：**不许更差**，同时打印"距目标还差多少"。
+#   每瘦身一轮就把基线往下调一档，直到等于 TARGET —— 这才是"渐进收紧"。
+# ══════════════════════════════════════════════════════════════════════════
+
+DENSITY_TARGET = {"num": 40, "screens": 2.0}          # DESIGN §5.2（桌面目标）
+
+#: 键 = hash；值 = (含数字节点数, 桌面页高/屏)。⚠️ 只许往下调，不许上调。
+#: ⚠️ 基线必须是**实测值**（向上取到 0.1 屏 / 逐个数字上取），不能凭印象估 ——
+#:   2026-10-05 首次写时把持仓写成 1.5、研究写成 1.6（估算），实测 1.52/1.65，
+#:   当场被自己的断言抓出来。页高与节点数会随数据小幅波动，留一点上界是必要的。
+DENSITY_BASELINE = {
+    "today": (80, 2.3),
+    "position": (53, 1.6),
+    "research": (108, 1.7),
+    "settings": (129, 2.4),
+}
+
+DENSITY_JS = r"""() => {
+  const vh = document.documentElement.clientHeight;
+  const vis = el => {
+    const r = el.getBoundingClientRect();
+    const cs = getComputedStyle(el);
+    return r.width > 0 && r.height > 0 && cs.display !== 'none' && cs.visibility !== 'hidden';
+  };
+  const leaf = [...document.querySelectorAll('body *')]
+    .filter(e => vis(e) && e.children.length === 0 && (e.textContent || '').trim().length > 0);
+  const hasNum = e => /[0-9]/.test(e.textContent);
+  const nums = leaf.filter(hasNum);
+  const inFold = nums.filter(e => e.getBoundingClientRect().top < vh);
+  return {
+    num: nums.length,
+    foldNum: inFold.length,
+    screens: +(document.documentElement.scrollHeight / vh).toFixed(2),
+  };
+}"""
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--base", default="http://localhost:5020")
@@ -588,6 +631,25 @@ def main() -> int:
             check(f"移动端 375 · {label} 无横向溢出",
                   r["doc"] <= r["client"] + 1 and r["n"] == 0, r)
             c3.close()
+
+        # ── DESIGN §5.2 信息密度（基线上限；见文件上方 DENSITY_BASELINE）──
+        for label, h in HASHES.items():
+            c6 = browser.new_context(viewport={"width": 1440, "height": 900})
+            pg6 = c6.new_page()
+            pg6.goto(f"{base}/#/{h}", wait_until="domcontentloaded")
+            pg6.wait_for_timeout(4200)
+            m = pg6.evaluate(DENSITY_JS)
+            c6.close()
+            base_num, base_scr = DENSITY_BASELINE[h]
+            gap = m["num"] - DENSITY_TARGET["num"]
+            check(
+                f"密度 · {label}：数字节点 ≤ 基线 {base_num}（DESIGN 目标 {DENSITY_TARGET['num']}）",
+                m["num"] <= base_num,
+                (f"实测 {m['num']}，距目标还差 {gap}（可缩）" if gap > 0 else f"实测 {m['num']}（已达标）"))
+            check(
+                f"密度 · {label}：页高 ≤ 基线 {base_scr} 屏（DESIGN 目标 {DENSITY_TARGET['screens']}）",
+                m["screens"] <= base_scr,
+                f"实测 {m['screens']} 屏 · 首屏数字节点 {m['foldNum']}")
 
         # ── ⑥ 骨架屏（注入 warming 后必须出现，而不是白屏）────────────
         c4 = browser.new_context(viewport={"width": 1440, "height": 900})
