@@ -1,18 +1,23 @@
 /** 端点薄封装：路径 + 返回类型**只在此处出现**，页面不再直接写 URL 字符串。 */
-import { apiEnvelope, apiGet, type EnvelopeOptions, type GetOptions } from './client'
+import { apiEnvelope, apiGet, apiPost, type EnvelopeOptions, type GetOptions } from './client'
 import type {
   AllDashboard,
   BoardPool,
+  DcaAction,
   DcaPlan,
   Explain,
   FundsPayload,
+  HoldingsAction,
+  HoldingsRefresh,
   InvestmentPlan,
   MarketLive,
   Overview,
+  PlanAction,
   PortfolioCurve,
   QuantModels,
   Rebalance,
   RecommendPayload,
+  ReconcileResult,
   SectorsPayload,
   SentimentData,
   SentimentState,
@@ -94,4 +99,38 @@ export const endpoints = {
    * 封装是为了补齐 §10.3 的双向差集（B-1 的验收项之一）。
    */
   all: (o?: GetOptions) => apiGet<AllDashboard>('/api/all', o),
+
+  /* ══ B-4：写端点（界面接入在 B-4b —— 通道先铺好）═════════════
+     ⚠️ 这些端点**真的会改 `data/fund_quant.db`**。它们返回**整个信封**
+     （后端成功时可能只给 `message`、不给 `data`），调用方自己取。 */
+
+  /** 持仓写操作：buy / sell / update / delete / dividend_policy。
+   *  后端成功时返回 `{ok:true, message:"已记录买入…"}`（**没有 data**）。 */
+  holdings: (body: HoldingsAction, o?: EnvelopeOptions) =>
+    apiPost('/api/holdings', body, o),
+
+  /**
+   * 幂等对账：结算到期的待确认买入/卖出 + 分红自动落账。
+   * ⚠️ **会真的改账本**（含 `auto_post` 的分红）。重复调用安全（幂等键），
+   *   但界面上必须让用户知道"这可能落若干笔账"。
+   */
+  reconcile: (o?: EnvelopeOptions) => apiPost<ReconcileResult>('/api/reconcile', {}, o),
+
+  /** 逐日重放刷新：对账 + 按生效日净值→最新净值重算。返回 portfolio + 净值时效。 */
+  holdingsRefresh: (o?: EnvelopeOptions) =>
+    apiPost<HoldingsRefresh>('/api/holdings/refresh', {}, o),
+
+  /** 更新净值：只拉取当前持仓涉及的基金。`codes` 缺省 = 当前持仓基金。 */
+  navUpdate: (body: { codes?: string[] } = {}, o?: EnvelopeOptions) =>
+    apiPost('/api/nav/update', body, o),
+
+  /** 投资计划维护：action = update / add_item / update_item / delete_item / delete_plan */
+  planAction: (body: PlanAction, o?: EnvelopeOptions) => apiPost('/api/plan', body, o),
+
+  /**
+   * 定投维护：action = sync / backfill / add / run / pause / resume / delete。
+   * ⚠️ `sync` / `backfill` / `run` 会**自己产生真实买入**（`auto_executed`）——
+   *   界面必须二次确认（B-4b），否则点一下就落若干笔真账。
+   */
+  dcaAction: (body: DcaAction, o?: EnvelopeOptions) => apiPost('/api/dca', body, o),
 }

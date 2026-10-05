@@ -527,6 +527,62 @@ export interface RecommendPayload {
   constraint_review?: ConstraintReview | null
 }
 
+/* ── 写端点参数（B-4） ─────────────────────────────────────────
+   ⚠️ 后端写端点的返回形状**不统一**：`/api/holdings` 只给 `message`、
+   `/api/reconcile` 给 `data`。所以 `apiPost` 返回整个信封，调用方各取所需。 */
+
+/** `/api/holdings` POST —— action 决定需要哪些字段 */
+export interface HoldingsAction {
+  action: 'buy' | 'sell' | 'update' | 'delete' | 'dividend_policy'
+  /** buy: 基金代码 */
+  code?: string
+  /** buy: 基金名（缺省时后端用库内名） */
+  name?: string
+  /** buy / sell: 日期 `YYYY-MM-DD`（缺省今天） */
+  date?: string
+  /** buy / sell: 金额（元） */
+  amount?: number
+  /** sell / update / delete / dividend_policy: 持仓 id */
+  id?: number
+  notes?: string
+  /** buy / sell: 是否 15:00 后提交（按下一交易日确认） */
+  after_cutoff?: boolean
+  /** dividend_policy: `reinvest`（红利再投）| `cash`（现金分红） */
+  policy?: 'reinvest' | 'cash'
+}
+
+/** `/api/reconcile` 返回 —— ⚠️ 这是**幂等自动补录**：真的会改账本 */
+export interface ReconcileResult {
+  settled_buys?: number
+  settled_sells?: number
+  dividend?: { posted_n?: number; posted_amount?: number; error?: string; [k: string]: unknown }
+  [k: string]: unknown
+}
+
+/** `/api/holdings/refresh` 返回 —— 对账 + 按最新净值重算 */
+export interface HoldingsRefresh {
+  portfolio: Portfolio
+  /** 本地净值最新日期（T+1 数据的实际截止日） */
+  nav_latest_date: string | null
+  today: string
+  /** 净值是否落后于今天（界面的"更新净值"提示依据） */
+  stale: boolean
+}
+
+/** `/api/plan` POST —— 投资计划维护 */
+export interface PlanAction {
+  action: 'update' | 'add_item' | 'update_item' | 'delete_item' | 'delete_plan'
+  [k: string]: unknown
+}
+
+/** `/api/dca` POST —— 定投维护。
+ *  ⚠️ `sync` / `backfill` / `run` 会**自己产生真实买入**（`auto_executed`）——
+ *  界面上必须二次确认，不能点一下就落若干笔真账。 */
+export interface DcaAction {
+  action: 'sync' | 'backfill' | 'add' | 'run' | 'pause' | 'resume' | 'delete'
+  [k: string]: unknown
+}
+
 /* ── 聚合端点（/api/all） ─────────────────────────────────────── */
 
 /** 旧前端的"一次拉全量"端点。新前端按页拆分请求，**原则上不用它** ——

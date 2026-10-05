@@ -22,6 +22,9 @@ export interface ApiEnvelope<T> {
   status?: 'warming' | 'scanning' | 'ok' | (string & {})
   retry_in?: number
   error?: string
+  /** ⚠️ **写端点成功时常常只有 `message`、没有 `data`**（如 `/api/holdings` 返回
+   *  `{ok:true, message:"已记录买入…"}`）—— 所以 `apiPost` 返回整个信封而不是只返回 `data`。 */
+  message?: string
   /** `/api/sentiment` 命中成功缓存时为 true */
   cached?: boolean
   /** ⚠️ `/api/recommend` 把**免责说明放在信封层**（与 `ok`/`data` 平级，不在 `data` 里）：
@@ -128,19 +131,26 @@ export async function apiEnvelope<T>(
 /**
  * POST 一个**写**端点（对齐后端 `{ok, data, source}` 信封）。
  *
+ * ⚠️ 返回的是**整个信封**（不是 `ApiResult`），因为后端写端点的返回形状**不统一**：
+ *   · `/api/holdings`      → `{ok:true, message:"已记录买入…"}`（**没有 data**）
+ *   · `/api/reconcile`     → `{ok:true, data:{settled_buys,…}, changed}`
+ *   · `/api/nav/update`    → `{ok:true, message:"…", failed:[…]}`
+ * 所以调用方自己取 `message`（给人看的提示）或 `data`（要看结构时）。
+ *
  * ⚠️ 与 `apiGet` 两处**刻意**的不同：
  *  1. **不做 warming 轮询** —— 写操作不存在"正在算"这一态；真收到 `warming` 说明服务端
  *     把这个端点接到了预热路径上，属实现错误。直接抛出来比静默等待好：否则用户点了
  *     「记买入」却一直没反应，分不清是慢还是失败。
- *  2. `data == null` 也抛错 —— 写操作要么改了账本、要么报错，不存在"成功但没结果"。
+ *  2. 只在 `ok:false` 时抛错（`ApiError` 带后端给的中文原因）；**不检查 `data` 是否为空**。
  *
- * 写端点本身（`/api/holdings` 等）在 **B-4** 才接进界面，这里先把通道铺好。
+ * 写端点见 `endpoints.ts`（`holdings` / `reconcile` / `holdingsRefresh` / `navUpdate` /
+ * `plan` / `dca`）。界面接入在 B-4。
  */
-export async function apiPost<T>(
+export async function apiPost<T = unknown>(
   path: string,
   body: unknown = {},
   opts: EnvelopeOptions = {},
-): Promise<ApiResult<T>> {
+): Promise<ApiEnvelope<T>> {
   const url = new URL(path, window.location.origin)
   const res = await fetch(url.toString(), {
     method: 'POST',
@@ -158,10 +168,7 @@ export async function apiPost<T>(
   if (!env.ok) {
     throw new ApiError(env.error || '后端返回 ok=false')
   }
-  if (env.data == null) {
-    throw new ApiError('写操作返回了空数据')
-  }
-  return { data: env.data, source: env.source ?? 'fresh', envelope: env }
+  return env
 }
 
 /** 来源标签 → 中文（界面标注用，避免各页面自己乱写） */
