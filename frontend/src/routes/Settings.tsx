@@ -2,6 +2,7 @@ import { endpoints } from '../api/endpoints'
 import { Bento, span } from '../components/Bento'
 import { Card } from '../components/Card'
 import { ConstraintNote } from '../components/ConstraintNote'
+import { DrillDown } from '../components/DrillDown'
 import { OpsActions } from '../components/OpsActions'
 import { PageHead } from '../components/PageHead'
 import { QuantPanel } from '../components/QuantPanel'
@@ -37,12 +38,14 @@ export default function Settings() {
   const sectors = useApi(endpoints.sectors)
   const quant = useApi(endpoints.quantModels)
   const dca = useApi(endpoints.dca)
+  /** 数据链路下钻（审计与溯源）—— 2026-10-06 从「今天」搬来（瘦身第 3 条），默认折叠 */
+  const explain = useApi(endpoints.explain)
 
   const ov = overview.data
   const rb = rebalance.data
   const pl = plan.data?.plan ?? ov?.plan ?? null
   const busy = overview.loading || rebalance.loading || plan.loading || sectors.loading
-    || quant.loading || dca.loading
+    || quant.loading || dca.loading || explain.loading
   const wait = Math.max(
     overview.warmingWait,
     rebalance.warmingWait,
@@ -50,6 +53,7 @@ export default function Settings() {
     sectors.warmingWait,
     quant.warmingWait,
     dca.warmingWait,
+    explain.warmingWait,
   )
 
   const refreshAll = () => {
@@ -59,6 +63,7 @@ export default function Settings() {
     sectors.refresh({ fresh: true })
     quant.refresh({ fresh: true })
     dca.refresh({ fresh: true })
+    explain.refresh({ fresh: true })
   }
 
   return (
@@ -69,10 +74,11 @@ export default function Settings() {
 
       <Warming seconds={busy ? wait : 0} />
 
+      {/* ⚠️ 2026-10-06（瘦身第 3 条）：首屏说明文字压到一行。
+          DESIGN §5.1「首屏零解释性文字」—— 原为 3 行，把真正的配置项挤下去了。
+          写操作的安全披露**不在**这里，而在每个操作自己的确认卡里（`OpsActions` 强制）。 */}
       <div className="rounded-[var(--radius-md)] border border-line bg-inset px-3.5 py-2.5 text-[11.5px] leading-relaxed text-fg-3">
-        写操作（投资计划维护 / 定投 / 净值更新 / 对账）已接进本页，每个操作都会先出确认卡；
-        会自己产生真实买入的操作（对账、定投同步 / 补录 / 执行）在确认卡里明示笔数与金额。
-        「持仓」页的买卖改删支持撤销（保留最近 20 次）；本页操作不记提交、不提供撤销。
+        写操作已接进本页，每个操作先出确认卡；会自己产生真实买入的（对账 / 定投）在确认卡里明示笔数与金额。
       </div>
 
       {/* 宽屏 Bento 2×2：计划与模型是主体（7 栏），画像与运维是辅助（5 栏）——
@@ -205,48 +211,84 @@ export default function Settings() {
           </Card>
         )}
 
-        {/* ── 数据源与运维 ─────────────────────────────────────── */}
-        <Card className={span(5)} title="数据源与运维">
-          <div className="mb-4 grid grid-cols-2 gap-x-6 gap-y-3 sm:grid-cols-3">
-            <div>
-              <div className="field">账本库</div>
-              <div className="mono text-[13px] text-fg-2">data/fund_quant.db</div>
-            </div>
-            <div>
-              <div className="field">净值最新日</div>
-              <div className="mono text-[13px] text-fg-2">
-                {ov && ov.curve.dates.length ? ov.curve.dates[ov.curve.dates.length - 1] : '—'}
+        {/* ── 数据源与运维 + 数据链路（审计与溯源）────────────────────
+            ⚠️ 2026-10-06 瘦身第 3 条：数据链路从「今天」搬来，与「数据源与运维」
+            在**同一列**里堆叠，而不是单独开一行。理由是本页的真实版式：
+            同行左侧的「量化模型」卡高约 1070px，第二行的高度**完全由它决定** ——
+            右列里再加一张卡**不增加页高**；若单独开一行（span 12）则 +120px，
+            会把本页推出 DESIGN §5.2 的基线上限（2.4 屏）。
+            溯源与运维本就同属"我要核查 / 我该怎么修"这一族，同列也是自然的。
+            按 DESIGN §5.1「审计 / 溯源 / 口径 / 命令表一律默认折叠」：
+            `DrillDown` 自身已默认折叠，命令表也收进折叠区。 */}
+        <div className="min-w-0 flex flex-col gap-4 xl:col-span-5">
+          <Card className="min-w-0" title="数据源与运维">
+            <div className="mb-4 grid grid-cols-2 gap-x-6 gap-y-3 sm:grid-cols-3">
+              <div>
+                <div className="field">账本库</div>
+                <div className="mono text-[13px] text-fg-2">data/fund_quant.db</div>
+              </div>
+              <div>
+                <div className="field">净值最新日</div>
+                <div className="mono text-[13px] text-fg-2">
+                  {ov && ov.curve.dates.length ? ov.curve.dates[ov.curve.dates.length - 1] : '—'}
+                </div>
+              </div>
+              <div>
+                <div className="field">板块缓存于</div>
+                <div className="mono text-[13px] text-fg-2">{sectors.data?.cached_at ?? '—'}</div>
               </div>
             </div>
-            <div>
-              <div className="field">板块缓存于</div>
-              <div className="mono text-[13px] text-fg-2">{sectors.data?.cached_at ?? '—'}</div>
+
+            {/* ⚠️ 2026-10-06（瘦身第 3 条）：命令表**默认折叠**（DESIGN §5.1「命令表一律默认折叠」）。
+                它回答的是"我要核查/运维时敲什么"，不是日常要看的 —— 7 条命令铺在卡里，
+                等于把一张速查表当正文。标题行自明，需要时一眼找得到、展开即可复制。 */}
+            <details className="mt-1">
+              <summary className="cursor-pointer list-none text-[12px] text-fg-2">
+                <span className="mr-1 text-fg-3">⌄</span>
+                运维命令清单 · {CMDS.length} 条（默认折叠）
+              </summary>
+              <table className="mt-2 w-full border-collapse">
+                <thead>
+                  <tr>
+                    <th className={TH}>命令</th>
+                    <th className={TH}>用途</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {CMDS.map((c) => (
+                    <tr key={c.cmd} className="row-hover border-t border-line">
+                      <td className="mono py-1.5 pr-3 text-[12px] text-fg-2">{c.cmd}</td>
+                      <td className="py-1.5 text-[12px] text-fg-3">{c.use}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </details>
+
+            <div className="mt-3 border-t border-line pt-2 text-[11.5px] leading-relaxed text-fg-4">
+              净值刷新也可走 CLI（上方命令表）；盘中行情端点（
+              <span className="mono">/api/market/live</span>）在抓不到时
+              <b className="font-semibold text-fg-3">如实返回不可用</b>，不会拿旧值冒充实时。
             </div>
-          </div>
+          </Card>
 
-          <table className="w-full border-collapse">
-            <thead>
-              <tr>
-                <th className={TH}>命令</th>
-                <th className={TH}>用途</th>
-              </tr>
-            </thead>
-            <tbody>
-              {CMDS.map((c) => (
-                <tr key={c.cmd} className="row-hover border-t border-line">
-                  <td className="mono py-1.5 pr-3 text-[12px] text-fg-2">{c.cmd}</td>
-                  <td className="py-1.5 text-[12px] text-fg-3">{c.use}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-
-          <div className="mt-3 border-t border-line pt-2 text-[11.5px] leading-relaxed text-fg-4">
-            净值刷新也可走 CLI（下方命令表）；盘中行情端点（
-            <span className="mono">/api/market/live</span>）在抓不到时
-            <b className="font-semibold text-fg-3">如实返回不可用</b>，不会拿旧值冒充实时。
-          </div>
-        </Card>
+          {/* ── 数据链路（审计与溯源）—— 2026-10-06 从「今天」搬来 ──
+              DESIGN §5.4 页面职责表把「审计与溯源」明确划归本页；§5.1 要求它默认折叠、
+              且不得出现在第一屏。 */}
+          <Card
+            className="min-w-0"
+            title="数据链路"
+            note="· 采集 → 清洗 → 特征 → 建模 → 评估（默认折叠）"
+          >
+            {explain.data ? (
+              <DrillDown explain={explain.data} />
+            ) : explain.error ? (
+              <div className="text-sm text-fg-2">读取失败：{explain.error}</div>
+            ) : (
+              <Skeleton lines={3} />
+            )}
+          </Card>
+        </div>
 
         {/* ── 写操作面板（B-4b-3）：计划 / 定投 / 净值 / 对账，全部先出确认卡 ── */}
         <OpsActions

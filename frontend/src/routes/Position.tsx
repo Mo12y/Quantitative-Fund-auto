@@ -181,7 +181,6 @@ export default function Position() {
         <>
           <VerdictCard
             rebalance={rebalance.data}
-            explain={null}
             loading={rebalance.loading}
             error={rebalance.error}
           />

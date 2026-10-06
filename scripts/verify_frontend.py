@@ -23,7 +23,7 @@
 
 退出码：0 = 全过；1 = 有失败（可直接接进 CI / 提交前自查）。
 
-覆盖范围（截至 2026-10-01 共 **32 项**）：
+覆盖范围（截至 2026-10-06 共 **55 项** = 动态 48 + 静态 7）：
   ① 四入口渲染与导航可达
   ② hash 路由（深链直达 / 未知 hash 回落）
   ③ 文案卫生（JSX 里写 `**粗体**` 会原样渲染 —— 曾真出现字面 `**只读**`）
@@ -31,6 +31,8 @@
   ⑤ 导航断点：lg 起侧栏 / 以下顶部条，且任意视口**只有一套可见**
   ⑥ 交互动效已绑定（错峰入场 / 条形生长 / 指针滑入 / 骨架屏 shimmer）
   ⑦ console 无 error
+  ⑦b **曲线为"裸曲线"**（2026-10-06 反转：无网格 / 无轴线 / 无 Y 刻度，保留零轴 —— DESIGN §5.1.1）
+  ⑦c **信息密度**（DESIGN §5.2：4 页 × 数字节点上限 + 页高上限 = 8 条，基线上限见 `DENSITY_BASELINE`）
 
 B-0 追加（2026-10-04，计划书 §11.3 的 ⬜ 三项 → ✅；见 §11.4 的判据取舍）：
   ⑧ **排版**：`text-[Npx]` 裸字号落在 token 阶梯内；TSX 里无裸色值（唯一例外见 `_CSS_ALLOW`）
@@ -235,12 +237,18 @@ ANIM_JS = r"""() => {
   };
 }"""
 
+# ⚠️ 2026-10-06 判据**反转**：曲线按 DESIGN §5.1.1 第 4 条改成"裸曲线"
+#    （三个参照产品 Wealthfolio / Ghostfolio / Rotki 都不画网格、不画刻度、不画边框）。
+#    断言从"必须有网格/轴线/5 档 Y 刻度"改为"必须**没有**这些"，并**新增零轴断言** ——
+#    否则"去网格"这条改动就没有守卫，将来（或换个智能体）随手加回网格也不会红灯。
 CHART_JS = r"""() => ({
+  surface: document.querySelectorAll('.recharts-surface').length,
   gridH: document.querySelectorAll('.recharts-cartesian-grid-horizontal line').length,
   gridV: document.querySelectorAll('.recharts-cartesian-grid-vertical line').length,
   axisLines: document.querySelectorAll('.recharts-cartesian-axis-line').length,
   yTicks: [...document.querySelectorAll('.recharts-yAxis .recharts-cartesian-axis-tick-value tspan')]
             .map(t => t.textContent),
+  refLines: document.querySelectorAll('.recharts-reference-line line').length,
 })"""
 
 
@@ -464,6 +472,14 @@ DENSITY_BASELINE = {
 DENSITY_JS = r"""() => {
   const vh = document.documentElement.clientHeight;
   const vis = el => {
+    // ⚠️ 2026-10-06 修正：**折叠的 `<details>` 内容不算"在屏上"**。
+    //   Chrome 121+ 把关闭态 details 的实现从 `display:none` 换成了
+    //   `content-visibility: hidden` —— 其后代元素的 `display` 仍是 `block`、
+    //   `getBoundingClientRect()` 也非零，于是"默认折叠"在旧判据下**完全测不出来**。
+    //   实测证据：把数据链路搬到「设置」并默认折叠后，旧判据给出 128 → **148**（假涨）。
+    //   DESIGN §5.3 把"折叠"当作渐进披露的主要手段，判据必须能看见它。
+    const d = el.closest('details:not([open])');
+    if (d && !el.closest('summary')) return false;
     const r = el.getBoundingClientRect();
     const cs = getComputedStyle(el);
     return r.width > 0 && r.height > 0 && cs.display !== 'none' && cs.visibility !== 'hidden';
@@ -561,7 +577,16 @@ def main() -> int:
         t = go("设置")
         check("「设置」页：计划 + 画像 + 运维", "投资计划" in t and "用户画像与生效约束" in t and "数据源与运维" in t)
         check("「设置」页：量化模型已移入", "量化模型" in t and "波动率预测模型" in t)
-        check("「设置」页：运维命令表", "python src/main.py snapshot" in t)
+        # 数据链路（审计）2026-10-06 从「今天」搬来，且按 DESIGN §5.1 **默认折叠**
+        check("「设置」页：数据链路（审计）已搬入且默认折叠",
+              "数据链路" in t and "这条结论是怎么算出来的" in t)
+        # 运维命令表按 DESIGN §5.1「命令表一律默认折叠」收进折叠区 —— 正文不应出现命令
+        check("「设置」页：命令表默认折叠（正文不出现命令全文）",
+              "python src/main.py snapshot" not in t)
+        page.locator("summary", has_text="运维命令清单").first.click()
+        page.wait_for_timeout(500)
+        check("「设置」页：命令表展开后内容完整",
+              "python src/main.py snapshot" in page.inner_text("body"))
         # B-4b-3：写操作面板（设置页不再是"只读"）
         check("「设置」页：写操作面板已接入（含高危笔数明示）",
               "数据运维与写入" in t and "确认卡" in t and "待确认" in t)
@@ -579,18 +604,20 @@ def main() -> int:
         page.wait_for_timeout(3500)
         check("未知 hash 回落「今天」", "今天要做什么" in page.inner_text("body"))
 
-        # ── ⑥ 图表参考系 ──────────────────────────────────────────────
+        # ── ⑥ 图表：裸曲线（DESIGN §5.1.1 第 4 条，2026-10-06 判据反转） ──
         page.goto(base + "/#/today", wait_until="domcontentloaded")
         # 绘图区现在是**懒加载**（Recharts 不进首屏）→ 必须等它到位再量，
-        # 否则会误报"没有网格"。（这也是这条断言存在的意义：拆包别把图拆没了。）
+        # 否则会误报"没有网格"（其实图还没渲染）。
         page.wait_for_selector(".recharts-surface", timeout=20000)
         page.wait_for_timeout(1200)
         c = page.evaluate(CHART_JS)
-        check("曲线：有垂直网格", c["gridV"] > 0, f'垂直 {c["gridV"]} 条')
-        check("曲线：有水平网格", c["gridH"] >= 4, f'水平 {c["gridH"]} 条')
-        check("曲线：有坐标轴线", c["axisLines"] >= 2, f'轴线 {c["axisLines"]} 条')
-        check("曲线：Y 轴刻度含 0 且 ≥5 档",
-              len(c["yTicks"]) >= 5 and any(t.startswith("0.") for t in c["yTicks"]), c["yTicks"])
+        check("曲线：绘图区已渲染（懒加载到位）", c["surface"] >= 1, f'{c["surface"]} 个 surface')
+        check("曲线：无网格、无坐标轴线",
+              c["gridH"] == 0 and c["gridV"] == 0 and c["axisLines"] == 0,
+              f'水平 {c["gridH"]} / 垂直 {c["gridV"]} / 轴线 {c["axisLines"]}')
+        check("曲线：无 Y 轴刻度（数值交给 tooltip 与上方大数字）",
+              len(c["yTicks"]) == 0, c["yTicks"])
+        check("曲线：保留零轴（全图唯一语义分界）", c["refLines"] >= 1, f'参考线 {c["refLines"]} 条')
 
         # ── ⑥ 动效绑定 ────────────────────────────────────────────────
         a = page.evaluate(ANIM_JS)

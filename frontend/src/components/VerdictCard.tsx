@@ -1,7 +1,6 @@
-import type { Explain, Rebalance } from '../api/types'
+import type { Rebalance } from '../api/types'
 import { fmtMoney, plainText } from '../lib/format'
 import { Card } from './Card'
-import { DrillDown } from './DrillDown'
 
 /** 指令动作徽标配色：减仓=提示黄、加仓=涨红（中国惯例里红是买入/走高）、其余中性 */
 function actCls(action: string): string {
@@ -12,16 +11,18 @@ function actCls(action: string): string {
 
 /**
  * 结论卡 —— 整屏最重要的东西放最上面。
- * 结论只来自「温度 + 硬约束」（不是预测，见评估格）；下方数据链路可展开下钻。
+ * 结论只来自「温度 + 硬约束」（不是预测，见评估格）；下方列出要动手的指令（若有）。
+ *
+ * ⚠️ 2026-10-06（瘦身第 3 条）：**不再内嵌数据链路下钻**（`DrillDown`）。
+ *   审计内容按 DESIGN §5.1 默认折叠、且不得出现在第一屏 —— 它已整体搬到「设置」页
+ *   （另在「研究」页保留一份）。本卡只剩「结论 + 指令」。
  */
 export function VerdictCard({
   rebalance,
-  explain,
   loading,
   error,
 }: {
   rebalance: Rebalance | null
-  explain: Explain | null
   loading: boolean
   /**
    * 调仓端点失败时后端给的**中文原因**。
@@ -84,8 +85,6 @@ export function VerdictCard({
       {rebalance.scope_note && (
         <div className="mt-3 text-[11.5px] leading-relaxed text-fg-4">{plainText(rebalance.scope_note)}</div>
       )}
-
-      {explain && <DrillDown explain={explain} />}
     </Card>
   )
 }

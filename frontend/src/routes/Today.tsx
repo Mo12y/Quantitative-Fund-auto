@@ -47,20 +47,18 @@ function fmtTemp(t: number | null | undefined): string {
 export default function Today() {
   const overview = useApi(endpoints.overview)
   const rebalance = useApi(endpoints.rebalance)
-  const explain = useApi(endpoints.explain)
 
   const ov = overview.data
   // 在持**基金**数：holdings 是批次行（29 行 = 7 只基金），去重后才是用户理解的"只"
   const fundCount = ov
     ? new Set(ov.portfolio.holdings.filter((h) => h.status === 'holding').map((h) => h.code)).size
     : 0
-  const busy = overview.loading || rebalance.loading || explain.loading
-  const warmingWait = Math.max(overview.warmingWait, rebalance.warmingWait, explain.warmingWait)
+  const busy = overview.loading || rebalance.loading
+  const warmingWait = Math.max(overview.warmingWait, rebalance.warmingWait)
 
   const refreshAll = () => {
     overview.refresh({ fresh: true })
     rebalance.refresh({ fresh: true })
-    explain.refresh({ fresh: true })
   }
 
   return (
@@ -105,7 +103,6 @@ export default function Today() {
           <div className="flex flex-col gap-2.5">
             <VerdictCard
               rebalance={rebalance.data}
-              explain={explain.data}
               loading={rebalance.loading}
               error={rebalance.error}
             />
