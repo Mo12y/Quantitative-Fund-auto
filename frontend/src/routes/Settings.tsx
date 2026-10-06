@@ -8,6 +8,7 @@ import { PageHead } from '../components/PageHead'
 import { QuantPanel } from '../components/QuantPanel'
 import { Skeleton } from '../components/Skeleton'
 import { SourceTag } from '../components/SourceTag'
+import { TemperatureCard } from '../components/TemperatureCard'
 import { Warming } from '../components/Warming'
 import { fmtMoney, fmtPct, plainText } from '../lib/format'
 import { useApi } from '../lib/useApi'
@@ -211,16 +212,22 @@ export default function Settings() {
           </Card>
         )}
 
-        {/* ── 数据源与运维 + 数据链路（审计与溯源）────────────────────
-            ⚠️ 2026-10-06 瘦身第 3 条：数据链路从「今天」搬来，与「数据源与运维」
-            在**同一列**里堆叠，而不是单独开一行。理由是本页的真实版式：
+        {/* ── 右列：市场温度 + 数据源与运维 + 数据链路（2026-10-06 瘦身第 2、3 条）──
+            「市场温度」与「数据链路」都是从「今天」搬来的，与「数据源与运维」
+            在**同一列**里堆叠，而不是各自单独开一行。理由是本页的真实版式：
             同行左侧的「量化模型」卡高约 1070px，第二行的高度**完全由它决定** ——
-            右列里再加一张卡**不增加页高**；若单独开一行（span 12）则 +120px，
+            右列里再加卡片**不增加页高**；若各开一行（span 12）则每行 +120px，
             会把本页推出 DESIGN §5.2 的基线上限（2.4 屏）。
-            溯源与运维本就同属"我要核查 / 我该怎么修"这一族，同列也是自然的。
+            语义上三张也同族：温度=目标仓位的输入，运维=数据从哪来，链路=结论怎么算出来，
+            全是"这个数字是怎么来的 / 我该怎么修"。
             按 DESIGN §5.1「审计 / 溯源 / 口径 / 命令表一律默认折叠」：
             `DrillDown` 自身已默认折叠，命令表也收进折叠区。 */}
         <div className="min-w-0 flex flex-col gap-4 xl:col-span-5">
+          {/* 市场温度 —— 2026-10-06 瘦身第 2 条从「今天」搬来（详见组件注释）。
+              放在本列首位：它是最上面那张「用户画像与生效约束」卡的**输入**，
+              紧随其后是溯源（数据源）与审计（数据链路），三张同属"这个数字怎么来的"。 */}
+          {ov && <TemperatureCard className="min-w-0" temp={ov.temp} />}
+
           <Card className="min-w-0" title="数据源与运维">
             <div className="mb-4 grid grid-cols-2 gap-x-6 gap-y-3 sm:grid-cols-3">
               <div>

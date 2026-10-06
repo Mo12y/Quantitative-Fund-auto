@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import type { Holding } from '../api/types'
+import type { Holding, Stats } from '../api/types'
 import { dirClass, dirOf, dirSymbol, fmtMoney, fmtSignedMoney, fmtSignedPct } from '../lib/format'
 import { Card } from './Card'
 
@@ -66,7 +66,7 @@ function Seg({
 }
 
 /** 持仓表：筛选（全部/盈利/亏损）+ 排序（市值/收益率，重复点击换方向） */
-export function HoldingsTable({ holdings }: { holdings: Holding[] }) {
+export function HoldingsTable({ holdings, stats }: { holdings: Holding[]; stats?: Stats | null }) {
   const [filter, setFilter] = useState<Filter>('all')
   const [sortKey, setSortKey] = useState<SortKey>('mv')
   const [asc, setAsc] = useState(false)
@@ -153,6 +153,32 @@ export function HoldingsTable({ holdings }: { holdings: Holding[] }) {
             })}
           </tbody>
         </table>
+      )}
+
+      {/* ⚠️ 2026-10-06（瘦身第 2 条）：**已实现盈亏**从「今天」页的四格 KPI 移到这里。
+          它回答的是"我卖出过的东西结算得怎么样"，属于持仓/交易，不属于"今天要不要动手" ——
+          原位置让它占了首页首屏一格，而看它的人本来就在持仓页。
+          口径：`realized_pnl` 是**已结算**的盈亏（与表格里的未实现盈亏无关），
+          `realized_fee` 是赎回费，`realized_dividend` 是现金分红累计。 */}
+      {stats && (stats.realized_count > 0 || stats.realized_pnl !== 0) && (
+        <div className="mt-3 flex flex-wrap items-baseline gap-x-4 gap-y-1 border-t border-line pt-2 text-[11.5px] text-fg-4">
+          <span>
+            已实现{' '}
+            <b className={'num font-medium ' + dirClass(dirOf(stats.realized_pnl))}>
+              {dirSymbol(dirOf(stats.realized_pnl))}
+              {fmtSignedMoney(stats.realized_pnl)}
+            </b>
+          </span>
+          <span>
+            {stats.realized_count} 笔 · 含赎回费{' '}
+            <span className="num text-fg-3">{fmtMoney(stats.realized_fee)}</span>
+          </span>
+          {stats.realized_dividend ? (
+            <span>
+              分红 <span className="num text-fg-3">{fmtMoney(stats.realized_dividend)}</span>
+            </span>
+          ) : null}
+        </div>
       )}
     </Card>
   )

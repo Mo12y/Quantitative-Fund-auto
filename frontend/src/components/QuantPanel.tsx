@@ -34,7 +34,19 @@ export function QuantPanel({ data, className = '' }: { data: QuantModels; classN
         的结论是「看不出优于等权持有的选基能力」，界面上不制造最优解印象。
       </div>
 
-      <Sub title="波动率预测模型" hint="IC / ICIR 越大越好；QLIKE 越小越好" />
+      {/* ⚠️ 2026-10-06：三张对照表**默认折叠**（DESIGN §5.1「审计 / 口径一律默认折叠」）。
+          计划书 §13.2 把「设置页那张模型指标表（DM / AUC / QLIKE / MZ β）」明确列为
+          "审计/研究内容混进日常界面"这一类病之一 —— 它回答的是"你的模型可信吗"，
+          不是"我今天要改什么配置"。上方那句"不给出哪个更好"的**安全表述留在外面**，
+          折叠的只是原始指标值：折叠 ≠ 隐藏立场。
+          实测：本卡由约 1070px 降到约 150px，同时不再压住整行高度。 */}
+      <details className="mt-2">
+        <summary className="cursor-pointer list-none text-[12px] text-fg-2">
+          <span className="mr-1 text-fg-3">⌄</span>
+          三张模型对照表 · vol / 回撤 / 组合（默认折叠）
+        </summary>
+
+        <Sub title="波动率预测模型" hint="IC / ICIR 越大越好；QLIKE 越小越好" />
       <table className="w-full border-collapse">
         <thead>
           <tr>
@@ -120,6 +132,7 @@ export function QuantPanel({ data, className = '' }: { data: QuantModels; classN
           </div>
         </>
       )}
+      </details>
     </Card>
   )
 }

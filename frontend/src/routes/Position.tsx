@@ -8,7 +8,7 @@ import { Skeleton } from '../components/Skeleton'
 import { SourceTag } from '../components/SourceTag'
 import { VerdictCard } from '../components/VerdictCard'
 import { Warming } from '../components/Warming'
-import { fmtMoney, fmtPct, plainText } from '../lib/format'
+import { fmtMoney, plainText } from '../lib/format'
 import { useApi } from '../lib/useApi'
 
 /**
@@ -67,9 +67,12 @@ function PlanProgress({ plan }: { plan: InvestmentPlan | null }) {
                 style={{ width: `${Math.max(0, Math.min(100, f.progress_pct))}%` }}
               />
             </div>
-            <div className="mt-0.5 flex justify-between text-[11px] text-fg-4">
-              <span>已投 {fmtPct(f.progress_pct)}</span>
-              <span>余 {fmtMoney(f.remaining)}</span>
+            {/* ⚠️ 2026-10-06（瘦身第 2 条）：这一行原为「已投 X% / 余 ¥Y」两个数字。
+                百分比与紧邻的进度条**重复**（条子本身就是比例，上面又已有「已投/目标」金额），
+                故去掉百分比、只留「余」。腾出的额度让「已实现盈亏」从「今天」页的
+                四格 KPI 搬进本页持仓卡的脚注，**本页密度不因此升高**。 */}
+            <div className="mt-0.5 text-right text-[11px] text-fg-4">
+              余 <span className="num">{fmtMoney(f.remaining)}</span>
             </div>
           </div>
         ))}
@@ -183,10 +186,11 @@ export default function Position() {
             rebalance={rebalance.data}
             loading={rebalance.loading}
             error={rebalance.error}
+            lead
           />
 
           <div className="grid items-start gap-4 md:grid-cols-[1.4fr_1fr]">
-            <HoldingsTable holdings={ov.portfolio.holdings} />
+            <HoldingsTable holdings={ov.portfolio.holdings} stats={ov.stats} />
             <PlanProgress plan={plan.data?.plan ?? ov.plan} />
           </div>
 

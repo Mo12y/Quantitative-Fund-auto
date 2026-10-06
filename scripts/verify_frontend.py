@@ -23,7 +23,7 @@
 
 退出码：0 = 全过；1 = 有失败（可直接接进 CI / 提交前自查）。
 
-覆盖范围（截至 2026-10-06 共 **55 项** = 动态 48 + 静态 7）：
+覆盖范围（截至 2026-10-06 共 **56 项** = 动态 49 + 静态 7）：
   ① 四入口渲染与导航可达
   ② hash 路由（深链直达 / 未知 hash 回落）
   ③ 文案卫生（JSX 里写 `**粗体**` 会原样渲染 —— 曾真出现字面 `**只读**`）
@@ -576,7 +576,14 @@ def main() -> int:
 
         t = go("设置")
         check("「设置」页：计划 + 画像 + 运维", "投资计划" in t and "用户画像与生效约束" in t and "数据源与运维" in t)
-        check("「设置」页：量化模型已移入", "量化模型" in t and "波动率预测模型" in t)
+        # 模型对照表按 DESIGN §5.1「审计 / 口径一律默认折叠」收起
+        # （计划书 §13.2 点名的那张「DM / AUC / QLIKE / MZ β」表）—— 展开后内容仍在
+        check("「设置」页：量化模型已移入且对照表默认折叠",
+              "量化模型" in t and "波动率预测模型" not in t)
+        page.locator("summary", has_text="三张模型对照表").first.click()
+        page.wait_for_timeout(500)
+        check("「设置」页：模型对照表展开后内容完整",
+              "波动率预测模型" in page.inner_text("body"))
         # 数据链路（审计）2026-10-06 从「今天」搬来，且按 DESIGN §5.1 **默认折叠**
         check("「设置」页：数据链路（审计）已搬入且默认折叠",
               "数据链路" in t and "这条结论是怎么算出来的" in t)
@@ -627,9 +634,11 @@ def main() -> int:
         check("动效：进度条生长动画已绑定",
               page.evaluate("() => { const e=document.querySelector('.grow-x'); "
                             "return e ? getComputedStyle(e).animationName : null; }") == "qfa-grow")
-        page.goto(base + "/#/today", wait_until="domcontentloaded")
+        # ⚠️ 2026-10-06（瘦身第 2 条）：温度卡已从「今天」搬到「设置」，指针动画随之移动 ——
+        #    断言必须跟着走，否则它会永远红（而"温度尺"本身没坏）。
+        page.goto(base + "/#/settings", wait_until="domcontentloaded")
         page.wait_for_timeout(3800)
-        check("动效：温度指针滑入已绑定",
+        check("动效：温度指针滑入已绑定（温度卡现挂「设置」）",
               page.evaluate("() => { const e=document.querySelector('.slide-thumb'); "
                             "return e ? getComputedStyle(e).animationName : null; }") == "qfa-slide-thumb")
 

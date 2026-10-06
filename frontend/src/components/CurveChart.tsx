@@ -87,15 +87,22 @@ export function CurveChart({ curve }: { curve: PortfolioCurve }) {
 
   return (
     <Card title="组合收益" note="· 资金加权 · 过零轴为盈亏分界">
-      <div className="mb-3 flex flex-wrap items-baseline gap-x-4 gap-y-1">
-        <div className={'num text-[32px] font-semibold leading-none tracking-[-.02em] ' + dirClass(d)}>
-          <span className="mr-1 align-top text-[13px]">{dirSymbol(d)}</span>
-          {fmtSignedPct(last)}
-        </div>
-        <div className="text-[12.5px] text-fg-3">
+      {/* ⚠️ 2026-10-06（瘦身第 2 条）：本卡**不再放大字号收益率**。
+          首屏的大数字只能有一个（总资产，见 `Today.tsx` 的 Hero 块），而这里的终值
+          （资金加权累计收益率）与 Hero 参照里的收益率**是同源数字** ——
+          放大两遍等于让同一条信息占两个视觉焦点。改为一行小字，**信息一处不减**。 */}
+      <div className="mb-2.5 flex flex-wrap items-baseline gap-x-4 gap-y-1 text-[12.5px]">
+        <span className="text-fg-3">
+          本组合{' '}
+          <b className={'num ' + dirClass(d)}>
+            {dirSymbol(d)}
+            {fmtSignedPct(last)}
+          </b>
+        </span>
+        <span className="text-fg-3">
           {rel >= 0 ? '跑赢' : '跑输'}沪深300{' '}
           <b className={dirClass(relDir)}>{fmtSignedPct(rel)}</b>
-        </div>
+        </span>
       </div>
 
       <div className="mb-2 flex flex-wrap gap-4 text-[11px] text-fg-3">
