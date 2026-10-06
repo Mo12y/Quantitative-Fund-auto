@@ -23,6 +23,100 @@
 
 ## 交接记录
 
+### 交接：2026-10-06（会话六 → 下一个智能体）—— ⭐ **当前任务：前端「信息密度瘦身」**
+
+> ⚠️ **上一个智能体出现思考循环，主动交接**。本块为该任务的**自包含入口**，
+> 读完本块 + 下方「开工三步」即可继续，不需要重新摸项目。
+
+**一句话**：用户反馈新前端「整体交互逻辑和信息面对于人类来说有点变态」，
+已完成**诊断 → 对标三个开源产品 → 写规范 → 加可断言红灯**，
+现在按处方**改页面**。第 1 条（曲线去网格）**已改完但尚未提交**。
+
+#### 当前状态（2026-10-06 19:49 实测）
+
+| 项 | 值 |
+|---|---|
+| HEAD | `fe2237c`（已推送，与远端一致） |
+| ⚠️ 未提交改动 | `frontend/src/components/ChartPlot.tsx`、`frontend/src/lib/chartColors.ts` |
+| 含义 | **瘦身第 1 条「曲线去网格」已完成**：删 `CartesianGrid`、`YAxis` 改 `hide`、`XAxis` 去轴线；`chartColors` 里 `GRID/AXIS/TICK` 标注为闲置 |
+| 验证程度 | ✅ `tsc -b --noEmit` 0 ｜ ✅ `vite build` 绿 ｜ ✅ 人工看截图确认（曲线变干净）｜ ❌ **未跑 `verify_frontend.py`**（服务被取消） |
+| 服务 | **未在跑**（需重启 + precompute） |
+
+#### 任务：按 `DESIGN.md` §5 做信息密度瘦身
+
+**必读顺序**（不要跳）：
+1. 本文件顶部（就是这里）
+2. `AGENTS.md` §二（命令）+ §三（铁律）
+3. `DESIGN.md` **§5**（信息密度规范 —— 2026-10-05 重写为**可断言**）
+4. `docs/前端重构计划书.md` **§13**（诊断数字 + 对标记录 + 六条处方）
+
+**六条处方**（详见计划书 §13.6；第 1 条已完成未提交）：
+
+| # | 内容 | 状态 |
+|---|---|---|
+| 1 | **曲线去网格**（删网格 / Y 轴刻度 / 边框，只留形状 + 零轴 + tooltip） | ✅ 已改，未提交 |
+| 2 | 「今天」页瘦成 3 块：**大数字（总资产）+ 结论句 + 曲线** | ⬜ |
+| 3 | 数据链路（审计）从「今天」搬到「设置」，**默认折叠** | ⬜ |
+| 4 | 持仓表从「今天」移走（「持仓」页本就有） | ⬜ |
+| 5 | 行情 + 消息面压成**一行小条**（现在各占一张卡） | ⬜ |
+| 6 | 筛选池一行 **8 列 → 4 列**（代码/名称/夏普/动量），其余进展开 | ⬜ |
+
+**第 2 条的参照（交叉验证过的共识，别自己发挥）**：
+首屏核心 = **一个大数字 + 一条曲线**；大数字字号约正文 **3~6 倍**；
+数字**必须带参照**（变化额 + 变化率 + 时间窗）；导航只留图标；首屏零解释性文字。
+依据：Wealthfolio / Ghostfolio / Rotki 三个独立产品实测结构一致（计划书 §13.3.2）。
+⚠️ **它们都是欧美配色（涨绿跌红），本项目必须涨红跌绿 + ▲▼ —— 这条不照搬。**
+
+#### 开工三步
+
+```bash
+cd /d/DSH/projects/Quantitative-Fund-auto
+
+# ① 起服务（后台）+ 预热快照 —— ⚠️ 不预热会得到假数字，见下方坑 1
+C:/Users/m1309/AppData/Local/Programs/Python/Python313/python.exe src/main.py web
+C:/Users/m1309/AppData/Local/Programs/Python/Python313/python.exe src/main.py precompute   # ~132s
+
+# ② 验收四件套（改完必跑）
+C:/Users/m1309/AppData/Local/Programs/Python/Python313/python.exe -m pytest tests/ -q          # 期望 845 passed / 2 skipped
+C:/Users/m1309/AppData/Local/Programs/Python/Python313/python.exe scripts/verify_frontend.py   # 期望 53/53（含 8 条密度断言）
+C:/Users/m1309/AppData/Local/Programs/Python/Python313/python.exe scripts/check_ledger_invariants.py  # 期望 24 项 0 失败
+cd frontend && D:/nodejs/node.exe node_modules/typescript/bin/tsc -b --noEmit && D:/nodejs/node.exe node_modules/vite/bin/vite.js build
+
+# ③ 推送（⚠️ 必须 SSH 显式 URL，HTTPS 不通）
+git push git@github.com:Mo12y/Quantitative-Fund-auto.git main
+```
+
+#### ⚠️ 改完页面后**必须下调基线**
+
+`scripts/verify_frontend.py` 的 `DENSITY_BASELINE` 现在是「基线上限」——
+它只钉「不许更差」。**瘦身成果要靠手动往下降基线来兑现**，不调等于没瘦。
+
+#### 特别提醒（本轮踩过，别重复）
+
+1. ⚠️⚠️ **冷缓存会给出假数字**。服务刚重启时快照是冷的 → 页面显示 warming 骨架 →
+   密度测量值**假低**（本轮实测：研究页 107→49 的"降幅"大部分是 warming，不是真瘦身）。
+   **必须先 `precompute` 再测。**
+2. ⚠️ **`Edit(replace_all=True)` 只替换第一处**（实测 8 处只改了 1 处）→ 用 Python 脚本批量替换。
+3. ⚠️ **kill 进程要用 bash PID**：`ps aux` 第 1 列是 bash PID、第 4 列才是 Windows PID；
+   或 `taskkill //F //PID <winpid>`。
+4. ⚠️ **pytest 每次换全新 basetemp + 串行**，并设 `CODEBUDDY_SAFE_DELETE_BULK_THRESHOLD=100000`
+   （复用目录会让 safe-delete 报错 → 一堆 ERROR 而非 failed）。
+5. ⚠️ **视觉验收用视口截图**（`full_page=True` 下 body 的 `background-attachment: fixed` 只渲染顶部一屏）。
+6. ⚠️ **JSX 文本里写 `**粗体**` 会原样渲染** → `verify_frontend.py` 会断言页面无 markdown 记号泄漏。
+7. ⚠️ **需要读 GitHub 时**：请用户开 Clash，用 `curl -x http://127.0.0.1:7897`；
+   不通时 `WebFetch` 返回空、直连 000。
+
+#### 约束（别越界）
+
+- **不动 `data/fund_quant.db`**（本轮纯前端）。
+- **不新增运行时依赖**（确需先停下问）。
+- **不顺手扩大范围**：发现新问题**记下来**，不顺手改。
+- **B-6（删旧前端）不在本轮** —— 优先级低于瘦身。
+
+> 本块之前的交接（B-0~B-5 全部完成、B-6 待办）见下方历史块，需要时再读。
+
+---
+
 ### 交接：2026-10-05（DSH 会话五 → 下一个智能体）—— ⭐ **B-0 ~ B-5 已全部完成，剩 B-6（删旧前端）**
 
 > **状态来源（本轮实测）**：工作树干净（本块提交后）、已推送、
