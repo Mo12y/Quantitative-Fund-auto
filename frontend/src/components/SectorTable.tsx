@@ -8,7 +8,7 @@ function Signed({ v, digits = 1 }: { v: number | null | undefined; digits?: numb
   const d = dirOf(v)
   return (
     <span className={'mono ' + dirClass(d)}>
-      <span className="mr-0.5 text-[10px]">{dirSymbol(d)}</span>
+      <span className="mr-0.5 text-micro">{dirSymbol(d)}</span>
       {fmtSignedPct(v, digits)}
     </span>
   )
@@ -55,7 +55,7 @@ export function SectorTable({ data, className = '' }: { data: SectorsPayload; cl
       {data.momentum_leaders.length > 0 && (
         /* ⚠️ 「近3月」只在标签里说一次，不再每枚 chip 重复挂一遍
            （4 枚 chip 就是 4 个重复的数字读数，纯噪声）。 */
-        <div className="mb-3 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11.5px]">
+        <div className="mb-3 flex flex-wrap items-center gap-x-3 gap-y-1 text-caption">
           <span className="text-fg-4">动量领先 · 近3月</span>
           {data.momentum_leaders.map((m) => (
             <span key={m.name} className="rounded-full border border-line bg-inset px-2 py-px">
@@ -83,28 +83,28 @@ export function SectorTable({ data, className = '' }: { data: SectorsPayload; cl
               /* Fragment：展开行是"行内的第二条 tr"，不额外占一列 */
               <Fragment key={s.name}>
                 <tr className="row-hover border-t border-line">
-                  <td className="py-2 pr-3 text-[13px]">
+                  <td className="py-2 pr-3 text-body">
                     <button
                       type="button"
                       onClick={() => toggle(s.name)}
                       aria-expanded={on}
                       className="text-left text-fg transition-colors hover:text-accent"
                     >
-                      <span className="mr-1 text-[10px] text-fg-4">{on ? '⌃' : '⌄'}</span>
-                      <span className="mr-1.5 text-[11px] text-fg-4">{s.rank}</span>
+                      <span className="mr-1 text-micro text-fg-4">{on ? '⌃' : '⌄'}</span>
+                      <span className="mr-1.5 text-caption text-fg-4">{s.rank}</span>
                       {plainText(s.name)}
                     </button>
                   </td>
-                  <td className="num py-2 text-right text-[12.5px]">
+                  <td className="num py-2 text-right text-body-sm">
                     <Signed v={s.ret_1m} />
                   </td>
-                  <td className="num py-2 text-right text-[12.5px]">
+                  <td className="num py-2 text-right text-body-sm">
                     <Plain v={s.score} digits={2} />
                   </td>
                 </tr>
                 {on && (
                   <tr>
-                    <td colSpan={3} className="pb-2.5 pl-1 text-[11.5px] leading-relaxed text-fg-3">
+                    <td colSpan={3} className="pb-2.5 pl-1 text-caption leading-relaxed text-fg-3">
                       <span className="mr-4">
                         近3月 <Signed v={s.ret_3m} />
                       </span>
@@ -137,7 +137,7 @@ export function SectorTable({ data, className = '' }: { data: SectorsPayload; cl
       )}
 
       {data.cached_at && (
-        <div className="mt-2 text-[11px] text-fg-4">
+        <div className="mt-2 text-caption text-fg-4">
           板块数据缓存于 {data.cached_at}（刷新走 CLI，见「设置」页运维说明）
         </div>
       )}

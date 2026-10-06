@@ -61,14 +61,14 @@ export function ConfirmDialog({
         {/* ⚠️ 用 div + ARIA 而不是 <h2>：`<h2>` 在本项目里是**卡片标题**（12px），
             模态标题要比它大（13.5px）—— 若也用 h2，就等于同一个标题层级有**两个字号**，
             破坏"层级单调"（B-0 判据的层级诊断会点出来）。语义靠 role 保留，无障碍不受影响。 */}
-        <div role="heading" aria-level={2} className="text-[13.5px] font-semibold text-fg">
+        <div role="heading" aria-level={2} className="text-body font-semibold text-fg">
           {spec.title}
         </div>
 
         {spec.fields && spec.fields.length > 0 && (
           <dl className="mt-3 flex flex-col gap-1.5">
             {spec.fields.map((f, i) => (
-              <div key={i} className="flex items-baseline justify-between gap-3 text-[12.5px]">
+              <div key={i} className="flex items-baseline justify-between gap-3 text-body-sm">
                 <dt className="shrink-0 text-fg-4">{f.label}</dt>
                 <dd className={'num min-w-0 text-right ' + toneCls(f.tone)}>{f.value}</dd>
               </div>
@@ -77,17 +77,17 @@ export function ConfirmDialog({
         )}
 
         {spec.warning && (
-          <div className="mt-3 rounded-[var(--radius-md)] border border-warn/30 bg-warn/[.07] px-3 py-2 text-[12px] leading-relaxed text-warn">
+          <div className="mt-3 rounded-[var(--radius-md)] border border-warn/30 bg-warn/[.07] px-3 py-2 text-body-sm leading-relaxed text-warn">
             {spec.warning}
           </div>
         )}
 
         {spec.note && (
-          <div className="mt-2 text-[11.5px] leading-relaxed text-fg-4">{spec.note}</div>
+          <div className="mt-2 text-caption leading-relaxed text-fg-4">{spec.note}</div>
         )}
 
         {error && (
-          <div className="mt-3 rounded-[var(--radius-md)] bg-inset px-3 py-2 text-[12px] leading-relaxed text-rise">
+          <div className="mt-3 rounded-[var(--radius-md)] bg-inset px-3 py-2 text-body-sm leading-relaxed text-rise">
             {error}
           </div>
         )}
@@ -97,7 +97,7 @@ export function ConfirmDialog({
             type="button"
             onClick={onCancel}
             disabled={busy}
-            className="rounded-md border border-line-strong px-3 py-1.5 text-[12px] text-fg-2 hover:text-fg disabled:opacity-45"
+            className="rounded-md border border-line-strong px-3 py-1.5 text-body-sm text-fg-2 hover:text-fg disabled:opacity-45"
           >
             取消
           </button>
@@ -106,7 +106,7 @@ export function ConfirmDialog({
             onClick={onConfirm}
             disabled={busy}
             className={
-              'rounded-md px-3 py-1.5 text-[12px] font-semibold disabled:opacity-45 ' +
+              'rounded-md px-3 py-1.5 text-body-sm font-semibold disabled:opacity-45 ' +
               (spec.danger
                 ? 'bg-rise/15 text-rise hover:bg-rise/25'
                 : 'bg-accent/15 text-accent hover:bg-accent/25')

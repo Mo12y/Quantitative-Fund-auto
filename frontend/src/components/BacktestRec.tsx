@@ -25,13 +25,13 @@ export function BacktestRec({ className = '' }: { className?: string }) {
   return (
     <Card className={className} title="历史回测验证" note="· 辅助参考，非推荐">
       <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2">
-        <span className="text-[12px] leading-relaxed text-fg-4">
+        <span className="text-body-sm leading-relaxed text-fg-4">
           看「过去哪些基金被反复选中且真的赚了钱」，属样本内统计 —— 不是选基能力证据。
         </span>
         <button
           type="button"
           onClick={() => setOpen((o) => !o)}
-          className="shrink-0 rounded-md border border-line-strong px-2.5 py-1 text-[11.5px] text-fg-2 hover:text-fg"
+          className="shrink-0 rounded-md border border-line-strong px-2.5 py-1 text-caption text-fg-2 hover:text-fg"
         >
           {open ? '收起' : '展开（首次约 15~20 秒）'}
         </button>
@@ -47,7 +47,7 @@ function RecInner() {
 
   if (st.error) {
     return (
-      <div className="mt-3 border-t border-line pt-3 text-[12.5px] text-fg-2">
+      <div className="mt-3 border-t border-line pt-3 text-body-sm text-fg-2">
         历史回测加载失败 · {plainText(st.error)}
       </div>
     )
@@ -55,7 +55,7 @@ function RecInner() {
   if (!d) {
     return (
       <div className="mt-3 border-t border-line pt-3">
-        <div className="mb-2 text-[12px] text-fg-3">正在跑历史回测（首次约 15~20 秒）…</div>
+        <div className="mb-2 text-body-sm text-fg-3">正在跑历史回测（首次约 15~20 秒）…</div>
         <Skeleton lines={5} />
       </div>
     )
@@ -66,22 +66,22 @@ function RecInner() {
 
   return (
     <div className="mt-3 border-t border-line pt-3">
-      <div className="rounded-[var(--radius-md)] border border-line bg-inset px-3 py-2.5 text-[11.5px] leading-relaxed text-warn">
+      <div className="rounded-[var(--radius-md)] border border-line bg-inset px-3 py-2.5 text-caption leading-relaxed text-warn">
         {plainText(note) ||
           '样本内结果，不构成选基能力证据；主推荐请看本页上方的温度驱动筛选池。'}
       </div>
 
-      <div className="mt-3 flex flex-wrap items-baseline gap-x-3 gap-y-1 text-[12px] text-fg-3">
+      <div className="mt-3 flex flex-wrap items-baseline gap-x-3 gap-y-1 text-body-sm text-fg-3">
         <span>
           通过约束的候选 <span className="num text-fg-2">{picks.length}</span> 只
         </span>
         {d.stats?.date_range ? (
-          <span className="text-[11px] text-fg-4">回测区间 {plainText(d.stats.date_range)}</span>
+          <span className="text-caption text-fg-4">回测区间 {plainText(d.stats.date_range)}</span>
         ) : null}
       </div>
 
       {picks.length === 0 ? (
-        <div className="mt-2 text-[12.5px] text-fg-2">
+        <div className="mt-2 text-body-sm text-fg-2">
           没有候选通过全部约束 —— 原因见落选 / 未评估明细
         </div>
       ) : (
@@ -98,11 +98,11 @@ function RecInner() {
                 key={p.code}
                 className="row-hover flex flex-wrap items-baseline gap-x-3 gap-y-1 border-t border-line py-1.5 first:border-t-0"
               >
-                <span className="mono text-[11.5px] text-fg-4">{p.code}</span>
-                <span className="min-w-0 flex-1 truncate text-[13px] text-fg">
+                <span className="mono text-caption text-fg-4">{p.code}</span>
+                <span className="min-w-0 flex-1 truncate text-body text-fg">
                   {plainText(p.name) || p.code}
                 </span>
-                <span className="num text-[11.5px] text-fg-4">
+                <span className="num text-caption text-fg-4">
                   {ok && comp != null
                     ? `同类 P${comp} · ${plainText(p.group) || '—'}${
                         p.group_n ? ` · ${p.group_n.toLocaleString()} 只对照` : ''

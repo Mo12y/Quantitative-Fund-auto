@@ -14,7 +14,7 @@ const TH = 'field pb-2.5'
 function DropMark({ s }: { s: PoolFund['constraint_status'] }) {
   if (s !== 'dropped') return null
   return (
-    <span className="ml-1.5 whitespace-nowrap rounded-full border border-[#3d3117] px-1.5 text-[10px] text-warn">
+    <span className="ml-1.5 whitespace-nowrap rounded-full border border-[#3d3117] px-1.5 text-micro text-warn">
       落选约束
     </span>
   )
@@ -24,7 +24,7 @@ function Num({ v, digits = 1 }: { v: number | null | undefined; digits?: number 
   const d = dirOf(v)
   return (
     <span className={'mono ' + dirClass(d)}>
-      <span className="mr-0.5 text-[10px]">{dirSymbol(d)}</span>
+      <span className="mr-0.5 text-micro">{dirSymbol(d)}</span>
       {fmtSignedPct(v, digits)}
     </span>
   )
@@ -63,7 +63,7 @@ export function PoolBoard({ data, className = '' }: { data: BoardPool; className
       title="筛选池 · 按主题板块"
       note={`· 共 ${data.total_funds} 只进池 · 每板块前 ${data.size}`}
     >
-      <div className="mb-2.5 text-[11.5px] leading-relaxed text-fg-4">
+      <div className="mb-2.5 text-caption leading-relaxed text-fg-4">
         性质：<b className="text-fg-3">不推荐"买哪只"，只排除有坑的</b>（存续/规模/费率/申购状态等硬检查）。
         板块按<b className="font-semibold text-fg-3">基金名称关键词</b>归类（近似口径），与上方申万行业不是同一套分类，故两卡不联动。
         质量池以稳健型为主，名称不含任何主题关键词的基金会归入「其他」，因此它通常是最大一桶
@@ -112,8 +112,8 @@ export function PoolBoard({ data, className = '' }: { data: BoardPool; className
               /* Fragment：展开行是"行内的第二条 tr"，不额外占一列 —— 否则可视列又变成 5 个 */
               <Fragment key={f.code}>
                 <tr className="row-hover border-t border-line">
-                  <td className="mono py-2 pr-3 align-baseline text-[11.5px] text-fg-4">{f.code}</td>
-                  <td className="py-2 pr-3 align-baseline text-[13px]">
+                  <td className="mono py-2 pr-3 align-baseline text-caption text-fg-4">{f.code}</td>
+                  <td className="py-2 pr-3 align-baseline text-body">
                     {/* 名称即展开开关：不新增"详情"列，可视列数保持 4 */}
                     <button
                       type="button"
@@ -126,16 +126,16 @@ export function PoolBoard({ data, className = '' }: { data: BoardPool; className
                     </button>
                     <DropMark s={f.constraint_status} />
                   </td>
-                  <td className="num py-2 align-baseline text-right text-[12.5px] text-fg-2">
+                  <td className="num py-2 align-baseline text-right text-body-sm text-fg-2">
                     {f.sharpe == null ? '—' : f.sharpe.toFixed(2)}
                   </td>
-                  <td className="py-2 align-baseline text-right text-[12.5px]">
+                  <td className="py-2 align-baseline text-right text-body-sm">
                     <Num v={f.momentum_3m} />
                   </td>
                 </tr>
                 {on && (
                   <tr>
-                    <td colSpan={4} className="pb-2.5 pl-1 text-[11.5px] leading-relaxed text-fg-3">
+                    <td colSpan={4} className="pb-2.5 pl-1 text-caption leading-relaxed text-fg-3">
                       <span className="mr-4">
                         类型 <span className="text-fg-2">{plainText(f.type) || '—'}</span>
                       </span>

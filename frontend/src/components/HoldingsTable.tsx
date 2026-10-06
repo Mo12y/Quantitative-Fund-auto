@@ -118,7 +118,7 @@ export function HoldingsTable({ holdings, stats }: { holdings: Holding[]; stats?
             ② 有持仓、但被「盈利/亏损」筛选滤空了（这是用户自己能切回来的）。
           2026-09-30 阶段 2 边界态实测（Playwright 注入 holdings=[] 复现）后补。 */}
       {shown.length === 0 ? (
-        <div className="rounded-md bg-inset px-3 py-6 text-center text-[12.5px] leading-relaxed text-fg-3">
+        <div className="rounded-md bg-inset px-3 py-6 text-center text-body-sm leading-relaxed text-fg-3">
           {rows.length === 0
             ? '当前没有在持基金。'
             : `没有符合「${filter === 'win' ? '盈利' : '亏损'}」的持仓 —— 切回「全部」可见 ${rows.length} 只。`}
@@ -138,14 +138,14 @@ export function HoldingsTable({ holdings, stats }: { holdings: Holding[]; stats?
               const d = dirOf(r.pct)
               return (
                 <tr key={r.code} className="row-hover border-t border-line">
-                  <td className="py-2.5 pr-3 text-[13.5px]">
+                  <td className="py-2.5 pr-3 text-body">
                     <span className="text-fg">{r.name}</span>
-                    <span className="mono ml-1.5 text-[11.5px] text-fg-4">{r.code}</span>
+                    <span className="mono ml-1.5 text-caption text-fg-4">{r.code}</span>
                   </td>
-                  <td className="num py-2.5 text-right text-[13.5px] text-fg-2">{fmtMoney(r.value)}</td>
-                  <td className={'num py-2.5 text-right text-[13.5px] ' + dirClass(d)}>{fmtSignedMoney(r.pnl)}</td>
-                  <td className={'num py-2.5 text-right text-[13.5px] ' + dirClass(d)}>
-                    <span className="mr-0.5 text-[10px]">{dirSymbol(d)}</span>
+                  <td className="num py-2.5 text-right text-body text-fg-2">{fmtMoney(r.value)}</td>
+                  <td className={'num py-2.5 text-right text-body ' + dirClass(d)}>{fmtSignedMoney(r.pnl)}</td>
+                  <td className={'num py-2.5 text-right text-body ' + dirClass(d)}>
+                    <span className="mr-0.5 text-micro">{dirSymbol(d)}</span>
                     {fmtSignedPct(r.pct)}
                   </td>
                 </tr>
@@ -161,7 +161,7 @@ export function HoldingsTable({ holdings, stats }: { holdings: Holding[]; stats?
           口径：`realized_pnl` 是**已结算**的盈亏（与表格里的未实现盈亏无关），
           `realized_fee` 是赎回费，`realized_dividend` 是现金分红累计。 */}
       {stats && (stats.realized_count > 0 || stats.realized_pnl !== 0) && (
-        <div className="mt-3 flex flex-wrap items-baseline gap-x-4 gap-y-1 border-t border-line pt-2 text-[11.5px] text-fg-4">
+        <div className="mt-3 flex flex-wrap items-baseline gap-x-4 gap-y-1 border-t border-line pt-2 text-caption text-fg-4">
           <span>
             已实现{' '}
             <b className={'num font-medium ' + dirClass(dirOf(stats.realized_pnl))}>

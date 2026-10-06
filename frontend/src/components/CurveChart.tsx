@@ -91,7 +91,7 @@ export function CurveChart({ curve }: { curve: PortfolioCurve }) {
           首屏的大数字只能有一个（总资产，见 `Today.tsx` 的 Hero 块），而这里的终值
           （资金加权累计收益率）与 Hero 参照里的收益率**是同源数字** ——
           放大两遍等于让同一条信息占两个视觉焦点。改为一行小字，**信息一处不减**。 */}
-      <div className="mb-2.5 flex flex-wrap items-baseline gap-x-4 gap-y-1 text-[12.5px]">
+      <div className="mb-2.5 flex flex-wrap items-baseline gap-x-4 gap-y-1 text-body-sm">
         <span className="text-fg-3">
           本组合{' '}
           <b className={'num ' + dirClass(d)}>
@@ -105,7 +105,7 @@ export function CurveChart({ curve }: { curve: PortfolioCurve }) {
         </span>
       </div>
 
-      <div className="mb-2 flex flex-wrap gap-4 text-[11px] text-fg-3">
+      <div className="mb-2 flex flex-wrap gap-4 text-caption text-fg-3">
         <span className="inline-flex items-center gap-1.5">
           <i className="inline-block h-[2.5px] w-4 rounded-full align-middle" style={{ background: comboColor }} />
           本组合
@@ -145,7 +145,7 @@ export function CurveChart({ curve }: { curve: PortfolioCurve }) {
           但本次前端重写**三个字段一个都没渲染**（types.ts 里有类型，全项目无人使用）
           —— 等于把 F-03 的修复丢了，用户会重新看到两个对不上的数字而无从解释。 */}
       {excluded > 0 && (
-        <div className="mt-2 text-[11px] text-fg-4">
+        <div className="mt-2 text-caption text-fg-4">
           另有 {excluded} 笔未入仓
           {curve.excluded_amount ? (
             <span className="num">{`（约 ${fmtMoney(curve.excluded_amount)}）`}</span>
@@ -156,7 +156,7 @@ export function CurveChart({ curve }: { curve: PortfolioCurve }) {
         </div>
       )}
 
-      <div className="mt-1 text-[11px] text-fg-4">
+      <div className="mt-1 text-caption text-fg-4">
         {curve.dates[0]} ~ {curve.dates[n - 1]} · {n} 个交易日 · 起点 {fmtSignedPct(data[0].combo)}
         {/* 原为硬编码的「起止 0.00%」：数字写死在文案里会与实际不符，
             且「起止」说的是首尾两个值却只给了首值 —— 措辞与内容不符。

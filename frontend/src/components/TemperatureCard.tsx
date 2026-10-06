@@ -61,7 +61,7 @@ export function TemperatureCard({ temp, className = '' }: { temp: Temperature; c
           <span className={'text-3xl font-medium ' + tempTone(temp.temperature)}>
             {fmtTemp(temp.temperature)}
           </span>
-          <span className="text-[13.5px] text-fg-2">
+          <span className="text-body text-fg-2">
             {plainText(temp.level_desc)} · {plainText(temp.action)}
           </span>
         </div>
@@ -96,7 +96,7 @@ export function TemperatureCard({ temp, className = '' }: { temp: Temperature; c
               aria-hidden="true"
             />
           </div>
-          <div className="relative mt-1 h-[13px] text-[10px] text-fg-4">
+          <div className="relative mt-1 h-[13px] text-micro text-fg-4">
             {[20, 40, 60, 80].map((v) => (
               <span key={v} className="absolute -translate-x-1/2" style={{ left: `${v}%` }}>
                 {v}
@@ -105,7 +105,7 @@ export function TemperatureCard({ temp, className = '' }: { temp: Temperature; c
           </div>
         </div>
       )}
-      <div className="text-[11.5px] leading-relaxed text-fg-4">
+      <div className="text-caption leading-relaxed text-fg-4">
         {Object.entries(temp.components ?? {})
           .map(([k, v]) => `${DIM_LABEL[k] ?? k} ${v == null ? '缺失' : `${v.toFixed(1)}°`}`)
           .join(' · ')}
@@ -115,13 +115,13 @@ export function TemperatureCard({ temp, className = '' }: { temp: Temperature; c
           系统在说"我的几个估值信号互相矛盾，别过度相信这个读数"，
           而界面装作没有这回事。审计 F-02 属于同一类问题。 */}
       {temp.divergence?.level && temp.divergence.level !== '一致' && (
-        <div className="mt-2 rounded-md border border-line bg-inset px-2.5 py-2 text-[11.5px] leading-relaxed text-warn">
+        <div className="mt-2 rounded-md border border-line bg-inset px-2.5 py-2 text-caption leading-relaxed text-warn">
           ⚠ {plainText(temp.divergence.level)}
           {temp.divergence.message ? `：${plainText(temp.divergence.message)}` : ''}
         </div>
       )}
       {temp.scope?.note && (
-        <div className="mt-2 border-t border-line pt-2 text-[11.5px] leading-relaxed text-fg-4">
+        <div className="mt-2 border-t border-line pt-2 text-caption leading-relaxed text-fg-4">
           {plainText(temp.scope.note)}
         </div>
       )}

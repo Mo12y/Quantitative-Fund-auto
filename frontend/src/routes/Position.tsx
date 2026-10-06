@@ -30,18 +30,18 @@ function PlanProgress({ plan }: { plan: InvestmentPlan | null }) {
           「设置 → 投资计划」卡里逐字都有，同屏再看一遍只是重复。
           按 DESIGN §5.4 的页面职责，配置归「设置」，本页只回答"计划**走到哪了**"，
           故只留逐只进度（下面那组），元数据请去「设置」看。 */}
-      <div className="mb-3 text-[11.5px] text-fg-4">
+      <div className="mb-3 text-caption text-fg-4">
         计划的目标 / 期限 / 风险偏好与资金口径见「设置 → 投资计划」。
       </div>
 
       <div className="space-y-2.5">
         {plan.funds.map((f) => (
           <div key={f.code}>
-            <div className="flex items-baseline justify-between gap-2 text-[12.5px]">
+            <div className="flex items-baseline justify-between gap-2 text-body-sm">
               <span className="text-fg">
                 {plainText(f.name)}
-                <span className="mono ml-1.5 text-[11px] text-fg-4">{f.code}</span>
-                <span className="ml-1.5 text-[11px] text-fg-4">{plainText(f.role)}</span>
+                <span className="mono ml-1.5 text-caption text-fg-4">{f.code}</span>
+                <span className="ml-1.5 text-caption text-fg-4">{plainText(f.role)}</span>
               </span>
               <span className="mono shrink-0 text-fg-3">
                 {fmtMoney(f.invested)} / {fmtMoney(f.target)}
@@ -59,7 +59,7 @@ function PlanProgress({ plan }: { plan: InvestmentPlan | null }) {
                 百分比与紧邻的进度条**重复**（条子本身就是比例，上面又已有「已投/目标」金额），
                 故去掉百分比、只留「余」。腾出的额度让「已实现盈亏」从「今天」页的
                 四格 KPI 搬进本页持仓卡的脚注，**本页密度不因此升高**。 */}
-            <div className="mt-0.5 text-right text-[11px] text-fg-4">
+            <div className="mt-0.5 text-right text-caption text-fg-4">
               余 <span className="num">{fmtMoney(f.remaining)}</span>
             </div>
           </div>
@@ -82,24 +82,24 @@ function DcaList({ plans }: { plans: DcaPlan[] }) {
         <table className="w-full border-collapse">
           <thead>
             <tr>
-              <th className="pb-2 text-left text-[11px] font-normal text-fg-3">基金</th>
-              <th className="pb-2 text-right text-[11px] font-normal text-fg-3">每期</th>
-              <th className="pb-2 text-right text-[11px] font-normal text-fg-3">已执行</th>
-              <th className="pb-2 text-right text-[11px] font-normal text-fg-3">状态</th>
+              <th className="pb-2 text-left text-caption font-normal text-fg-3">基金</th>
+              <th className="pb-2 text-right text-caption font-normal text-fg-3">每期</th>
+              <th className="pb-2 text-right text-caption font-normal text-fg-3">已执行</th>
+              <th className="pb-2 text-right text-caption font-normal text-fg-3">状态</th>
             </tr>
           </thead>
           <tbody>
             {plans.map((p) => (
               <tr key={p.id} className="border-t border-line">
-                <td className="py-2 pr-3 text-[13px]">
+                <td className="py-2 pr-3 text-body">
                   <span className="text-fg">{plainText(p.fund_name)}</span>
-                  <span className="mono ml-1.5 text-[11.5px] text-fg-4">{p.fund_code}</span>
+                  <span className="mono ml-1.5 text-caption text-fg-4">{p.fund_code}</span>
                 </td>
-                <td className="mono py-2 text-right text-[12.5px] text-fg-2">{fmtMoney(p.amount_per_period)}</td>
-                <td className="mono py-2 text-right text-[12.5px] text-fg-2">
+                <td className="mono py-2 text-right text-body-sm text-fg-2">{fmtMoney(p.amount_per_period)}</td>
+                <td className="mono py-2 text-right text-body-sm text-fg-2">
                   {p.executed_periods} / {p.expected_periods}
                 </td>
-                <td className="py-2 text-right text-[12.5px]">
+                <td className="py-2 text-right text-body-sm">
                   {p.due ? <span className="text-warn">待执行</span> : <span className="text-fg-3">已跟上</span>}
                 </td>
               </tr>
@@ -107,7 +107,7 @@ function DcaList({ plans }: { plans: DcaPlan[] }) {
           </tbody>
         </table>
       )}
-      <div className="mt-2 text-[11px] text-fg-4">
+      <div className="mt-2 text-caption text-fg-4">
         频率说明：daily = 每个交易日；「已执行 / 应为」按计划起始日算。执行到期期数在旧仪表盘操作。
       </div>
     </Card>

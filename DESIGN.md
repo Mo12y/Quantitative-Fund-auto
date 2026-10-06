@@ -26,6 +26,13 @@
 
 单一色相强调（Linear 原则）：强调色**只**出现在主操作、焦点环、图表主线，不做装饰。
 
+> ⚠️ **本表是 v2 草案，与实现不符**（2026-10-06 核对发现）：实现里 token 名为
+> `--color-canvas` / `--color-fg-*` / `--color-rise` / `--color-fall` …（共 19 个，
+> 见 `frontend/src/index.css` 的 `@theme`），值也不同（如底色是 `#080b12` 而非 `#010102`）。
+> **唯一来源以 `index.css` 为准**；下面这张表只保留"为什么这么设计"的意图说明。
+> ⚠️ 另注：表里的 `--up` / `--down` 是**欧美惯例**（绿涨红跌），本项目已改为
+> `--color-rise` / `--color-fall`（涨红跌绿），勿按此表实现。
+
 | Token | 值 | 用途 |
 |---|---|---|
 | `--canvas` | `#010102` | 页面底色（带蓝调的黑） |
@@ -47,23 +54,35 @@
 
 ## 2. 字体与字阶
 
-字体栈：
+字体栈（唯一来源：`frontend/src/index.css` 的 `@theme`）：
 ```
---font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
---font-mono: ui-monospace, SFMono-Regular, "SF Mono", Consolas, "Liberation Mono", monospace;
+--font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
+             "Microsoft YaHei", system-ui, sans-serif;
+--font-mono: ui-monospace, SFMono-Regular, "SF Mono", Consolas, monospace;
 ```
 数字（金额/百分比/净值/份额）统一 `--font-mono` 或 `tabular-nums`。
 
-| 角色 | 字号/字重/字距 | 用途 |
-|---|---|---|
-| display | 28px / 600 / -0.6px | 面板大标题 |
-| title | 20px / 600 / -0.4px | 卡片标题 |
-| body | 14px / 400 / 0 | 正文 |
-| body-sm | 13px / 400 | 表格、次级信息 |
-| caption | 12px / 400 | 说明 |
-| eyebrow | 11px / 600 / +0.08em 大写 | 分组小标签 |
-| mono | 13px / 400 | 数字、代码 |
-| metric | 22px / 600 / -0.4px | KPI 数字 |
+> ⚠️ **2026-10-06 本节重写**。原文列的是 `display 28 / title 20 / body 14 / caption 12 /
+> metric 22` 这类**从未落地的档位** —— 实现里卡标题一直是 12px、正文档挤了 6 个值，
+> 实测全站 **14 档裸字号**（10 / 10.5 / 11 / 11.5 / 12 / 12.5 / 13 / 13.5 / 14 / 16 / 17 / 24 / 40 / 48），
+> 层级靠颜色深浅硬撑。现收敛为 **7 档 `--text-*` token**，并由
+> `scripts/verify_frontend.py` 守住「**一处裸字号都不许有**」（判据从"0.5px 阶梯 + 种类 ≤16"收紧）。
+
+| Token | 值 | 层级 | 用途 |
+|---|---|---|---|
+| `--text-title` | 24px | **页标题** | 入口页 h1（`PageHead`） |
+| `--text-hero` | 48px | 专用 · 首屏大数字 | 「今天」的总资产（正文 3.4 倍，见 §5.1.1） |
+| `--text-metric` | 16px | 专用 · 关键数字 | 结论句、计划金额 |
+| `--text-body` | 13.5px | **正文** | 表格 / 正文 / 数字；也是 `body` 的 base 字号 |
+| `--text-body-sm` | 12.5px | **卡标题** | 卡标题 h2、次级信息 |
+| `--text-caption` | 11.5px | **注脚** | 字段名、说明（`.field` 也用这个） |
+| `--text-micro` | 10px | 专用 · 角标 | 涨跌箭头、极小角标 |
+
+> ⚠️ **刻意不给 `--text-*--line-height`**：这些元素的行高是**从 `body` 继承 1.6** 的
+> （Tailwind 的任意值 `text-[Npx]` 只设 `font-size`），少数还位于 `leading-snug / relaxed`
+> 的父级里。不写 companion 就仍是"继承" → 行高逐字节不变；写死 1.6 反而会让那些元素的行高改变、
+> 整页高度漂移。实测收敛后四页页高变化 ≤0.02 屏。
+> ⚠️ 取值的取向是"**就近向上**"（11→11.5、12→12.5、13→13.5）：用户明确要求"整体都更松"。
 
 ## 3. 间距 / 圆角 / 描边
 

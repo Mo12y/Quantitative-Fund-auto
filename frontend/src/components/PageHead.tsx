@@ -27,8 +27,8 @@ export function PageHead({
         aria-hidden="true"
       />
       <div className="relative">
-        <h1 className="text-[24px] font-semibold leading-tight tracking-[-.02em] text-fg">{title}</h1>
-        {sub && <div className="mt-1 text-[12.5px] text-fg-3">{sub}</div>}
+        <h1 className="text-title font-semibold leading-tight tracking-[-.02em] text-fg">{title}</h1>
+        {sub && <div className="mt-1 text-body-sm text-fg-3">{sub}</div>}
       </div>
       <div className="relative">{children}</div>
     </div>

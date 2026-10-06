@@ -54,7 +54,7 @@ function Tip({ active, payload, label }: { active?: boolean; payload?: TipPayloa
   const combo = payload.find((p) => p.dataKey === 'combo')
   const bench = payload.find((p) => p.dataKey === 'bench')
   return (
-    <div className="rounded-[var(--radius-md)] border border-line-strong bg-card/95 px-3 py-2 text-[11.5px] shadow-[0_20px_44px_-20px_rgba(0,0,0,.95)] backdrop-blur">
+    <div className="rounded-[var(--radius-md)] border border-line-strong bg-card/95 px-3 py-2 text-caption shadow-[0_20px_44px_-20px_rgba(0,0,0,.95)] backdrop-blur">
       <div className="mb-1.5 text-fg-4">{label}</div>
       {combo && (
         <div className="flex items-center gap-4">

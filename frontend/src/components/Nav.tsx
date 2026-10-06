@@ -23,14 +23,14 @@ export function Nav({ entry, onGo }: { entry: Entry; onGo: (e: Entry) => void })
         aria-hidden="true"
       />
       <nav className="relative mx-auto flex max-w-[1080px] flex-wrap items-center gap-x-2 gap-y-1 px-4">
-        <span className="mr-3 flex items-center gap-2.5 py-3.5 text-[13.5px] font-semibold text-fg">
+        <span className="mr-3 flex items-center gap-2.5 py-3.5 text-body font-semibold text-fg">
           <i
             className="grad-brand inline-block h-[17px] w-[17px] shrink-0 rounded-[6px]"
             style={{ boxShadow: '0 0 16px -2px rgba(90,162,255,.75)' }}
             aria-hidden="true"
           />
           量化基金
-          <span className="text-[11.5px] font-normal text-fg-4">个人账本</span>
+          <span className="text-caption font-normal text-fg-4">个人账本</span>
         </span>
 
         <div className="flex flex-wrap items-center gap-1 py-2">
@@ -43,7 +43,7 @@ export function Nav({ entry, onGo }: { entry: Entry; onGo: (e: Entry) => void })
                 onClick={() => onGo(e)}
                 aria-current={on ? 'page' : undefined}
                 className={
-                  'inline-flex items-center gap-1.5 rounded-full px-3.5 py-1.5 text-[13px] transition-all duration-150 ' +
+                  'inline-flex items-center gap-1.5 rounded-full px-3.5 py-1.5 text-body transition-all duration-150 ' +
                   (on
                     ? 'bg-card-hi text-fg shadow-[inset_0_1px_0_rgba(255,255,255,.08),0_8px_22px_-14px_rgba(0,0,0,.95)]'
                     : 'text-fg-3 hover:bg-card hover:text-fg-2')

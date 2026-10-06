@@ -2,7 +2,7 @@ import type { QuantModels } from '../api/types'
 import { Card } from './Card'
 
 const TH = 'field pb-1.5'
-const TD = 'py-1.5 text-[12.5px]'
+const TD = 'py-1.5 text-body-sm'
 
 function num(v: number | null | undefined, digits = 3): string {
   return v == null || Number.isNaN(v) ? '—' : v.toFixed(digits)
@@ -11,9 +11,9 @@ function num(v: number | null | undefined, digits = 3): string {
 /** 小标题（三张表共用样式） */
 function Sub({ title, hint }: { title: string; hint?: string }) {
   return (
-    <div className="mb-1.5 mt-3.5 text-[12px] text-fg-2 first:mt-0">
+    <div className="mb-1.5 mt-3.5 text-body-sm text-fg-2 first:mt-0">
       {title}
-      {hint && <span className="ml-1.5 text-[11px] text-fg-4">{hint}</span>}
+      {hint && <span className="ml-1.5 text-caption text-fg-4">{hint}</span>}
     </div>
   )
 }
@@ -29,7 +29,7 @@ function Sub({ title, hint }: { title: string; hint?: string }) {
 export function QuantPanel({ data, className = '' }: { data: QuantModels; className?: string }) {
   return (
     <Card className={className} title="量化模型" note="· vol 预测 / 回撤预警 / 组合模拟（样本外）">
-      <div className="text-[11.5px] leading-relaxed text-fg-4">
+      <div className="text-caption leading-relaxed text-fg-4">
         只陈列模型对照原始值，<b className="font-semibold text-fg-3">不给出"哪个更好"的结论</b> —— 本项目样本外验证（51 窗口）
         的结论是「看不出优于等权持有的选基能力」，界面上不制造最优解印象。
       </div>
@@ -41,7 +41,7 @@ export function QuantPanel({ data, className = '' }: { data: QuantModels; classN
           折叠的只是原始指标值：折叠 ≠ 隐藏立场。
           实测：本卡由约 1070px 降到约 150px，同时不再压住整行高度。 */}
       <details className="mt-2">
-        <summary className="cursor-pointer list-none text-[12px] text-fg-2">
+        <summary className="cursor-pointer list-none text-body-sm text-fg-2">
           <span className="mr-1 text-fg-3">⌄</span>
           三张模型对照表 · vol / 回撤 / 组合（默认折叠）
         </summary>
@@ -123,7 +123,7 @@ export function QuantPanel({ data, className = '' }: { data: QuantModels; classN
       {Object.keys(data.reports).length > 0 && (
         <>
           <Sub title="模型报告" hint="仓库 docs/ 目录" />
-          <div className="flex flex-wrap gap-x-3 gap-y-1 text-[11.5px]">
+          <div className="flex flex-wrap gap-x-3 gap-y-1 text-caption">
             {Object.entries(data.reports).map(([name, ok]) => (
               <span key={name} className={ok ? 'text-fg-3' : 'text-fg-4 line-through'}>
                 {name}

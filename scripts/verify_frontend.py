@@ -23,7 +23,7 @@
 
 退出码：0 = 全过；1 = 有失败（可直接接进 CI / 提交前自查）。
 
-覆盖范围（截至 2026-10-06 共 **61 项** = 动态 54 + 静态 7）：
+覆盖范围（截至 2026-10-06 共 **63 项** = 动态 54 + 静态 9）：
   ① 四入口渲染与导航可达
   ② hash 路由（深链直达 / 未知 hash 回落）
   ③ 文案卫生（JSX 里写 `**粗体**` 会原样渲染 —— 曾真出现字面 `**只读**`）
@@ -35,9 +35,10 @@
   ⑦c **信息密度**（DESIGN §5.2：4 页 × 数字节点上限 + 页高上限 = 8 条，基线上限见 `DENSITY_BASELINE`）
 
 B-0 追加（2026-10-04，计划书 §11.3 的 ⬜ 三项 → ✅；见 §11.4 的判据取舍）：
-  ⑧ **排版**：`text-[Npx]` 裸字号落在 token 阶梯内；TSX 里无裸色值（唯一例外见 `_CSS_ALLOW`）
+  ⑧ **排版**：**无裸字号**（字号全部走 `@theme` 的 `--text-*` token，共 7 档）；
+     字阶级数 ≤ 8；TSX 里无裸色值（唯一例外见 `_BARE_COLOR_ALLOW`）
   ⑨ **留白**：`Card` 自身零 margin；间距只走 4px-grid（**含 Tailwind 半档**，见 `_SPACING_GRID_PX`）
-  ⑩ **视觉层级**：无 `h1 > h2 > h3` 倒挂；页面头层字号高于卡标题
+  ⑩ **视觉层级**：h 标签字号可解析（裸值或 token）；无 `h1 > h2 > h3` 倒挂；页面头层字号高于卡标题
   ⑪ **数字等宽**：货币/百分比/份额格式化值必须挂 `.num`/`.mono`
 
 ⚠️ 静态扫描项（⑧⑨⑩⑪）**不需要起服务**：`--static-only` 可单独跑。
@@ -92,13 +93,13 @@ def skip(name: str, why: str) -> None:
 # 「能抓到现存问题、又不逼着页面写出夸张数值」来定，取舍逐条写在下面。
 # ══════════════════════════════════════════════════════════════════════════
 
-# ── 排版 1：裸字号阶梯 ────────────────────────────────────────────────────
-# ⚠️ `@theme` 里**没有 `--text-*` token**（index.css 只有色/圆角/字体族），
-#    所以"不出现裸值"这条判据**在本项目无法字面成立** —— 见 §11.4 的裁决。
-#    折中：裸字号必须落在 **0.5px 网格**上（离散化），且种类数有上限。
-#    抓的是 `13.7px` / `10.2px` 这种随手拟的散落值。
-_FONT_STEP = 0.5
-_FONT_MAX_DISTINCT = 16        # 现状 14 种；留 2 档余量做"定型"
+# ── 排版 1：字号必须走 token ─────────────────────────────────────────────
+# ⚠️ 2026-10-06：`@theme` 补上了 `--text-*`（7 档），判据随之**收紧**——
+#    旧版是"裸字号落在 0.5px 网格上 + 种类 ≤16"，那是**因为当时字阶不可引用**
+#    （index.css 只有色/圆角/字体族，见 §11.4 的裁决）。
+#    现在字阶可引用了，再写 `text-[11.5px]` 就是绕过字阶 → 改为**一处裸字号都不许有**。
+#    判据分两条：① 裸字号 0 处；② 用到的 `--text-*` 档数 ≤ 8（DESIGN §2 的 4 层级 + 3 专用档）。
+_TEXT_MAX_DISTINCT = 8
 
 # ── 排版 1b：裸色值 ──────────────────────────────────────────────────────
 # 唯一现存例外：PoolBoard 的「低估」标签边框 `#3d3117`（warn 暗化变体，token 里没有）。
@@ -143,6 +144,24 @@ _CLS_SP_ARB = re.compile(
 #    "每页字号种类"改为**诊断输出**（进 detail，不参与成败），保留可见性。
 _H_TAG = re.compile(r"<(h[1-6])\b[^>]*?className=\"([^\"]*)\"[^>]*>", re.S)
 _FONT_SZ = re.compile(r"text-\[(\d+(?:\.\d+)?)px\]")
+
+#: `@theme` 里的字号 token → px。**层级判据必须靠它**解析 `h1/h2` 的实际字号 ——
+#: ⚠️ 2026-10-06 踩到的**假绿**：字号改成 token 后，`h1/h2` 的 className 里不再有
+#: `text-[Npx]`，旧判据取不到字号 → 打印"无 h2 或未取到字号" → **两条层级断言双双 PASS**。
+#: 即"判据在数据消失时默认通过"是错的：**取不到值必须判红**（下面对 missing 的处理已改）。
+_FONT_TOKEN_RE = re.compile(r"(?<![\w-])text-([a-z][\w-]*)\b")
+
+
+def _text_token_px() -> dict[str, float]:
+    """从 `index.css` 的 `@theme` 读出 `--text-<name>: <N>px` → `{name: N}`。"""
+    css = INDEX_CSS.read_text(encoding="utf-8") if INDEX_CSS.exists() else ""
+    theme = re.search(r"@theme\s*\{(.*?)\n\}", css, re.S)
+    if not theme:
+        return {}
+    out: dict[str, float] = {}
+    for name, val in re.findall(r"--text-([\w-]+?)\s*:\s*([\d.]+)px", theme.group(1)):
+        out.setdefault(name, float(val))
+    return out
 
 # ── 数字等宽 ─────────────────────────────────────────────────────────────
 # 抓"货币/百分比/份额的格式化值直接裸渲染在无 `num`/`mono` 的容器里"。
@@ -289,22 +308,25 @@ def static_typography() -> None:
         check("排版：`.tsx` 源文件可读", False, f"未找到源文件：{SRC}")
         return
 
-    # 读 `@theme` —— 色 token 白名单 + 确认字号 token 的**缺失**
+    # 读 `@theme` —— 色 token 白名单 + 字号 token 名单
     css = INDEX_CSS.read_text(encoding="utf-8") if INDEX_CSS.exists() else ""
     theme = re.search(r"@theme\s*\{(.*?)\n\}", css, re.S)
     tokens = re.findall(r"(--[\w-]+)\s*:", theme.group(1)) if theme else []
     color_tokens = {t for t in tokens if t.startswith("--color-")}
+    text_tokens = {t[len("--text-"):] for t in tokens if t.startswith("--text-")}
 
-    seen_sizes: dict[str, int] = {}
-    off_grid: list[tuple[str, str]] = []
+    bare_sizes: list[tuple[str, str]] = []
     bare_colors: list[tuple[str, str]] = []
+    font_used: set[str] = set()
     for f in files:
         src = _strip_comments(f.read_text(encoding="utf-8"))
         rel = _rel(f)
         for s in _FONT_SZ.findall(src):
-            seen_sizes[s] = seen_sizes.get(s, 0) + 1
-            if (float(s) / _FONT_STEP) % 1 != 0:
-                off_grid.append((rel, s))
+            bare_sizes.append((rel, f"text-[{s}px]"))
+        for cls in _class_attrs(src):
+            for m in re.finditer(r"(?<![\w-])text-([a-z][\w-]*)\b", cls):
+                if m.group(1) in text_tokens:
+                    font_used.add(m.group(1))
         # 裸色值：只查 `#hex` / `rgb()` / `hsl()` 这类"硬编码颜色"，
         # 不查 `w-[212px]` 这种尺寸（那是布局测量值，不是设计 token 的职责）
         for m in re.finditer(r"\[(#[0-9a-fA-F]{3,8}|rgba?\([^\]]*\)|hsla?\([^\]]*\))\]", src):
@@ -314,11 +336,14 @@ def static_typography() -> None:
             bare_colors.append((rel, lit))
 
     check(
-        f"排版：裸字号落在 {_FONT_STEP}px 阶梯上（{len(seen_sizes)} 种 / 上限 {_FONT_MAX_DISTINCT}）",
-        not off_grid and len(seen_sizes) <= _FONT_MAX_DISTINCT,
-        (f"离格 {off_grid[:5]}" if off_grid else "") +
-        (f" 种类超限 {len(seen_sizes)}>{_FONT_MAX_DISTINCT}：{sorted(seen_sizes, key=float)}"
-         if len(seen_sizes) > _FONT_MAX_DISTINCT else "") or f"{len(seen_sizes)} 种",
+        f"排版：无裸字号 —— 字号全部走 `--text-*` token（`@theme` 声明 {len(text_tokens)} 档）",
+        not bare_sizes,
+        (f"仍有 {len(bare_sizes)} 处：{bare_sizes[:6]}" if bare_sizes else "0 处裸字号"),
+    )
+    check(
+        f"排版：字阶级数 {len(font_used)}（上限 {_TEXT_MAX_DISTINCT}：4 层级 + 3 专用档）",
+        bool(font_used) and len(font_used) <= _TEXT_MAX_DISTINCT and font_used <= text_tokens,
+        f"用到 {sorted(font_used)}",
     )
     check(
         f"排版：TSX 无裸色值（白名单 {sum(len(v) for v in _BARE_COLOR_ALLOW.values())} 处，token {len(color_tokens)} 个）",
@@ -368,6 +393,7 @@ def static_spacing() -> None:
 # ── ⑩ 视觉层级：h 标签 + 页头 > 卡标题 ───────────────────────────────────
 def static_hierarchy() -> None:
     files = _tsx_files()
+    tok_px = _text_token_px()
     ranks: dict[str, list[tuple[str, float, int]]] = {}
     missing_size: list[tuple[str, str]] = []
     for f in files:
@@ -376,11 +402,18 @@ def static_hierarchy() -> None:
         for line_no, line in enumerate(src.splitlines(), 1):
             for m in _H_TAG.finditer(line):
                 tag, cls = m.group(1), m.group(2)
+                # 字号两种写法都要认：裸值 `text-[24px]`（已禁用，但历史代码可能有）
+                # 与 token `text-title`（2026-10-06 起的唯一写法）。
                 sz = _FONT_SZ.search(cls)
-                if not sz:
+                if sz:
+                    size: float | None = float(sz.group(1))
+                else:
+                    size = next(
+                        (tok_px[t] for t in _FONT_TOKEN_RE.findall(cls) if t in tok_px), None)
+                if size is None:
                     missing_size.append((rel, f"<{tag}>"))
                     continue
-                ranks.setdefault(tag, []).append((rel, float(sz.group(1)), line_no))
+                ranks.setdefault(tag, []).append((rel, size, line_no))
 
     order = ["h1", "h2", "h3", "h4", "h5", "h6"]
     vals = {k: sorted({v for _, v, _ in ranks[k]}) for k in order if k in ranks}
@@ -396,18 +429,18 @@ def static_hierarchy() -> None:
             inversion.append(f"{a}({vals[a]}) ≤ {b}({vals[b]})")
 
     # ③ 页面头层 > 卡标题层
-    head_gt_card = True
-    note = "无 h2 或未取到字号"
-    if "h1" in vals and "h2" in vals:
-        head_gt_card = min(vals["h1"]) > max(vals["h2"])
-        note = f"h1={vals['h1']} vs h2={vals['h2']}"
-
+    # ⚠️ 取不到字号 = **判红**，不是跳过：2026-10-06 字号改 token 后，旧实现因为
+    #    `h1/h2` 的 className 里不再有 `text-[Npx]` 而取不到值，两条断言当场变成**假绿**
+    #    （detail 里写着"无 h2 或未取到字号"却 PASS）。"判据看不到数据"必须报出来。
+    noted = f"h1={vals.get('h1')} vs h2={vals.get('h2')}"
+    check("层级：h1 / h2 的字号都能解析出来（裸值或 token）",
+          not missing_size and "h1" in vals and "h2" in vals,
+          (f"解析不到：{missing_size[:4]}" if missing_size else noted))
     check(f"层级：h 标签字号严格递减（{' > '.join(present) or '无'}）",
-          not inversion, inversion or note)
-    check("层级：页面头层字号 > 卡标题字号", head_gt_card, note)
-    # 诊断（不参与成败）：无字号 h 标签 + 同标签多档
-    if missing_size:
-        print(f"        · 诊断：{len(missing_size)} 处 h 标签未显式给字号 {missing_size[:3]}")
+          bool(present) and not inversion, inversion or noted)
+    check("层级：页面头层字号 > 卡标题字号",
+          bool(vals.get("h1")) and bool(vals.get("h2"))
+          and min(vals["h1"]) > max(vals["h2"]), noted)
     for k, v in multi.items():
         print(f"        · 诊断：<{k}> 有 {len(v)} 档字号 {v}（档内细分，非层级倒挂）")
 
@@ -481,8 +514,16 @@ DENSITY_TARGET = {"num": 40, "screens": 2.0}          # DESIGN §5.2（桌面目
 #: ⚠️ DESIGN 目标 40 对「今天」是合适的（实测 31 已达标）；对**表格页**（研究 / 持仓）
 #:   是否合适 **未定** —— 研究的两张表本身就是页面职责，持仓表 7 只 × 4 字段 ≈ 28 是下限。
 #:   该问题已在计划书 §13.9 记为待用户拍板项，**不擅自改 §5.2 的目标值**。
+#: ⚠️ **今天页的数字与"行情端点是否可用"强相关**（2026-10-06 自捉的测量错误）：
+#:   行情不可用（本机沙箱常态）→ 小条只显示一句"不可用"+ 原因，今天 = **31**；
+#:   行情可用（正常态，verify 那一轮就是）→ 小条多出 4 只指数的「点位 + 涨跌」≈ +9，
+#:   消息面有信号再 +2 → 今天 = **42**。
+#:   我先前把基线设成 34，是**只按降级态测的值定的** —— 属于"测了个非正常状态"，
+#:   一次 verify 就被自己的断言抓出来。现在取**正常态（联网）**的 42 + 约 10% 余量作为基线。
+#:   ⚠️ 副作用要如实记：联网态 42 比 DESIGN 目标 40 **多 2**，来源就是那 4 组指数报价。
+#:   要压到 ≤40 只需去掉指数**点位**（只留涨跌%），省 4 个读数 —— 属产品取舍，未做。
 DENSITY_BASELINE = {
-    "today": (34, 1.5),
+    "today": (46, 1.5),
     "position": (64, 1.6),
     "research": (82, 1.5),
     "settings": (57, 2.1),

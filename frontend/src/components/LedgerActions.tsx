@@ -8,10 +8,10 @@ import { fmtMoney, plainText } from '../lib/format'
 
 /** 输入框统一样式（新前端至此第一次出现 `<input>` —— 写操作才需要）。 */
 const INPUT =
-  'w-full rounded-md border border-line bg-inset px-2.5 py-1.5 text-[12.5px] text-fg ' +
+  'w-full rounded-md border border-line bg-inset px-2.5 py-1.5 text-body-sm text-fg ' +
   'outline-none transition-colors focus:border-line-strong disabled:opacity-45'
 
-const LABEL = 'mb-1 block text-[11px] text-fg-4'
+const LABEL = 'mb-1 block text-caption text-fg-4'
 
 const today = () => new Date().toISOString().slice(0, 10)
 
@@ -209,7 +209,7 @@ export function LedgerActions({
               setResult(null)
             }}
             className={
-              'rounded-full border px-2.5 py-1 text-[11.5px] transition-colors ' +
+              'rounded-full border px-2.5 py-1 text-caption transition-colors ' +
               (op === o.key
                 ? 'border-accent/40 bg-accent/15 text-accent'
                 : 'border-line text-fg-3 hover:text-fg')
@@ -280,7 +280,7 @@ export function LedgerActions({
         )}
 
         {op === 'buy' && (
-          <label className="flex items-center gap-2 text-[12px] text-fg-3 sm:col-span-2">
+          <label className="flex items-center gap-2 text-body-sm text-fg-3 sm:col-span-2">
             <input type="checkbox" checked={after} onChange={(e) => setAfter(e.target.checked)} />
             15:00 后提交（按下一交易日确认）
           </label>
@@ -288,18 +288,18 @@ export function LedgerActions({
       </div>
 
       {error && !pending && (
-        <div className="mt-2.5 text-[12px] text-rise">{error}</div>
+        <div className="mt-2.5 text-body-sm text-rise">{error}</div>
       )}
 
       {result && (
         <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-2 rounded-[var(--radius-md)] bg-inset px-3 py-2.5">
-          <span className="text-[12px] text-fg-2">{result.text}</span>
+          <span className="text-body-sm text-fg-2">{result.text}</span>
           {result.commitId != null && (
             <button
               type="button"
               onClick={() => void undo()}
               disabled={busy}
-              className="rounded-md border border-line-strong px-2.5 py-1 text-[11.5px] text-fg-2 hover:text-fg disabled:opacity-45"
+              className="rounded-md border border-line-strong px-2.5 py-1 text-caption text-fg-2 hover:text-fg disabled:opacity-45"
             >
               撤销
             </button>
@@ -311,11 +311,11 @@ export function LedgerActions({
         <button
           type="button"
           onClick={() => prepare()}
-          className="rounded-md bg-accent/15 px-3 py-1.5 text-[12px] font-semibold text-accent hover:bg-accent/25"
+          className="rounded-md bg-accent/15 px-3 py-1.5 text-body-sm font-semibold text-accent hover:bg-accent/25"
         >
           下一步（出确认卡）
         </button>
-        <span className="text-[11px] text-fg-4">
+        <span className="text-caption text-fg-4">
           写入真实账本；成功后可用「撤销」还原（保留最近 20 次）
         </span>
       </div>

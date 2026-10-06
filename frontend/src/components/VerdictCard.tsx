@@ -83,10 +83,10 @@ export function VerdictCard({
     return (
       <Card lead={lead} title="今天" note="· 结论">
         <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1.5">
-          <span className={'shrink-0 rounded-full border px-2.5 py-0.5 text-[12px] ' + badge.cls}>
+          <span className={'shrink-0 rounded-full border px-2.5 py-0.5 text-body-sm ' + badge.cls}>
             {badge.label}
           </span>
-          <span className="text-[13.5px] text-fg-3">
+          <span className="text-body text-fg-3">
             {loading ? '正在计算调仓结论…' : error ? `调仓结论不可用：${error}` : '调仓结论暂不可用'}
           </span>
         </div>
@@ -105,12 +105,12 @@ export function VerdictCard({
   return (
     <Card lead={lead} title="今天" note="· 结论">
       <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1.5">
-        <span className={'shrink-0 rounded-full border px-2.5 py-0.5 text-[12px] ' + badge.cls}>
+        <span className={'shrink-0 rounded-full border px-2.5 py-0.5 text-body-sm ' + badge.cls}>
           {badge.label}
         </span>
-        <span className="text-[17px] font-medium leading-snug tracking-[-.01em]">{verdict}</span>
+        <span className="text-metric font-medium leading-snug tracking-[-.01em]">{verdict}</span>
       </div>
-      {detail && <div className="mt-1.5 text-[12.5px] text-fg-2">{detail}</div>}
+      {detail && <div className="mt-1.5 text-body-sm text-fg-2">{detail}</div>}
 
       <div className="mt-3 grid gap-2">
         {rb.instructions.length === 0 ? (
@@ -121,22 +121,22 @@ export function VerdictCard({
                这时说"无需操作"会让用户把"缺着口"当成"已达标"。
              徽标给的是**今天能不能动手**（三态之一），所以是「不用动手」；
              缺口本身由下方支撑行与这句话交代。 */
-          <div className="rounded-[var(--radius-md)] bg-inset px-3.5 py-2.5 text-[13px] text-fg-2">
+          <div className="rounded-[var(--radius-md)] bg-inset px-3.5 py-2.5 text-body text-fg-2">
             {rb.need_rebalance
               ? '组合偏离目标，但当前没有可执行的买入 / 卖出候选 —— 今天不动手（缺口见下方）。'
               : '无需任何买卖操作。'}
           </div>
         ) : allHold ? (
-          <div className="rounded-[var(--radius-md)] bg-inset px-3.5 py-2.5 text-[13px] text-fg-2">
+          <div className="rounded-[var(--radius-md)] bg-inset px-3.5 py-2.5 text-body text-fg-2">
             {rb.instructions.length} 只持仓仓位均在合理范围内，无需操作。
           </div>
         ) : (
           rb.instructions.map((ins, i) => (
             <div
               key={`${ins.fund_code}-${i}`}
-              className="flex items-start gap-2.5 rounded-[var(--radius-md)] bg-inset px-3.5 py-2.5 text-[13px]"
+              className="flex items-start gap-2.5 rounded-[var(--radius-md)] bg-inset px-3.5 py-2.5 text-body"
             >
-              <span className={'shrink-0 rounded-full border px-2 py-px text-[11px] ' + actCls(ins.action)}>
+              <span className={'shrink-0 rounded-full border px-2 py-px text-caption ' + actCls(ins.action)}>
                 {ins.action}
               </span>
               <span className="text-fg-2">
@@ -152,7 +152,7 @@ export function VerdictCard({
           **不是**总资产、不是累计投入；所以这里只显示后端给的 `gap_pct`，不自己算。
           ⚠️ 只在传 `support` 的页面显示（见该 prop 的注释）。 */}
       {support && rb.target_equity_pct != null && (
-        <div className="mt-3 flex flex-wrap items-baseline gap-x-4 gap-y-1 border-t border-line pt-2 text-[11.5px] text-fg-4">
+        <div className="mt-3 flex flex-wrap items-baseline gap-x-4 gap-y-1 border-t border-line pt-2 text-caption text-fg-4">
           <span>
             权益占比 <b className="num font-medium text-fg-2">{fmtPct(rb.current_equity_pct)}</b>
           </span>
@@ -172,7 +172,7 @@ export function VerdictCard({
       )}
 
       {rb.scope_note && (
-        <div className="mt-3 text-[11.5px] leading-relaxed text-fg-4">{plainText(rb.scope_note)}</div>
+        <div className="mt-3 text-caption leading-relaxed text-fg-4">{plainText(rb.scope_note)}</div>
       )}
     </Card>
   )

@@ -38,7 +38,7 @@ export function DrillDown({ explain }: { explain: Explain }) {
 
   return (
     <details className="@container">
-      <summary className="cursor-pointer list-none text-[12.5px] text-fg-2">
+      <summary className="cursor-pointer list-none text-body-sm text-fg-2">
         <span className="mr-1 text-fg-3">⌄</span>
         这条结论是怎么算出来的 · 数据链路
       </summary>
@@ -54,7 +54,7 @@ export function DrillDown({ explain }: { explain: Explain }) {
               className={'px-3 py-2.5 text-left transition-colors ' + (on ? 'bg-inset' : 'bg-card hover:bg-inset')}
             >
               <b className={'mb-1 block text-xs font-medium ' + (on ? 'text-accent' : 'text-fg-2')}>{s.title}</b>
-              <span className="block text-[11.5px] leading-relaxed text-fg-3">{plainText(s.headline)}</span>
+              <span className="block text-caption leading-relaxed text-fg-3">{plainText(s.headline)}</span>
             </button>
           )
         })}
@@ -76,8 +76,8 @@ export function DrillDown({ explain }: { explain: Explain }) {
                     key={i}
                     className="flex flex-wrap items-baseline justify-between gap-x-5 gap-y-0.5 py-1.5"
                   >
-                    <span className="text-[12.5px] text-fg-3">{plainText(r.label)}</span>
-                    <span className={'text-right text-[12.5px] ' + (TONE[r.tone ?? 'flat'] ?? 'text-fg-2')}>
+                    <span className="text-body-sm text-fg-3">{plainText(r.label)}</span>
+                    <span className={'text-right text-body-sm ' + (TONE[r.tone ?? 'flat'] ?? 'text-fg-2')}>
                       {plainText(r.value)}
                     </span>
                   </div>
@@ -85,7 +85,7 @@ export function DrillDown({ explain }: { explain: Explain }) {
               </div>
             ))}
           </div>
-          <div className="mt-2 border-t border-line pt-2 text-[11.5px] leading-relaxed text-fg-4">
+          <div className="mt-2 border-t border-line pt-2 text-caption leading-relaxed text-fg-4">
             <div className="mb-0.5">真实产物</div>
             <div className="grid gap-x-10 @2xl:grid-cols-2">
               {stage.artifacts.map((a, i) => (

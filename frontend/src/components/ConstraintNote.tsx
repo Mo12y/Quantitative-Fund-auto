@@ -21,7 +21,7 @@ export function ConstraintNote({ review }: { review: ConstraintReview | null | u
   const skipped = review.skipped ?? []
 
   return (
-    <div className="mb-3.5 rounded-[var(--radius-md)] border border-line bg-inset px-3.5 py-2.5 text-[11.5px] leading-relaxed">
+    <div className="mb-3.5 rounded-[var(--radius-md)] border border-line bg-inset px-3.5 py-2.5 text-caption leading-relaxed">
       <div className="text-fg-2">
         用户约束（{applied.length} 条生效）：约束前 {c.before} → 通过{' '}
         <b className="num text-accent">{c.kept}</b> · 落选 <b className="num text-warn">{c.dropped}</b> · 未评估{' '}

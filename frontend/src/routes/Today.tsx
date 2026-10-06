@@ -87,10 +87,13 @@ export default function Today() {
                 （DESIGN §5.5）。 */}
           <Card lead title="组合" note="· 资金加权">
             <div className="flex flex-wrap items-baseline gap-x-5 gap-y-2">
-              <div className="num text-[40px] font-semibold leading-none tracking-[-.02em] text-fg sm:text-[48px]">
+              {/* ⚠️ 2026-10-06：原为 `text-[40px] sm:text-[48px]`（两档裸字号）。
+                  现在统一走 `text-hero`(48px) —— 48px 在 375 视口下 `¥1,234.56` 约 220px，
+                  远小于可用宽度，不必再降一档；顺带把"手机上一个字号"那档也收掉了。 */}
+              <div className="num text-hero font-semibold leading-none tracking-[-.02em] text-fg">
                 {fmtMoney(st.total_assets)}
               </div>
-              <div className="flex flex-wrap items-baseline gap-x-2.5 gap-y-1 text-[13px]">
+              <div className="flex flex-wrap items-baseline gap-x-2.5 gap-y-1 text-body">
                 <span className={'num font-medium ' + dirClass(pnlDir)}>
                   {dirSymbol(pnlDir)}
                   {fmtSignedMoney(st.total_pnl)}
@@ -101,7 +104,7 @@ export default function Today() {
                 </span>
               </div>
             </div>
-            <div className="mt-2.5 text-[11.5px] text-fg-4">
+            <div className="mt-2.5 text-caption text-fg-4">
               在持 {fundCount} 只
               {st.pending_amount ? ` · 在途 ${fmtMoney(st.pending_amount)}` : ''}
             </div>

@@ -42,7 +42,7 @@ export function MarketStrip({ className = '' }: { className?: string }) {
 
   return (
     <Card className={className} title="市场" note="· 指数行情 / 消息面">
-      <div className="flex flex-wrap items-center gap-x-3 gap-y-2 text-[12px]">
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-2 text-body-sm">
         {/* ── 指数行情 ─────────────────────────────────────────────── */}
         {live.error ? (
           <span className="text-fg-2">行情读取失败：{live.error}</span>
@@ -83,7 +83,7 @@ export function MarketStrip({ className = '' }: { className?: string }) {
             <button
               type="button"
               onClick={senti.reload}
-              className="rounded-md border border-line-strong px-2 py-0.5 text-[11px] text-fg-2 hover:text-fg"
+              className="rounded-md border border-line-strong px-2 py-0.5 text-caption text-fg-2 hover:text-fg"
             >
               重试
             </button>
@@ -110,21 +110,21 @@ export function MarketStrip({ className = '' }: { className?: string }) {
         {/* 旧值标注（scanning）与时滞量化（lag_note）—— 两条都是**必须显示**的披露。
             ⚠️ "以下是上次结果"只在**真的拿着旧值**（sd 非空）时才说 —— 没有旧值时
             它和"扫描中…"同时出现会自相矛盾（实测踩到）。 */}
-        {senti.scanning && sd && <span className="text-[11px] text-fg-4">（刷新中…以下为上次结果）</span>}
-        {d?.lag_note && <span className="text-[11px] text-fg-4">{plainText(d.lag_note)}</span>}
+        {senti.scanning && sd && <span className="text-caption text-fg-4">（刷新中…以下为上次结果）</span>}
+        {d?.lag_note && <span className="text-caption text-fg-4">{plainText(d.lag_note)}</span>}
       </div>
 
       {/* 消息面明细 —— 默认折叠（DESIGN §5.3 渐进披露）：摘要已经在上面一行讲完，
           逐条告警是"我要看细节"时才需要的。折叠 ≠ 隐藏：标题行写清了条数。 */}
       {alerts.length > 0 && (
         <details className="mt-2">
-          <summary className="cursor-pointer list-none text-[11.5px] text-fg-2">
+          <summary className="cursor-pointer list-none text-caption text-fg-2">
             <span className="mr-1 text-fg-3">⌄</span>
             消息面明细 · {alerts.length} 条（默认折叠）
           </summary>
           <div className="mt-2 flex flex-col gap-1.5">
             {alerts.map((a, i) => (
-              <div key={i} className="rounded-[var(--radius-md)] bg-inset px-3 py-2 text-[12px]">
+              <div key={i} className="rounded-[var(--radius-md)] bg-inset px-3 py-2 text-body-sm">
                 <span className="inline-flex items-center gap-2 text-fg">
                   <i
                     className={'h-[6px] w-[6px] shrink-0 rounded-full ' + levelDot(a.level)}
@@ -136,14 +136,14 @@ export function MarketStrip({ className = '' }: { className?: string }) {
                   </span>
                 </span>
                 {a.detail ? (
-                  <div className="mt-1 pl-3.5 text-[11.5px] leading-relaxed text-fg-4">
+                  <div className="mt-1 pl-3.5 text-caption leading-relaxed text-fg-4">
                     {plainText(a.detail)}
                   </div>
                 ) : null}
               </div>
             ))}
           </div>
-          <div className="mt-2 text-[11px] text-fg-4">只显示能影响决策的信号</div>
+          <div className="mt-2 text-caption text-fg-4">只显示能影响决策的信号</div>
         </details>
       )}
     </Card>

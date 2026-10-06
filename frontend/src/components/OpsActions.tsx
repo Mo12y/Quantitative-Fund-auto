@@ -7,14 +7,14 @@ import { ConfirmDialog, type ConfirmSpec } from './ConfirmDialog'
 import { fmtMoney, plainText } from '../lib/format'
 
 const INPUT =
-  'w-full rounded-md border border-line bg-inset px-2.5 py-1.5 text-[12.5px] text-fg ' +
+  'w-full rounded-md border border-line bg-inset px-2.5 py-1.5 text-body-sm text-fg ' +
   'outline-none transition-colors focus:border-line-strong'
 
 const BTN =
-  'rounded-md border border-line-strong px-2.5 py-1 text-[11.5px] text-fg-2 hover:text-fg disabled:opacity-45'
+  'rounded-md border border-line-strong px-2.5 py-1 text-caption text-fg-2 hover:text-fg disabled:opacity-45'
 
 const BTN_WARN =
-  'rounded-md border border-warn/35 px-2.5 py-1 text-[11.5px] text-warn hover:bg-warn/[.08] disabled:opacity-45'
+  'rounded-md border border-warn/35 px-2.5 py-1 text-caption text-warn hover:bg-warn/[.08] disabled:opacity-45'
 
 /**
  * 设置页的写操作面板（B-4b-3）—— 数据运维 + 定投 + 投资计划，**全部先过确认卡**。
@@ -82,7 +82,7 @@ export function OpsActions({
   return (
     <Card className={'min-w-0 ' + className} title="数据运维与写入" note="· 每个操作都会先出确认卡">
       {/* ── 数据运维 ─────────────────────────────────────────── */}
-      <div className="text-[11px] text-fg-4">数据运维</div>
+      <div className="text-caption text-fg-4">数据运维</div>
       <div className="mt-2 flex flex-wrap gap-2">
         <button
           type="button"
@@ -139,7 +139,7 @@ export function OpsActions({
       </div>
 
       {/* ── 定投 ─────────────────────────────────────────────── */}
-      <div className="mt-4 border-t border-line pt-3 text-[11px] text-fg-4">
+      <div className="mt-4 border-t border-line pt-3 text-caption text-fg-4">
         定投计划（{plans.length} 条{duePlans.length ? ` · ${duePlans.length} 条到期` : ''}）
       </div>
       <div className="mt-2 flex flex-wrap gap-2">
@@ -225,7 +225,7 @@ export function OpsActions({
       {plans.length > 0 && (
         <div className="mt-3 flex flex-col gap-1.5">
           {plans.map((p) => (
-            <div key={p.id} className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[11.5px]">
+            <div key={p.id} className="flex flex-wrap items-center gap-x-2 gap-y-1 text-caption">
               <span className="min-w-0 flex-1 truncate text-fg-3">
                 {plainText(p.fund_name)}
                 <span className="mono ml-1.5 text-fg-4">{p.fund_code}</span>
@@ -264,23 +264,23 @@ export function OpsActions({
       )}
 
       {/* ── 投资计划 ─────────────────────────────────────────── */}
-      <div className="mt-4 border-t border-line pt-3 text-[11px] text-fg-4">
+      <div className="mt-4 border-t border-line pt-3 text-caption text-fg-4">
         投资计划{plan ? `（ID${plan.id} ${plainText(plan.name)}）` : '（无生效计划）'}
       </div>
       {plan && (
         <>
           <div className="mt-2 grid gap-2.5 sm:grid-cols-3">
             <div>
-              <label className="mb-1 block text-[11px] text-fg-4" htmlFor="ops-goal">新目标（可留空）</label>
+              <label className="mb-1 block text-caption text-fg-4" htmlFor="ops-goal">新目标（可留空）</label>
               <input id="ops-goal" className={INPUT} value={goal} onChange={(e) => setGoal(e.target.value)} />
             </div>
             <div>
-              <label className="mb-1 block text-[11px] text-fg-4" htmlFor="ops-cap">计划资金（可留空）</label>
+              <label className="mb-1 block text-caption text-fg-4" htmlFor="ops-cap">计划资金（可留空）</label>
               <input id="ops-cap" className={INPUT} value={capital} inputMode="decimal"
                      onChange={(e) => setCapital(e.target.value)} />
             </div>
             <div>
-              <label className="mb-1 block text-[11px] text-fg-4" htmlFor="ops-cash">现金弹药（可留空）</label>
+              <label className="mb-1 block text-caption text-fg-4" htmlFor="ops-cash">现金弹药（可留空）</label>
               <input id="ops-cash" className={INPUT} value={cash} inputMode="decimal"
                      onChange={(e) => setCash(e.target.value)} />
             </div>
@@ -345,9 +345,9 @@ export function OpsActions({
         </>
       )}
 
-      {error && !pending && <div className="mt-3 text-[12px] text-rise">{error}</div>}
+      {error && !pending && <div className="mt-3 text-body-sm text-rise">{error}</div>}
       {result && (
-        <div className="mt-3 rounded-[var(--radius-md)] bg-inset px-3 py-2.5 text-[12px] text-fg-2">
+        <div className="mt-3 rounded-[var(--radius-md)] bg-inset px-3 py-2.5 text-body-sm text-fg-2">
           {result}
         </div>
       )}

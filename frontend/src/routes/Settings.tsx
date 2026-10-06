@@ -78,7 +78,7 @@ export default function Settings() {
       {/* ⚠️ 2026-10-06（瘦身第 3 条）：首屏说明文字压到一行。
           DESIGN §5.1「首屏零解释性文字」—— 原为 3 行，把真正的配置项挤下去了。
           写操作的安全披露**不在**这里，而在每个操作自己的确认卡里（`OpsActions` 强制）。 */}
-      <div className="rounded-[var(--radius-md)] border border-line bg-inset px-3.5 py-2.5 text-[11.5px] leading-relaxed text-fg-3">
+      <div className="rounded-[var(--radius-md)] border border-line bg-inset px-3.5 py-2.5 text-caption leading-relaxed text-fg-3">
         写操作已接进本页，每个操作先出确认卡；会自己产生真实买入的（对账 / 定投）在确认卡里明示笔数与金额。
       </div>
 
@@ -98,29 +98,29 @@ export default function Settings() {
               <div className="grid grid-cols-2 gap-x-6 gap-y-3 sm:grid-cols-3">
                 <div>
                   <div className="field">目标</div>
-                  <div className="text-[13px] text-fg-2">{plainText(pl.goal)}</div>
+                  <div className="text-body text-fg-2">{plainText(pl.goal)}</div>
                 </div>
                 <div>
                   <div className="field">期限 / 风险偏好</div>
-                  <div className="text-[13px] text-fg-2">
+                  <div className="text-body text-fg-2">
                     {plainText(pl.horizon)} · {plainText(pl.risk_pref)}
                   </div>
                 </div>
                 <div>
                   <div className="field">起始日</div>
-                  <div className="mono text-[13px] text-fg-2">{plainText(pl.start_date)}</div>
+                  <div className="mono text-body text-fg-2">{plainText(pl.start_date)}</div>
                 </div>
                 <div>
                   <div className="field">计划资金</div>
-                  <div className="mono text-[16px] font-semibold text-fg">{fmtMoney(pl.total_capital)}</div>
+                  <div className="mono text-metric font-semibold text-fg">{fmtMoney(pl.total_capital)}</div>
                 </div>
                 <div>
                   <div className="field">已投</div>
-                  <div className="mono text-[16px] font-semibold text-fg">{fmtMoney(pl.total_invested)}</div>
+                  <div className="mono text-metric font-semibold text-fg">{fmtMoney(pl.total_invested)}</div>
                 </div>
                 <div>
                   <div className="field">现金弹药</div>
-                  <div className="mono text-[16px] font-semibold text-fg">{fmtMoney(pl.cash_reserve)}</div>
+                  <div className="mono text-metric font-semibold text-fg">{fmtMoney(pl.cash_reserve)}</div>
                 </div>
               </div>
 
@@ -137,24 +137,24 @@ export default function Settings() {
                 <tbody>
                   {pl.funds.map((f) => (
                     <tr key={f.code} className="row-hover border-t border-line">
-                      <td className="py-2.5 pr-3 text-[13px]">
+                      <td className="py-2.5 pr-3 text-body">
                         <span className="text-fg">{plainText(f.name)}</span>
-                        <span className="mono ml-1.5 text-[11.5px] text-fg-4">{f.code}</span>
+                        <span className="mono ml-1.5 text-caption text-fg-4">{f.code}</span>
                       </td>
-                      <td className="py-2.5 pr-3 text-[12px] text-fg-3">{plainText(f.role)}</td>
-                      <td className="num py-2.5 text-right text-[12.5px] text-fg-2">
+                      <td className="py-2.5 pr-3 text-body-sm text-fg-3">{plainText(f.role)}</td>
+                      <td className="num py-2.5 text-right text-body-sm text-fg-2">
                         {fmtMoney(f.target)}
                         <span className="num ml-1 text-fg-4">{fmtPct(f.target_pct)}</span>
                       </td>
-                      <td className="num py-2.5 text-right text-[12.5px] text-fg-2">{fmtMoney(f.invested)}</td>
-                      <td className="num py-2.5 text-right text-[12.5px] text-fg-3">{fmtPct(f.progress_pct)}</td>
+                      <td className="num py-2.5 text-right text-body-sm text-fg-2">{fmtMoney(f.invested)}</td>
+                      <td className="num py-2.5 text-right text-body-sm text-fg-3">{fmtPct(f.progress_pct)}</td>
                     </tr>
                   ))}
                 </tbody>
               </table>
 
               {pl.notes && (
-                <div className="mt-3 border-t border-line pt-2 text-[11.5px] leading-relaxed text-fg-4">
+                <div className="mt-3 border-t border-line pt-2 text-caption leading-relaxed text-fg-4">
                   {plainText(pl.notes)}
                 </div>
               )}
@@ -169,28 +169,28 @@ export default function Settings() {
               <div className="mb-4 grid grid-cols-2 gap-x-6 gap-y-3 sm:grid-cols-3">
                 <div>
                   <div className="field">目标权益仓位</div>
-                  <div className="text-[16px] font-semibold text-fg">
+                  <div className="text-metric font-semibold text-fg">
                     {rb.target_equity_pct == null ? '—' : fmtPct(rb.target_equity_pct)}
-                    <span className="ml-1.5 text-[11px] font-normal text-fg-4">
+                    <span className="ml-1.5 text-caption font-normal text-fg-4">
                       {rb.target_source === 'user_profile' ? '（我的设定）' : '（温度模型）'}
                     </span>
                   </div>
                 </div>
                 <div>
                   <div className="field">容忍带</div>
-                  <div className="num text-[13px] text-fg-2">
+                  <div className="num text-body text-fg-2">
                     {rb.rebalance_pp == null ? '—' : `±${rb.rebalance_pp}pp`}
                   </div>
                 </div>
                 <div>
                   <div className="field">当前权益（A 股口径）</div>
-                  <div className="num text-[13px] text-fg-2">{fmtPct(rb.current_equity_pct)}</div>
+                  <div className="num text-body text-fg-2">{fmtPct(rb.current_equity_pct)}</div>
                 </div>
               </div>
 
               <ConstraintNote review={rb.constraint_review} />
 
-              <div className="mt-1 text-[11.5px] leading-relaxed text-fg-4">
+              <div className="mt-1 text-caption leading-relaxed text-fg-4">
                 画像文件：<span className="mono text-fg-3">config/user_profile.local.yaml</span>
                 （gitignore，个人文件）。约束
                 <b className="font-semibold text-fg-3">只作用于候选筛选与买入候选</b>，不改变持仓与账本。
@@ -232,17 +232,17 @@ export default function Settings() {
             <div className="mb-4 grid grid-cols-2 gap-x-6 gap-y-3 sm:grid-cols-3">
               <div>
                 <div className="field">账本库</div>
-                <div className="mono text-[13px] text-fg-2">data/fund_quant.db</div>
+                <div className="mono text-body text-fg-2">data/fund_quant.db</div>
               </div>
               <div>
                 <div className="field">净值最新日</div>
-                <div className="mono text-[13px] text-fg-2">
+                <div className="mono text-body text-fg-2">
                   {ov && ov.curve.dates.length ? ov.curve.dates[ov.curve.dates.length - 1] : '—'}
                 </div>
               </div>
               <div>
                 <div className="field">板块缓存于</div>
-                <div className="mono text-[13px] text-fg-2">{sectors.data?.cached_at ?? '—'}</div>
+                <div className="mono text-body text-fg-2">{sectors.data?.cached_at ?? '—'}</div>
               </div>
             </div>
 
@@ -250,7 +250,7 @@ export default function Settings() {
                 它回答的是"我要核查/运维时敲什么"，不是日常要看的 —— 7 条命令铺在卡里，
                 等于把一张速查表当正文。标题行自明，需要时一眼找得到、展开即可复制。 */}
             <details className="mt-1">
-              <summary className="cursor-pointer list-none text-[12px] text-fg-2">
+              <summary className="cursor-pointer list-none text-body-sm text-fg-2">
                 <span className="mr-1 text-fg-3">⌄</span>
                 运维命令清单 · {CMDS.length} 条（默认折叠）
               </summary>
@@ -264,15 +264,15 @@ export default function Settings() {
                 <tbody>
                   {CMDS.map((c) => (
                     <tr key={c.cmd} className="row-hover border-t border-line">
-                      <td className="mono py-1.5 pr-3 text-[12px] text-fg-2">{c.cmd}</td>
-                      <td className="py-1.5 text-[12px] text-fg-3">{c.use}</td>
+                      <td className="mono py-1.5 pr-3 text-body-sm text-fg-2">{c.cmd}</td>
+                      <td className="py-1.5 text-body-sm text-fg-3">{c.use}</td>
                     </tr>
                   ))}
                 </tbody>
               </table>
             </details>
 
-            <div className="mt-3 border-t border-line pt-2 text-[11.5px] leading-relaxed text-fg-4">
+            <div className="mt-3 border-t border-line pt-2 text-caption leading-relaxed text-fg-4">
               净值刷新也可走 CLI（上方命令表）；盘中行情端点（
               <span className="mono">/api/market/live</span>）在抓不到时
               <b className="font-semibold text-fg-3">如实返回不可用</b>，不会拿旧值冒充实时。

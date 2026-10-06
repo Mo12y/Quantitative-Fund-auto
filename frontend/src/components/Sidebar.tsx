@@ -22,7 +22,7 @@ export function Sidebar({ entry, onGo }: { entry: Entry; onGo: (e: Entry) => voi
           style={{ boxShadow: '0 0 16px -2px rgba(90,162,255,.75)' }}
           aria-hidden="true"
         />
-        <span className="text-[14px] font-semibold tracking-[-.01em] text-fg">量化基金</span>
+        <span className="text-body font-semibold tracking-[-.01em] text-fg">量化基金</span>
       </div>
 
       <nav className="flex flex-col gap-1 px-3" aria-label="主导航">
@@ -35,7 +35,7 @@ export function Sidebar({ entry, onGo }: { entry: Entry; onGo: (e: Entry) => voi
               onClick={() => onGo(e)}
               aria-current={on ? 'page' : undefined}
               className={
-                'flex items-center gap-2.5 rounded-[var(--radius-md)] px-3 py-2 text-[13px] transition-all duration-150 ' +
+                'flex items-center gap-2.5 rounded-[var(--radius-md)] px-3 py-2 text-body transition-all duration-150 ' +
                 (on
                   ? 'bg-card-hi text-fg shadow-[inset_0_1px_0_rgba(255,255,255,.07)]'
                   : 'text-fg-3 hover:bg-card hover:text-fg-2')
@@ -50,7 +50,7 @@ export function Sidebar({ entry, onGo }: { entry: Entry; onGo: (e: Entry) => voi
 
       {/* 页脚：说清"数据在哪"。旧仪表盘入口已随 B-5 切换移除（它已不在 `/` 上）。 */}
       <div className="mt-auto border-t border-line px-5 py-4">
-        <div className="text-[10.5px] leading-relaxed text-fg-4">
+        <div className="text-micro leading-relaxed text-fg-4">
           本地账本 · 数据只在本机
           <br />
           data/fund_quant.db
