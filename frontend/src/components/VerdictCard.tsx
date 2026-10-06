@@ -1,5 +1,5 @@
 import type { Rebalance } from '../api/types'
-import { dirSymbol, fmtMoney, fmtPct, fmtSignedPct, plainText } from '../lib/format'
+import { fmtMoney, fmtPct, fmtSignedPct, plainText } from '../lib/format'
 import { Card } from './Card'
 
 /** 指令动作徽标配色：减仓=提示黄、加仓=涨红（中国惯例里红是买入/走高）、其余中性 */
@@ -11,8 +11,14 @@ function actCls(action: string): string {
 
 /**
  * 结论的**三态**（DESIGN §5.1）：结论必须落到「要动手 / 不用动手 / 待数据」之一，
- * 不能只描述现象。判定完全来自后端：`need_rebalance` 决定要不要动手，
- * 端点没回来（加载中 / 失败）就是待数据 —— **不许**把"没数据"渲染成"不用动手"。
+ * 不能只描述现象。
+ *
+ * ⚠️ 判定用**指令列表**而不是后端的 `need_rebalance` —— 两者会不一致，且不一致时
+ * 用户看的是指令：实测本机 `need_rebalance=true`（权益占比 33.9% 距目标 58.8% 有缺口）
+ * 但同时 `instructions=[]`（池子里没有"稳健且温度适用"的买入候选）→ 结论文案写着
+ * "无需任何买卖操作"。此时若按 `need_rebalance` 打「要动手」徽标，就会自相矛盾。
+ * "今天要不要动手"取决于**今天有没有可执行的动作**，缺口本身由 `detail` 文案交代。
+ * 端点没回来（加载中 / 失败）一律是「待数据」，**不许**渲染成「不用动手」。
  */
 type VerdictState = 'act' | 'hold' | 'pending'
 
@@ -20,6 +26,11 @@ const STATE: Record<VerdictState, { label: string; cls: string }> = {
   act: { label: '要动手', cls: 'text-warn border-warn/35 bg-warn/10' },
   hold: { label: '不用动手', cls: 'text-accent border-accent-dim bg-accent/10' },
   pending: { label: '待数据', cls: 'text-fg-3 border-line-strong bg-inset' },
+}
+
+/** 有没有**非「持有」**的指令（全持有 / 空列表都算"不用动手"）。 */
+function hasAction(rb: Rebalance | null): boolean {
+  return !!rb && rb.instructions.some((i) => !i.action.includes('持有'))
 }
 
 /**
@@ -65,7 +76,7 @@ export function VerdictCard({
    */
   support?: boolean
 }) {
-  const state: VerdictState = !rebalance ? 'pending' : rebalance.need_rebalance ? 'act' : 'hold'
+  const state: VerdictState = !rebalance ? 'pending' : hasAction(rebalance) ? 'act' : 'hold'
   const badge = STATE[state]
 
   if (!rebalance) {
@@ -141,16 +152,11 @@ export function VerdictCard({
             <span className="ml-1">（{rb.target_source === 'user_profile' ? '我的设定' : '温度模型'}）</span>
           </span>
           {rb.gap_pct != null && (
+            /* ⚠️ 缺口用**文字**表达（待补 / 待减 / 差），**不给涨跌色、不加 ▲▼** ——
+               它是"仓位离目标多远"，不是"赚了还是亏了"；套上涨红跌绿会被读成收益。 */
             <span>
-              {rb.need_rebalance ? (gapUp ? '待补 ' : '待减 ') : '差 '}
-              <b
-                className={
-                  'num ' + (rb.need_rebalance ? (gapUp ? 'text-rise' : 'text-fall') : 'text-fg-2')
-                }
-              >
-                {dirSymbol(rb.need_rebalance ? (gapUp ? 'rise' : 'fall') : 'flat')}
-                {fmtSignedPct(rb.gap_pct)}
-              </b>
+              {rb.need_rebalance ? (gapUp ? '待补' : '待减') : '偏离'}
+              <b className="num ml-1 font-medium text-fg-2">{fmtSignedPct(rb.gap_pct)}</b>
             </span>
           )}
         </div>

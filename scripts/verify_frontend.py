@@ -23,7 +23,7 @@
 
 退出码：0 = 全过；1 = 有失败（可直接接进 CI / 提交前自查）。
 
-覆盖范围（截至 2026-10-06 共 **56 项** = 动态 49 + 静态 7）：
+覆盖范围（截至 2026-10-06 共 **55 项** = 动态 48 + 静态 7）：
   ① 四入口渲染与导航可达
   ② hash 路由（深链直达 / 未知 hash 回落）
   ③ 文案卫生（JSX 里写 `**粗体**` 会原样渲染 —— 曾真出现字面 `**只读**`）
@@ -547,10 +547,10 @@ def main() -> int:
 
         check("导航含四个入口", all(e in page.inner_text("nav") for e in ENTRIES))
         check("「今天」页渲染", "总资产" in page.inner_text("body"))
-        # B-3：行情 + 消息面（两个独占展示块）
+        # 2026-10-06 瘦身第 5 条：行情与消息面已合成**一块「市场小条」**，不再各占一张卡
         t0 = page.inner_text("body")
-        check("「今天」页：指数行情块已接入", "指数行情" in t0)
-        check("「今天」页：消息面块已接入", "消息面" in t0)
+        check("「今天」页：市场小条（指数行情 + 消息面）已接入",
+              "指数行情" in t0 and "消息面" in t0)
 
         def go(label: str) -> str:
             page.get_by_role("button", name=label, exact=True).click()

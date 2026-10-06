@@ -1,9 +1,8 @@
 import { endpoints } from '../api/endpoints'
 import { Card } from '../components/Card'
 import { CurveChart } from '../components/CurveChart'
-import { LiveQuoteCard } from '../components/LiveQuoteCard'
+import { MarketStrip } from '../components/MarketStrip'
 import { PageHead } from '../components/PageHead'
-import { SentimentCard } from '../components/SentimentCard'
 import { Skeleton } from '../components/Skeleton'
 import { SourceTag } from '../components/SourceTag'
 import { VerdictCard } from '../components/VerdictCard'
@@ -14,14 +13,15 @@ import { useApi } from '../lib/useApi'
 /**
  * 「今天」入口 —— 只回答**今天要不要动手**（DESIGN §5.4 页面职责表）。
  *
- * ⚠️ 2026-10-06 信息密度瘦身（第 2 条）：本页收敛成 **3 块**：
+ * ⚠️ 2026-10-06 信息密度瘦身（第 2、5 条）：本页收敛成 **3 块核心 + 1 条小条**：
  *     ① 大数字（总资产，带"变化额 + 变化率 + 时间窗"三个参照）
  *     ② 结论句（必须落到 `要动手 / 不用动手 / 待数据` 三态之一）
  *     ③ 组合收益曲线
+ *     ④ 市场小条（指数行情 + 消息面压成一行，`MarketStrip`）
  *   搬走的：持仓明细表（→「持仓」页本就有）、数据链路审计（→「设置」）、
  *   市场温度卡（→「设置」，见 `TemperatureCard.tsx`）。
  *   依据：三个独立开源产品首屏结构的交集（Wealthfolio / Ghostfolio / Rotki，
- *   计划书 §13.3.2）—— 首屏核心 = 一个大数字 + 一条曲线，其余至多一块。
+ *   计划书 §13.3.2）—— 首屏核心 = 一个大数字 + 一条曲线，其余**至多一块**。
  */
 export default function Today() {
   const overview = useApi(endpoints.overview)
@@ -118,13 +118,9 @@ export default function Today() {
           {/* ── ③ 曲线 ───────────────────────────────────────────────── */}
           <CurveChart curve={ov.curve} />
 
-          {/* 行情 + 消息面 —— "市场当下状态"，一行小条（见 `MarketStrip`）。
-              ⚠️ 子项必须给 `min-w-0`：grid/flex 子项默认 `min-width: auto`，
-                 内容的 min-content 宽会把卡片顶破 → 375 下横向溢出。 */}
-          <div className="grid items-start gap-4 md:grid-cols-2">
-            <LiveQuoteCard className="min-w-0" />
-            <SentimentCard className="min-w-0" />
-          </div>
+          {/* ④ 市场小条（瘦身第 5 条）：指数行情 + 消息面压成**一块、一行**，
+              逐条告警明细收进折叠区。改造前两者各占一张卡。 */}
+          <MarketStrip />
         </>
       )}
     </>
