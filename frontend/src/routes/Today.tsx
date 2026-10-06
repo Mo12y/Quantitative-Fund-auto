@@ -1,7 +1,6 @@
 import { endpoints } from '../api/endpoints'
 import { Card } from '../components/Card'
 import { CurveChart } from '../components/CurveChart'
-import { HoldingsTable } from '../components/HoldingsTable'
 import { KpiRow } from '../components/KpiRow'
 import { LiveQuoteCard } from '../components/LiveQuoteCard'
 import { PageHead } from '../components/PageHead'
@@ -66,7 +65,7 @@ export default function Today() {
 
   return (
     <>
-      <PageHead title="今天要做什么" sub="结论 · 组合 · 持仓 · 温度">
+      <PageHead title="今天要做什么" sub="结论 · 组合 · 温度">
         <SourceTag
           source={overview.source}
           asof={ov ? ov.curve.dates[ov.curve.dates.length - 1] : null}
@@ -99,7 +98,7 @@ export default function Today() {
       {ov && (
         <>
           {/* ── 概览区 ────────────────────────────────────────────────
-              结论 + KPI 是**一个整体**（父级只给 10px 间距），与后面的图表、持仓
+              结论 + KPI 是**一个整体**（父级只给 10px 间距），与后面的图表、行情
               用标准的 16px 分开 —— **间距本身就是层级**：
               靠得近 = 从属关系，分得开 = 并列关系。
               这也是对"卡片与卡片之间的关系有问题"的直接回应。 */}
@@ -115,93 +114,93 @@ export default function Today() {
 
           <CurveChart curve={ov.curve} />
 
-          <div className="grid items-start gap-4 md:grid-cols-[1.4fr_1fr]">
-            <HoldingsTable holdings={ov.portfolio.holdings} />
-
-            <Card title="温度" note="· A 股权益估值分位">
-              {/* ⚠️ 数据不足时必须显示「数据不足」，**绝不能显示一个具体数字**。
-                  黑箱验收审计 F-02 的教训：旧实现兜底成 50.0，让"数据缺失"伪装成
-                  一个中性真实读数，还顺着给出"适中 / 保持定投 / 建议权益 35%"。
-                  重写时这里写的是 `Math.round(ov.temp.temperature)`，而 JS 里
-                  `Math.round(null) === 0` → 数据不足时会显示 **"0°"**（还配着冷色），
-                  等于把同一个反模式又带了回来。后端此时明确返回 temperature=null
-                  （thermometer.py:145），故以前端判空为准。 */}
-              {ov.temp.insufficient_data || ov.temp.temperature == null ? (
-                <div className="text-3xl font-medium text-fg-3">数据不足</div>
-              ) : (
-                <div className="flex items-baseline gap-2.5">
-                  <span className={'text-3xl font-medium ' + tempTone(ov.temp.temperature)}>
-                    {fmtTemp(ov.temp.temperature)}
-                  </span>
-                  <span className="text-[13.5px] text-fg-2">
-                    {plainText(ov.temp.level_desc)} · {plainText(ov.temp.action)}
-                  </span>
-                </div>
-              )}
-              {/* 温度尺：**刻度轨道 + 指针**，不是进度条 ——
-                  温度是"落在哪一档"的读数，用指针读**位置**比用填充读**长度**更直接；
-                  轨道底色本身就是冷→热渐变，指针一放上去档位自明。
-                  ⚠️ 数据不足时**整条尺子都不画** —— 画一条 0% 的条同样是"假装有读数"。 */}
-              {!ov.temp.insufficient_data && ov.temp.temperature != null && (
-                <div className="mt-3">
-                  <div
-                    className="relative h-[9px] rounded-full"
-                    style={{
-                      background:
-                        'linear-gradient(90deg, rgba(90,162,255,.34), rgba(90,162,255,.16) 26%, rgba(227,179,65,.26) 62%, rgba(255,107,94,.32))',
-                    }}
-                  >
-                    {[20, 40, 60, 80].map((v) => (
-                      <i
-                        key={v}
-                        className="absolute top-0 h-full w-px bg-canvas/55"
-                        style={{ left: `${v}%` }}
-                        aria-hidden="true"
-                      />
-                    ))}
+          {/* ⚠️ 2026-10-06（瘦身第 4 条）：**持仓明细表已从本页移走** ——
+              「持仓」页本来就有一份（`Position.tsx` → `HoldingsTable`），
+              同一个人在两处维护两张表只会漂移。本页只回答"今天要不要动手"，
+              不陈列"我持有什么"（DESIGN §5.4 页面职责表）。 */}
+          <Card title="温度" note="· A 股权益估值分位">
+            {/* ⚠️ 数据不足时必须显示「数据不足」，**绝不能显示一个具体数字**。
+                黑箱验收审计 F-02 的教训：旧实现兜底成 50.0，让"数据缺失"伪装成
+                一个中性真实读数，还顺着给出"适中 / 保持定投 / 建议权益 35%"。
+                重写时这里写的是 `Math.round(ov.temp.temperature)`，而 JS 里
+                `Math.round(null) === 0` → 数据不足时会显示 **"0°"**（还配着冷色），
+                等于把同一个反模式又带了回来。后端此时明确返回 temperature=null
+                （thermometer.py:145），故以前端判空为准。 */}
+            {ov.temp.insufficient_data || ov.temp.temperature == null ? (
+              <div className="text-3xl font-medium text-fg-3">数据不足</div>
+            ) : (
+              <div className="flex items-baseline gap-2.5">
+                <span className={'text-3xl font-medium ' + tempTone(ov.temp.temperature)}>
+                  {fmtTemp(ov.temp.temperature)}
+                </span>
+                <span className="text-[13.5px] text-fg-2">
+                  {plainText(ov.temp.level_desc)} · {plainText(ov.temp.action)}
+                </span>
+              </div>
+            )}
+            {/* 温度尺：**刻度轨道 + 指针**，不是进度条 ——
+                温度是"落在哪一档"的读数，用指针读**位置**比用填充读**长度**更直接；
+                轨道底色本身就是冷→热渐变，指针一放上去档位自明。
+                ⚠️ 数据不足时**整条尺子都不画** —— 画一条 0% 的条同样是"假装有读数"。 */}
+            {!ov.temp.insufficient_data && ov.temp.temperature != null && (
+              <div className="mt-3">
+                <div
+                  className="relative h-[9px] rounded-full"
+                  style={{
+                    background:
+                      'linear-gradient(90deg, rgba(90,162,255,.34), rgba(90,162,255,.16) 26%, rgba(227,179,65,.26) 62%, rgba(255,107,94,.32))',
+                  }}
+                >
+                  {[20, 40, 60, 80].map((v) => (
                     <i
-                      className="slide-thumb absolute -top-[2px] h-[13px] w-[3px] rounded-full bg-fg"
-                      style={{
-                        left: `calc(${Math.max(0, Math.min(100, ov.temp.temperature))}% - 1.5px)`,
-                        boxShadow: '0 0 10px rgba(238,243,250,.65)',
-                      }}
+                      key={v}
+                      className="absolute top-0 h-full w-px bg-canvas/55"
+                      style={{ left: `${v}%` }}
                       aria-hidden="true"
                     />
-                  </div>
-                  <div className="relative mt-1 h-[13px] text-[10px] text-fg-4">
-                    {[20, 40, 60, 80].map((v) => (
-                      <span key={v} className="absolute -translate-x-1/2" style={{ left: `${v}%` }}>
-                        {v}
-                      </span>
-                    ))}
-                  </div>
+                  ))}
+                  <i
+                    className="slide-thumb absolute -top-[2px] h-[13px] w-[3px] rounded-full bg-fg"
+                    style={{
+                      left: `calc(${Math.max(0, Math.min(100, ov.temp.temperature))}% - 1.5px)`,
+                      boxShadow: '0 0 10px rgba(238,243,250,.65)',
+                    }}
+                    aria-hidden="true"
+                  />
                 </div>
-              )}
-              <div className="text-[11.5px] leading-relaxed text-fg-4">
-                {Object.entries(ov.temp.components ?? {})
-                  .map(([k, v]) => `${DIM_LABEL[k] ?? k} ${v == null ? '缺失' : `${v.toFixed(1)}°`}`)
-                  .join(' · ')}
+                <div className="relative mt-1 h-[13px] text-[10px] text-fg-4">
+                  {[20, 40, 60, 80].map((v) => (
+                    <span key={v} className="absolute -translate-x-1/2" style={{ left: `${v}%` }}>
+                      {v}
+                    </span>
+                  ))}
+                </div>
               </div>
-              {/* ⚠️ 估值分化告警。后端一直在给（temp.divergence.level / message），
-                  旧前端也一直显示，但重写时**整个漏掉了** —— 属于安全披露丢失：
-                  系统在说"我的几个估值信号互相矛盾，别过度相信这个读数"，
-                  而界面装作没有这回事。审计 F-02 属于同一类问题。 */}
-              {ov.temp.divergence?.level && ov.temp.divergence.level !== '一致' && (
-                <div className="mt-2 rounded-md border border-line bg-inset px-2.5 py-2 text-[11.5px] leading-relaxed text-warn">
-                  ⚠ {plainText(ov.temp.divergence.level)}
-                  {ov.temp.divergence.message ? `：${plainText(ov.temp.divergence.message)}` : ''}
-                </div>
-              )}
-              {ov.temp.scope?.note && (
-                <div className="mt-2 border-t border-line pt-2 text-[11.5px] leading-relaxed text-fg-4">
-                  {plainText(ov.temp.scope.note)}
-                </div>
-              )}
-            </Card>
-          </div>
+            )}
+            <div className="text-[11.5px] leading-relaxed text-fg-4">
+              {Object.entries(ov.temp.components ?? {})
+                .map(([k, v]) => `${DIM_LABEL[k] ?? k} ${v == null ? '缺失' : `${v.toFixed(1)}°`}`)
+                .join(' · ')}
+            </div>
+            {/* ⚠️ 估值分化告警。后端一直在给（temp.divergence.level / message），
+                旧前端也一直显示，但重写时**整个漏掉了** —— 属于安全披露丢失：
+                系统在说"我的几个估值信号互相矛盾，别过度相信这个读数"，
+                而界面装作没有这回事。审计 F-02 属于同一类问题。 */}
+            {ov.temp.divergence?.level && ov.temp.divergence.level !== '一致' && (
+              <div className="mt-2 rounded-md border border-line bg-inset px-2.5 py-2 text-[11.5px] leading-relaxed text-warn">
+                ⚠ {plainText(ov.temp.divergence.level)}
+                {ov.temp.divergence.message ? `：${plainText(ov.temp.divergence.message)}` : ''}
+              </div>
+            )}
+            {ov.temp.scope?.note && (
+              <div className="mt-2 border-t border-line pt-2 text-[11.5px] leading-relaxed text-fg-4">
+                {plainText(ov.temp.scope.note)}
+              </div>
+            )}
+          </Card>
 
           {/* 行情 + 消息面（B-3 补的两个独占展示块）。
-              两者都是"市场当下状态"，并排放；温度卡在上一行右侧，同属"市场位置"一族。
+              两者都是"市场当下状态"，并排放；温度卡在上一行，同属"市场位置"一族。
               ⚠️ 子项必须给 `min-w-0`：grid/flex 子项默认 `min-width: auto`，
                  内容（长基金名 / 行情 chip）的 min-content 宽会把卡片顶破 → 375 下横向溢出。 */}
           <div className="grid items-start gap-4 md:grid-cols-2">
