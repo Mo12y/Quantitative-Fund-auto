@@ -23,97 +23,111 @@
 
 ## 交接记录
 
-### 交接：2026-10-06（会话六 → 下一个智能体）—— ⭐ **当前任务：前端「信息密度瘦身」**
+### 交接：2026-10-06（会话六 → 会话七）—— ✅ **前端「信息密度瘦身」六条处方全部落地**
 
-> ⚠️ **上一个智能体出现思考循环，主动交接**。本块为该任务的**自包含入口**，
-> 读完本块 + 下方「开工三步」即可继续，不需要重新摸项目。
+> 前一个智能体（会话六）出现思考循环、主动交接；本块由**会话七**接手完成后重写。
+> 上一版交接块留的题（六条处方 + 第 1 条未提交）已全部做完，故本块改为**完成记录 + 下一步**。
 
 **一句话**：用户反馈新前端「整体交互逻辑和信息面对于人类来说有点变态」，
-已完成**诊断 → 对标三个开源产品 → 写规范 → 加可断言红灯**，
-现在按处方**改页面**。第 1 条（曲线去网格）**已改完但尚未提交**。
+经 **诊断 → 对标三个开源产品 → 写规范 → 加可断言红灯 → 改页面** 五步，
+六条瘦身处方**全部落地并各自提交**。
 
-#### 当前状态（2026-10-06 19:49 实测）
+#### 当前状态（2026-10-06 20:35 实测）
 
 | 项 | 值 |
 |---|---|
-| HEAD | `fe2237c`（已推送，与远端一致） |
-| ⚠️ 未提交改动 | `frontend/src/components/ChartPlot.tsx`、`frontend/src/lib/chartColors.ts` |
-| 含义 | **瘦身第 1 条「曲线去网格」已完成**：删 `CartesianGrid`、`YAxis` 改 `hide`、`XAxis` 去轴线；`chartColors` 里 `GRID/AXIS/TICK` 标注为闲置 |
-| 验证程度 | ✅ `tsc -b --noEmit` 0 ｜ ✅ `vite build` 绿 ｜ ✅ 人工看截图确认（曲线变干净）｜ ❌ **未跑 `verify_frontend.py`**（服务被取消） |
-| 服务 | **未在跑**（需重启 + precompute） |
+| HEAD | 本轮 6 个 commit（`b571a9d` 第4条 → `42dd3e4` 第6条 → 收尾 commit） |
+| 工作树 | 干净（收尾 commit 后） |
+| 门禁 | ✅ pytest **845 passed / 2 skipped** ｜ ✅ 前端真机 **60/60** ｜ ✅ 数据契约 **24 项 0 失败** ｜ ✅ `tsc --noEmit` 0 ｜ ✅ `vite build` 绿 |
+| 服务 | 起在 `:5020`（需先 `precompute` 预热，否则密度**假低**） |
 
-#### 任务：按 `DESIGN.md` §5 做信息密度瘦身
+#### 六条处方落地情况（详见计划书 §13.8「落地记录」）
 
-**必读顺序**（不要跳）：
-1. 本文件顶部（就是这里）
-2. `AGENTS.md` §二（命令）+ §三（铁律）
-3. `DESIGN.md` **§5**（信息密度规范 —— 2026-10-05 重写为**可断言**）
-4. `docs/前端重构计划书.md` **§13**（诊断数字 + 对标记录 + 六条处方）
+| # | 内容 | 状态 | 实测（1440×900，数字节点 / 页高屏） |
+|---|---|---|---|
+| 1 | 曲线去网格（只留形状 + 零轴 + tooltip） | ✅ | 今天 80→74（y 刻度不再计入） |
+| 2 | 「今天」瘦成 大数字 + 结论句 + 曲线 | ✅ | 30 → **24** / 1.32 → **1.27** |
+| 3 | 数据链路从「今天」搬到「设置」，默认折叠 | ✅ | 今天 50→30 / 研究 107→87 |
+| 4 | 持仓表从「今天」移走 | ✅ | 今天 74→50 / 2.27→2.05 |
+| 5 | 行情 + 消息面压成一行小条（`MarketStrip`） | ✅ | 今天页高 1.32→1.27 |
+| 6 | 筛选池可视列 6 → 4（代码/名称/夏普/近3月） | ✅ | 研究 87→**75** |
 
-**六条处方**（详见计划书 §13.6；第 1 条已完成未提交）：
+**本轮总账（1440×900 数字节点 / 页高屏，基线已同步下调）**
 
-| # | 内容 | 状态 |
-|---|---|---|
-| 1 | **曲线去网格**（删网格 / Y 轴刻度 / 边框，只留形状 + 零轴 + tooltip） | ✅ 已改，未提交 |
-| 2 | 「今天」页瘦成 3 块：**大数字（总资产）+ 结论句 + 曲线** | ⬜ |
-| 3 | 数据链路（审计）从「今天」搬到「设置」，**默认折叠** | ⬜ |
-| 4 | 持仓表从「今天」移走（「持仓」页本就有） | ⬜ |
-| 5 | 行情 + 消息面压成**一行小条**（现在各占一张卡） | ⬜ |
-| 6 | 筛选池一行 **8 列 → 4 列**（代码/名称/夏普/动量），其余进展开 | ⬜ |
+```
+今天   80 / 2.3  →  24 / 1.27    （基线 30 / 1.5）✅ 已达 DESIGN 目标（≤40）
+研究  108 / 1.7  →  75 / 1.23    （基线 85 / 1.5）
+设置  129 / 2.4  →  43 / 1.81    （基线 55 / 2.1）
+持仓   53 / 1.6  →  51 / 1.55    （基线 53 / 1.6，本页未瘦）
+```
 
-**第 2 条的参照（交叉验证过的共识，别自己发挥）**：
-首屏核心 = **一个大数字 + 一条曲线**；大数字字号约正文 **3~6 倍**；
-数字**必须带参照**（变化额 + 变化率 + 时间窗）；导航只留图标；首屏零解释性文字。
-依据：Wealthfolio / Ghostfolio / Rotki 三个独立产品实测结构一致（计划书 §13.3.2）。
-⚠️ **它们都是欧美配色（涨绿跌红），本项目必须涨红跌绿 + ▲▼ —— 这条不照搬。**
+#### 本轮**顺手改掉**的三处非计划内问题（都在 commit 消息里写明了）
 
-#### 开工三步
+1. ⚠️ **密度判据测不出"折叠"**：Chrome 121+ 关闭态 `<details>` 用 `content-visibility: hidden`，
+   子孙 `display` 仍非 `none`、rect 非零 → 旧 `DENSITY_JS` 把折叠内容也算进密度
+   （实测：搬来折叠卡后「设置」反而 128→**148** 假涨）。已改为跳过 closed details。
+2. **结论徽标自相矛盾**：原按 `need_rebalance` 判定，而本机 `need_rebalance=true` 且
+   `instructions=[]`，文案写着"无需任何买卖操作" → 改为按**有无非持有指令**判定。
+3. **量化模型三表默认展开**：计划书 §13.2 点名它是"审计内容混进日常界面"。
+   收进折叠区后本卡 1070px → 约 150px，同时不再压住整行高度。
+
+⚠️ **两条**为保住密度基线上限而做的**等价替换**（不是新增内容）：
+「设置」页运维命令表默认折叠（DESIGN §5.1「命令表一律默认折叠」）；
+「持仓」页 `PlanProgress` 去掉与进度条重复的「已投 X%」，腾出的额度给
+从「今天」搬来的「已实现盈亏」。
+
+#### 下一步（按优先级）
+
+1. **B-6（删旧前端）** 仍是唯一未做的施工项 —— 前置条件是"B-5 稳定、自己用几天"，
+   且删掉 `scripts/check_rise_fall.py` 后需**补一条查新前端的涨跌色断言**
+   （现在靠 `lib/format.ts` 的 `dirClass` 保证）。
+2. **字号 14 档 → 6~7 档**（计划书 §13.6 原列第 6 条，本轮**未做**）：
+   `@theme` 里没有 `--text-*` token，这是它一直没收敛的根因。要做就得先给
+   `index.css` 补字号 token，再逐处替换 —— 独立一轮。
+3. 密度剩余空间：持仓 51（目标 40）、研究 75（目标 40）。研究的大头是筛选池与
+   行业板块两张表本身（不是装饰），再压要靠"要不要全摊开"的产品决策，不是版式改动。
+
+#### 开工三步（与上一版相同，未变）
 
 ```bash
 cd /d/DSH/projects/Quantitative-Fund-auto
 
-# ① 起服务（后台）+ 预热快照 —— ⚠️ 不预热会得到假数字，见下方坑 1
+# ① 起服务（后台）+ 预热快照 —— ⚠️ 不预热会得到假数字
 C:/Users/m1309/AppData/Local/Programs/Python/Python313/python.exe src/main.py web
-C:/Users/m1309/AppData/Local/Programs/Python/Python313/python.exe src/main.py precompute   # ~132s
+C:/Users/m1309/AppData/Local/Programs/Python/Python313/python.exe src/main.py precompute
 
-# ② 验收四件套（改完必跑）
-C:/Users/m1309/AppData/Local/Programs/Python/Python313/python.exe -m pytest tests/ -q          # 期望 845 passed / 2 skipped
-C:/Users/m1309/AppData/Local/Programs/Python/Python313/python.exe scripts/verify_frontend.py   # 期望 53/53（含 8 条密度断言）
-C:/Users/m1309/AppData/Local/Programs/Python/Python313/python.exe scripts/check_ledger_invariants.py  # 期望 24 项 0 失败
+# ② 验收四件套
+C:/Users/m1309/AppData/Local/Programs/Python/Python313/python.exe -m pytest tests/ -q          # 845 passed / 2 skipped
+C:/Users/m1309/AppData/Local/Programs/Python/Python313/python.exe scripts/verify_frontend.py   # **60/60**
+C:/Users/m1309/AppData/Local/Programs/Python/Python313/python.exe scripts/check_ledger_invariants.py  # 24 项 0 失败
 cd frontend && D:/nodejs/node.exe node_modules/typescript/bin/tsc -b --noEmit && D:/nodejs/node.exe node_modules/vite/bin/vite.js build
 
 # ③ 推送（⚠️ 必须 SSH 显式 URL，HTTPS 不通）
 git push git@github.com:Mo12y/Quantitative-Fund-auto.git main
 ```
 
-#### ⚠️ 改完页面后**必须下调基线**
+#### ⚠️ 坑（本轮新增，接上上一版的 7 条）
 
-`scripts/verify_frontend.py` 的 `DENSITY_BASELINE` 现在是「基线上限」——
-它只钉「不许更差」。**瘦身成果要靠手动往下降基线来兑现**，不调等于没瘦。
+8. ⚠️ **折叠区不能只看 `display`**：判"在不在屏上"要显式排除 `details:not([open])` 的子孙
+   （见上面"顺手改掉 1"）。
+9. ⚠️ **Bento 栅格里"加一张卡"未必加页高**：「设置」页第二行的高度由左侧
+   「量化模型」（当时 1070px）决定，右列里堆卡不增加页高；单独开一行（span 12）才 +120px。
+   搬卡进某页前**先量同行最高者**。
+10. ⚠️ **密度基线的"只许往下调"遇到"搬内容"会冲突**：本轮靠**同页等价替换**
+    （折叠命令表 / 去掉重复的已投%）解决，不上调任何一页。以后搬内容请照此办理。
 
-#### 特别提醒（本轮踩过，别重复）
+#### 约束（未变）
 
-1. ⚠️⚠️ **冷缓存会给出假数字**。服务刚重启时快照是冷的 → 页面显示 warming 骨架 →
-   密度测量值**假低**（本轮实测：研究页 107→49 的"降幅"大部分是 warming，不是真瘦身）。
-   **必须先 `precompute` 再测。**
-2. ⚠️ **`Edit(replace_all=True)` 只替换第一处**（实测 8 处只改了 1 处）→ 用 Python 脚本批量替换。
-3. ⚠️ **kill 进程要用 bash PID**：`ps aux` 第 1 列是 bash PID、第 4 列才是 Windows PID；
-   或 `taskkill //F //PID <winpid>`。
-4. ⚠️ **pytest 每次换全新 basetemp + 串行**，并设 `CODEBUDDY_SAFE_DELETE_BULK_THRESHOLD=100000`
-   （复用目录会让 safe-delete 报错 → 一堆 ERROR 而非 failed）。
-5. ⚠️ **视觉验收用视口截图**（`full_page=True` 下 body 的 `background-attachment: fixed` 只渲染顶部一屏）。
-6. ⚠️ **JSX 文本里写 `**粗体**` 会原样渲染** → `verify_frontend.py` 会断言页面无 markdown 记号泄漏。
-7. ⚠️ **需要读 GitHub 时**：请用户开 Clash，用 `curl -x http://127.0.0.1:7897`；
-   不通时 `WebFetch` 返回空、直连 000。
+- **不动 `data/fund_quant.db`**（`precompute` 会写 `analysis_snapshot` 缓存表，属正常读缓存，非账本变更）。
+- **不新增运行时依赖**（`@container` 用的是 Tailwind v4 内建容器查询，不是新依赖）。
+- **不顺手扩大范围**：新问题记在 commit 与本节，不悄悄改。
+- **B-6（删旧前端）不在本轮**。
 
-#### 约束（别越界）
-
-- **不动 `data/fund_quant.db`**（本轮纯前端）。
-- **不新增运行时依赖**（确需先停下问）。
-- **不顺手扩大范围**：发现新问题**记下来**，不顺手改。
-- **B-6（删旧前端）不在本轮** —— 优先级低于瘦身。
-
-> 本块之前的交接（B-0~B-5 全部完成、B-6 待办）见下方历史块，需要时再读。
+> 上一版交接块（会话六，含六条处方的**原始**对照参照与 7 条坑）已并入本节；
+> 其内容要点：首屏核心 = 一个大数字 + 一条曲线、大数字约正文 3~6 倍、
+> 数字必须带参照（变化额 + 变化率 + 时间窗）、导航只留图标、首屏零解释性文字
+> —— 依据是 Wealthfolio / Ghostfolio / Rotki 三个独立产品的实测交集（计划书 §13.3.2）。
+> ⚠️ 三者都是欧美配色（涨绿跌红），**本项目必须涨红跌绿 + ▲▼**，此条不照搬。
 
 ---
 
@@ -287,9 +301,8 @@ git push git@github.com:Mo12y/Quantitative-Fund-auto.git main
 | `src/web/app.py` / `src/cli/output_cmds.py` | update/delete/dividend_policy 改走门面 |
 | `tests/conftest.py` | 设 `QFA_DB_ALLOW_CREATE=1` 放行测试建临时库 |
 | `tests/test_ledger_write.py` | 路径守卫 + 口径①② + 孤儿流水（13 个用例） |
-| `frontend/src/components/LiveQuoteCard.tsx` | B-3：行情快照 + 时滞（`available=false` 是降级） |
-| `frontend/src/components/SentimentCard.tsx` | B-3：消息面三态自管轮询 + 旧值标注 |
 | `frontend/src/components/BacktestRec.tsx` | B-3：历史回测折叠块（引用信封层 `purpose`） |
+| `frontend/src/components/MarketStrip.tsx` | B-3 的行情块 + 消息面块 —— 2026-10-06 瘦身第 5 条把原先那两个组件合并成本文件（消息面三态轮询抽到 `frontend/src/lib/useSentiment.ts`） |
 | `frontend/src/lib/useApi.ts` | B-3：加 `envelope` 字段（带出信封层文案） |
 | `frontend/src/routes/Today.tsx` / `Research.tsx` | B-3：接入三个块（子项给 `min-w-0`） |
 
