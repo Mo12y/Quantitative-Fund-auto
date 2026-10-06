@@ -23,12 +23,12 @@
 
 - 数据规模：`fund_info` 约 2.8 万只；`fund_nav` 约 2,290 万行 / 2.4 万只有净值
 - 账本：`data/fund_quant.db`（`holdings` / `transactions` / `fund_nav` / `fund_info` / `trade_calendar` …）
-- 前端：⚠️ **过渡期 —— 两套并存，但已定案合并**。
-  **目标态（方案 B，2026-10-04 用户拍板）**：新前端 React（`frontend/`）挂 **`/`**，
-  旧仪表盘退役。施工详规见 `docs/前端重构计划书.md` **§10 + §12（B-0~B-6）**。
-  **当前态**：新前端仍在 `/v2`（`frontend/dist` 由 Flask 托管），
-  旧仪表盘在 `/`（`src/web/static/app.js`，**仍是唯一的写入口**）。
-  ⚠️ **B-5（切换）之前旧前端一行都不删** —— 它是唯一写入口 + 唯一回滚路径。
+- 前端：**方案 B 已全部落地（2026-10-06）**。React 新前端（`frontend/`，构建产物由 Flask 托管）
+  挂在 **`/`**；`/assets/<file>` 走 dist；`/v2*` → **301** 到 `/`（给书签/外链用，**保留**）。
+  **旧前端已删除**（B-6：`src/web/static/app.js` / `app.css` / `src/web/_archive/dashboard.html` /
+  `scripts/check_rise_fall.py`）；`src/web/static/` 只剩 `favicon.svg`（**新前端在用，别删**）。
+  施工详规与逐条落地记录见 `docs/前端重构计划书.md` **§10 / §12（B-0~B-6）/ §13**。
+  ⚠️ 回滚只在 git 历史里（例如 `git show 3425ed5:src/web/static/app.js`）。
 
 ## 二、操作记忆：环境与命令
 
@@ -50,10 +50,10 @@
 
 | 动作 | 命令 |
 |:---|:---|
-| 跑测试（基线 **806 passed / 2 skipped**，2026-10-03 实测） | `python -m pytest tests/ -q` |
+| 跑测试（基线 **831 passed / 2 skipped**，2026-10-06 实测） | `python -m pytest tests/ -q` |
 | 起 Web | `python src/main.py web`（默认 :5020） |
-| 前端构建 | `cd frontend && npm run build` |
-| **前端真机验收**（33 项，需先起服务**并先 `precompute` 预热快照**） | `python scripts/verify_frontend.py` |
+| 前端构建 | `cd frontend && npm run build`（沙箱里 npm 不稳 → `D:/nodejs/node.exe node_modules/vite/bin/vite.js build`） |
+| **前端真机验收**（**65 项**，需先起服务**并先 `precompute` 预热快照**） | `python scripts/verify_frontend.py` |
 | **数据契约检查**（24 项，只读） | `python scripts/check_ledger_invariants.py` |
 | 同类结构体检（只读） | `python scripts/analyze_peer_structure.py` |
 | 回填指数估值分位（**写库，先快照**） | `python scripts/backfill_index_percentiles.py [--dry-run]` |
@@ -75,7 +75,7 @@
    （表现为"持仓=0、最新净值=None"，极易误判成数据丢失）。
 3. **【铁律·先复现再修改】**：结论与文档不符时**停下来报告**，不要硬改。
    口径不同 ≠ bug —— 本项目反复栽在"把口径当 bug 修"和"把 bug 当口径放过"两头。
-4. **【铁律·测试全绿】**：现有 **806** 个测试必须继续全绿；每项修复配新测试。
+4. **【铁律·测试全绿】**：现有 **831** 个测试必须继续全绿；每项修复配新测试。
 5. **【铁律·不新增运行时依赖】**：确需新增先停下来问。（开发工具如 Playwright 不算，不进 `requirements.txt`。）
 6. **【铁律·不顺手扩大范围】**：做完所列事项即停；发现的新问题**记下来**，不顺手改。
 7. **【铁律·付费服务先设闸】**：任何计费外部 API（同花顺等）先报告预估用量与金额、配硬上限、
@@ -91,7 +91,7 @@
    `【文献】`附可查来源｜`【推测】`写明依据 + 什么证据能推翻它。
 2. **不迎合**：与用户判断冲突时**先摆证据再给建议**；确信度低就直说没把握，
    **不许为显得独立而制造分歧**，也不许明知有错却顺着说。
-3. **机械验收**：任务的"验收"必须写**命令 + 预期输出**（如 `pytest -q 得 806 passed`），
+3. **机械验收**：任务的"验收"必须写**命令 + 预期输出**（如 `pytest -q 得 831 passed`），
    **不写 prose**（如"数字一致"）。
 4. **提醒预算**：只在"会改变结论是否成立"或"成本量级变化"时提醒，每轮最多 3 条、
    单独成节、不混进主回答；**没有达标项就一条都不写**。
@@ -101,9 +101,9 @@
 
 | 守卫 | 命令 | 挡住什么 |
 |:---|:---|:---|
-| 功能回归 | `python -m pytest tests/ -q` | 806 项功能断言（基线 **806 passed / 2 skipped**）|
+| 功能回归 | `python -m pytest tests/ -q` | 831 项功能断言（基线 **831 passed / 2 skipped**）|
 | 数据契约（账本 + 市场数据） | `python scripts/check_ledger_invariants.py` | 值域 / 引用完整性 / 时序 / 覆盖率 / 新鲜度 / **复式记账恒等式**（24 项 = 账本 13 + 市场数据 11）|
-| 前端真机 | `python scripts/verify_frontend.py` | 四入口渲染、导航断点、移动端零溢出、动效绑定、数据链路下钻（**33 项**）<br>⚠️ **必须先 `precompute` 预热快照**，否则「研究」在 warming 骨架屏上采样会假红 |
+| 前端真机 | `python scripts/verify_frontend.py` | 四入口渲染、导航断点、移动端零溢出、动效绑定、数据链路下钻、**信息密度基线**、**字号 token**、**涨跌色**（**65 项** = 动态 54 + 静态 11）<br>⚠️ **必须先 `precompute` 预热快照**，否则「研究」在 warming 骨架屏上采样会假红 |
 | **文档引用完整性** | `pytest tests/test_doc_refs.py -q` | 文档指向**仓库内不存在**的路径 |
 | 同类结构体检 | `python scripts/analyze_peer_structure.py` | 同类相关基线（决定 `corr_overlap` 阈值是否还成立）|
 

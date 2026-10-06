@@ -23,7 +23,7 @@
 
 退出码：0 = 全过；1 = 有失败（可直接接进 CI / 提交前自查）。
 
-覆盖范围（截至 2026-10-06 共 **63 项** = 动态 54 + 静态 9）：
+覆盖范围（截至 2026-10-06 共 **65 项** = 动态 54 + 静态 11）：
   ① 四入口渲染与导航可达
   ② hash 路由（深链直达 / 未知 hash 回落）
   ③ 文案卫生（JSX 里写 `**粗体**` 会原样渲染 —— 曾真出现字面 `**只读**`）
@@ -40,6 +40,9 @@ B-0 追加（2026-10-04，计划书 §11.3 的 ⬜ 三项 → ✅；见 §11.4 �
   ⑨ **留白**：`Card` 自身零 margin；间距只走 4px-grid（**含 Tailwind 半档**，见 `_SPACING_GRID_PX`）
   ⑩ **视觉层级**：h 标签字号可解析（裸值或 token）；无 `h1 > h2 > h3` 倒挂；页面头层字号高于卡标题
   ⑪ **数字等宽**：货币/百分比/份额格式化值必须挂 `.num`/`.mono`
+  ⑫ **涨跌色**：`--color-rise` 是红 / `--color-fall` 是绿（中国惯例）、`dirClass()` 映射不反转、
+     `chartColors.RISE/FALL` 与 `@theme` 同值 —— 2026-10-06 B-6 起**接管**
+     被删的 `scripts/check_rise_fall.py`
 
 ⚠️ 静态扫描项（⑧⑨⑩⑪）**不需要起服务**：`--static-only` 可单独跑。
    默认模式下若服务不可达，静态项仍会跑并计入结果，动态项才降级为 SKIP。
@@ -472,11 +475,64 @@ def static_numeral() -> None:
           not unreachable, unreachable[:5] or "全部命中")
 
 
+# ── ⑪ 涨跌色：rise=红 / fall=绿（中国惯例），且重复常量不许漂移 ──────────────
+# ⚠️ 2026-10-06 B-6：本条**接管**被删掉的 `scripts/check_rise_fall.py`。
+#    旧守卫专查旧前端 `app.css` / `app.js` 里的 `--up/--down` 残留（那是**欧美惯例**：
+#    绿=涨、红=跌，与 A 股相反 → 曾把"盈利显示成绿色"）。旧前端删了，那条守卫没有对象了，
+#    但**「涨跌色不许再反」这条约束必须继续有红灯**，否则哪天有人"顺手统一配色"就没人拦。
+#    新前端方向色只有两个来源，都要断言：
+#      ① `@theme` 的 `--color-rise` / `--color-fall` —— 语义必须是 红 / 绿；
+#      ② `lib/format.ts` 的 `dirClass()` 映射不能反转（rise→text-rise、fall→text-fall）。
+#    另有一处**重复常量**：`lib/chartColors.ts` 的 RISE/FALL（Recharts 不认 CSS 变量，
+#    只能另写一份）—— 它最容易与 token 漂移，故单独断言同值。
+def static_rise_fall() -> None:
+    css = INDEX_CSS.read_text(encoding="utf-8") if INDEX_CSS.exists() else ""
+    fmt_path = SRC / "lib" / "format.ts"
+    cc_path = SRC / "lib" / "chartColors.ts"
+    fmt = fmt_path.read_text(encoding="utf-8") if fmt_path.exists() else ""
+    cc = cc_path.read_text(encoding="utf-8") if cc_path.exists() else ""
+
+    def hex_of(tok: str) -> str | None:
+        m = re.search(re.escape(tok) + r"\s*:\s*(#[0-9a-fA-F]{6})", css)
+        return m.group(1).lower() if m else None
+
+    def rgb(h: str) -> tuple[int, int, int]:
+        return (int(h[1:3], 16), int(h[3:5], 16), int(h[5:7], 16))
+
+    rise, fall = hex_of("--color-rise"), hex_of("--color-fall")
+    sem_ok = False
+    if rise and fall:
+        rr, rg, rb = rgb(rise)
+        fr, fg, fb = rgb(fall)
+        # rise 必须红占优；fall 必须绿占优
+        sem_ok = rr > rg and rr > rb and fg > fr and fg > fb
+    map_ok = bool(re.search(r"d\s*===\s*'rise'\s*\?\s*'text-rise'", fmt)) and bool(
+        re.search(r"d\s*===\s*'fall'\s*\?\s*'text-fall'", fmt))
+    check(
+        "涨跌色：rise=红 / fall=绿（中国惯例）且 dirClass 映射不反转",
+        sem_ok and map_ok,
+        f"rise={rise} fall={fall}｜dirClass {'OK' if map_ok else '反转或缺失'}"
+        + ("" if sem_ok else "｜⚠️ 语义反了（又成欧美惯例）"),
+    )
+
+    cc_rise = re.search(r"export const RISE = '(#[0-9a-fA-F]{6})'", cc)
+    cc_fall = re.search(r"export const FALL = '(#[0-9a-fA-F]{6})'", cc)
+    same = bool(cc_rise and cc_fall and rise and fall
+                and cc_rise.group(1).lower() == rise and cc_fall.group(1).lower() == fall)
+    check(
+        "涨跌色：图表常量 chartColors.RISE/FALL 与 @theme 同值（重复常量不许漂移）",
+        same,
+        f"chartColors {cc_rise.group(1) if cc_rise else '?'}/{cc_fall.group(1) if cc_fall else '?'}"
+        f" vs @theme {rise}/{fall}",
+    )
+
+
 def run_static_checks() -> None:
     static_typography()
     static_spacing()
     static_hierarchy()
     static_numeral()
+    static_rise_fall()
 
 
 # ══════════════════════════════════════════════════════════════════════════

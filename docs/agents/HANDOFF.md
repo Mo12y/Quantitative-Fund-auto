@@ -36,9 +36,9 @@
 
 | 项 | 值 |
 |---|---|
-| HEAD | 本轮 **9 个 commit**（`b571a9d` 第4条 → … → 研究/持仓瘦身 → **字号收敛**） |
+| HEAD | 本轮 **10 个 commit**（`b571a9d` 第4条 → … → 字号收敛 → **B-6 删旧前端**） |
 | 工作树 | 干净（收尾 commit 后） |
-| 门禁 | ✅ pytest **845 passed / 2 skipped** ｜ ✅ 前端真机 **63/63** ｜ ✅ 数据契约 **24 项 0 失败** ｜ ✅ `tsc --noEmit` 0 ｜ ✅ `vite build` 绿 |
+| 门禁 | ✅ pytest **831 passed / 2 skipped** ｜ ✅ 前端真机 **65/65** ｜ ✅ 数据契约 **24 项 0 失败** ｜ ✅ `tsc --noEmit` 0 ｜ ✅ `vite build` 绿 |
 | 服务 | 起在 `:5020`（需先 `precompute` 预热，否则密度**假低**） |
 
 #### 六条处方落地情况（详见计划书 §13.8「落地记录」）
@@ -121,20 +121,51 @@ body-sm 12.5 / caption 11.5 / micro 10），**24 个文件 164 处**裸字号一
    → 一轮 verify 就被抓出来。现按正常态取 **46**。
    ⚠️ **如实记**：联网态 42 比目标 40 **多 2**，来源就是那 4 组指数报价。
 
+#### 后续轮 3（同日）：**B-6 删旧前端 —— B-0~B-6 施工全部完成**
+
+- 删 `src/web/static/app.js` / `app.css`、`src/web/_archive/dashboard.html`（空目录一并删）、
+  `scripts/check_rise_fall.py`。
+  ⚠️ **`src/web/static/favicon.svg` 保留** —— 计划里没提它，但**新前端的
+  `frontend/index.html` 引用了 `/static/favicon.svg`**（Flask 默认静态路由提供），删了就是一条 404。
+- ⚠️ **计划漏列的 3 个文件（跑 pytest 才炸出来，这才是 B-6 真正的坑）**：
+  删 `tests/test_curve_render.py`、`tests/test_recommend_render.py`
+  （**旧前端的静态哨兵**：模块导入时就 `read_text()` 读 `app.js`/`app.css` 源码，被测对象一删
+  连**收集**都过不去 → 整轮 pytest `Interrupted`）、`scripts/_diag_frontend.py`
+  （一次性探测脚本，读 `app.js` + 已在 B-5 移走的 `dashboard.html`，其实早就坏了）。
+  ⚠️ **测试总数 845 → 831**（14 个用例）属"被测对象已删除"的**正常下降**，不是丢测试 ——
+  同时新增了 5 条前端静态判据（涨跌色 2 + 字号 2 + 层级"可解析"1）。
+  ⚠️ **教训**：删代码前要 `grep` 一遍"谁在读这些文件"，**含 `tests/`，并预期"静态哨兵"这种形态**；
+  本轮是靠"删完立刻跑 pytest"补上的。
+- **替代守卫（删旧守卫的前提）**：`verify_frontend.py` 新增 **2 条静态断言** —
+  ① `--color-rise` 红 / `--color-fall` 绿（中国惯例）+ `dirClass()` 映射不反转；
+  ② **重复常量** `lib/chartColors.ts` 的 `RISE/FALL` 必须与 `@theme` 同值（Recharts 不认 CSS 变量）。
+  ✅ **做了负对照**：把两个色值对调后这 2 条立刻红（9/11），改回即绿。
+- `app.py`：删掉**从未被任何路由使用**的 `STATIC_DIR`；更新 `/v2` docstring（原文说"旧前端仍挂在
+  `/` 上、app.js 还在（B-6 才删）"，已过期）。`/v2*` → 301 **保留**（给书签/外链用）。
+- ⚠️ **验收口径要改**：计划书原文写「`grep -r "app\.js"` 无仓库内残留」，但那会与项目自己的
+  **"不改历史文档"** 规则冲突（多份历史任务书/执行报告引用了这些文件）。
+  已按 `test_doc_refs.py` 里 `templates/dashboard.html` 的**先例**办：**登记 EXCEPTIONS + 写理由**，
+  只改"活文档"（`AGENTS.md` 的当前态、计划书 B-6 与 §11.3 行、本文件）。
+- 顺带修了 `AGENTS.md` 的**过时基线**：806→**831** 项（其中 845→831 是 B-6 删掉 2 个
+  旧前端哨兵测试的**正常下降**，不是丢测试，见计划书 §12 B-6 第 4 条）、前端真机 33→**65** 项、前端段落的
+  "过渡期两套并存"→ 已全部落地。
+
 #### 下一步（按优先级）
 
-1. **B-6（删旧前端）** —— 前置条件"B-5 稳定、自己用几天"由**用户**判定；删
-   `scripts/check_rise_fall.py` 前必须补一条查新前端的涨跌色断言。
-2. ⚠️ **待用户拍板：DESIGN §5.2 的"数字节点 ≤40"是否对**表格页**合适？**
+> ⚠️ **施工项（B-0~B-6）已全部完成**，剩下的是**待用户拍板**的事项。
+
+1. ⚠️ **待拍板：DESIGN §5.2 的"数字节点 ≤40"是否对**表格页**合适？**
    实测「今天」31~42（联网态 42 略超）、「研究」76、「持仓」59，其构成是**表格内容本身**
    （研究两张表 8 行 × 3 字段；持仓表 7 只 × 4 字段 ≈ 28 就是下限）。
    见计划书 §13.9.3，**没有擅自改 §5.2 的目标值**。
-3. ⚠️ **待用户拍板（三个产品取舍，见 §13.9.3 / §13.10.3）**：
+2. ⚠️ **待拍板（三个产品取舍，见 §13.9.3 / §13.10.3）**：
    ① 研究「筛选池每板块 8 → 5 只」（省约 9 个读数）；
    ② 持仓「去掉收益率% 列」（省 7；但它是跨基金可比大小的唯一指标）；
    ③ 今天「行情小条去掉指数点位」（省 4 → 联网态 38，可回到 ≤40）。
+3. ⚠️ **回滚 B-6 的话**：文件只在 git 历史里（`git show 3425ed5:src/web/static/app.js`）。
+   真要恢复"旧前端可用"，得同时恢复 `app.py` 的 `/` 路由 —— 不建议，那是把 B-5 一起退回去。
 
-#### 开工三步（与上一版相同，未变；只是真机项数 **63**）
+#### 开工三步（与上一版相同，未变；只是真机项数 **65**）
 
 ```bash
 cd /d/DSH/projects/Quantitative-Fund-auto
@@ -144,8 +175,8 @@ C:/Users/m1309/AppData/Local/Programs/Python/Python313/python.exe src/main.py we
 C:/Users/m1309/AppData/Local/Programs/Python/Python313/python.exe src/main.py precompute
 
 # ② 验收四件套
-C:/Users/m1309/AppData/Local/Programs/Python/Python313/python.exe -m pytest tests/ -q          # 845 passed / 2 skipped
-C:/Users/m1309/AppData/Local/Programs/Python/Python313/python.exe scripts/verify_frontend.py   # **63/63**
+C:/Users/m1309/AppData/Local/Programs/Python/Python313/python.exe -m pytest tests/ -q          # 831 passed / 2 skipped
+C:/Users/m1309/AppData/Local/Programs/Python/Python313/python.exe scripts/verify_frontend.py   # **65/65**
 C:/Users/m1309/AppData/Local/Programs/Python/Python313/python.exe scripts/check_ledger_invariants.py  # 24 项 0 失败
 cd frontend && D:/nodejs/node.exe node_modules/typescript/bin/tsc -b --noEmit && D:/nodejs/node.exe node_modules/vite/bin/vite.js build
 
@@ -194,7 +225,7 @@ git push git@github.com:Mo12y/Quantitative-Fund-auto.git main
 ### 交接：2026-10-05（DSH 会话五 → 下一个智能体）—— ⭐ **B-0 ~ B-5 已全部完成，剩 B-6（删旧前端）**
 
 > **状态来源（本轮实测）**：工作树干净（本块提交后）、已推送、
-> 门禁 **845 passed / 2 skipped**、前端真机 **45/45**（在 **`/`** 上跑）、
+> 门禁 **845 passed / 2 skipped**（当时值）、前端真机 **45/45**（在 **`/`** 上跑）、
 > 数据契约 **24 项 0 失败**、前端 `tsc --noEmit` 0、`vite build` 成功。
 > ⭐ **新前端已挂在 `/`**（B-5 完成）；`/v2` → 301 到 `/`；旧仪表盘已归档。
 > ⚠️ **账本新增一张表** `ledger_commits`（撤销日志，B-4b-1）；动它之前已快照
@@ -227,6 +258,9 @@ git push git@github.com:Mo12y/Quantitative-Fund-auto.git main
 补 6 个写端点封装：`holdings` / `reconcile` / `holdingsRefresh` / `navUpdate` / `planAction` / `dcaAction`。
 
 #### 二、下一步：按 DESIGN §5 瘦身（用户 2026-10-05 反馈后定的新主线）
+
+> ⚠️ **本块已完全被顶部块取代**：B-5 之后的 B-6 与 §13.6 六条处方**都已做完**，
+> 本块的"下一步 / 待办"**全部过时**，只作为"当时怎么定的"的线索保留。
 
 > **用户反馈原话**：「改完前端后，整体交互逻辑和信息面对于人类来说有点变态了，
 > 能不能学习一下其他人的再来做优化？」

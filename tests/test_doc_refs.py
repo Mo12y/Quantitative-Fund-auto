@@ -32,10 +32,25 @@ EXTS = ('.md', '.py', '.ts', '.tsx', '.js', '.css', '.json', '.yaml', '.html', '
 #:
 #: · `src/web/templates/dashboard.html` —— `docs/前端展示优化任务书.md` 提到它。
 #:   那是 **2026-09 的历史任务书**，描述的是当时的状态（当时该文件确实在 `templates/`）。
-#:   2026-10-05 的 B-5 把旧仪表盘退役、文件已 `git mv` 到 `src/web/_archive/dashboard.html`。
+#:   2026-10-05 的 B-5 把旧仪表盘退役、文件已 `git mv` 到 `src/web/_archive/dashboard.html`，
+#:   该文件又在 **2026-10-06 的 B-6 被删除**（见下一条）。
 #:   **不改历史任务书**（那是篡改记录），也**不删它**（它是审计线索）—— 只在此登记。
+#: · `src/web/static/app.js` / `src/web/static/app.css` / `src/web/_archive/dashboard.html` /
+#:   `scripts/check_rise_fall.py` / `tests/test_curve_render.py` / `tests/test_recommend_render.py`
+#:   —— 2026-10-06 的 **B-6 删除了旧前端**（`app.js`/`app.css`/`_archive/dashboard.html`/
+#:   `check_rise_fall.py`）以及**两个锁它渲染契约的静态哨兵测试**（读 `app.js`/`app.css` 源码文本，
+#:   被测对象没了它们就必然 ERROR；B-6 的计划里**漏列了这两个测试**，是跑 pytest 才炸出来的）。
+#:   这些路径仍被若干**历史任务书 / 执行报告 / 设计文档**引用（描述当时的状态），
+#:   也被 B-6 的**落地记录**本身引用（记录"删了什么"）。
+#:   仍按先例：**不改历史文档、不删它，只登记**。
 EXCEPTIONS: set[str] = {
     "src/web/templates/dashboard.html",
+    "src/web/static/app.js",
+    "src/web/static/app.css",
+    "src/web/_archive/dashboard.html",
+    "scripts/check_rise_fall.py",
+    "tests/test_curve_render.py",
+    "tests/test_recommend_render.py",
 }
 
 #: 含这些标记的行直接跳过（跨项目路径 / 通配符 / 命令 / 占位符 / 举例）

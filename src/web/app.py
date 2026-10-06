@@ -51,10 +51,11 @@ app.json = _SafeJSONProvider(app)
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
 DB_PATH = os.path.join(BASE_DIR, "data", "fund_quant.db")
 SECTORS_CACHE_FILE = os.path.join(BASE_DIR, "data", "sectors_cache.json")
-# 旧前端的静态资源目录（app.js / app.css / favicon.svg）。
-# ⚠️ B-5 后 `/` 已改挂新前端，这里的 `app.js`/`app.css` 不再被任何页面引用；
-# 它们与 `templates/dashboard.html` 一起在 **B-6** 删除，届时本常量一并清理。
-STATIC_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
+# ⚠️ 2026-10-06 B-6：旧前端的 `app.js` / `app.css` 已删除（连同 `_archive/dashboard.html`
+# 与 `scripts/check_rise_fall.py`）。原来那个指向 `src/web/static/` 的 `STATIC_DIR` 常量
+# **从未被任何路由使用**（静态文件一直由 Flask 的默认 `/static/<path>` 提供），故一并删掉。
+# ⚠️ `src/web/static/favicon.svg` **保留** —— 新前端的 `frontend/index.html` 引用了
+# `/static/favicon.svg`（Flask 默认静态路由提供），删了就是控制台一条 404。
 # 新前端（React）构建产物；由 `/` 路由托管（B-5 切换后旧仪表盘退役）
 FRONTEND_DIST = os.path.join(BASE_DIR, "frontend", "dist")
 
@@ -236,9 +237,9 @@ def legacy_v2_redirect(filename=None):
     `<path>` 部分映射到 `/#/<path>` 以**保留深链**（新前端是 hash 路由）。
     ⚠️ 用 301 而非 302：让浏览器与书签把新地址记下来，之后不再多一跳。
 
-    ⚠️ 关于"旧标签页要不要提示升级"：**本实现下不会出现 404** ——
-    旧前端仍挂在 `/` 上，刷新即得新界面；它的 `app.js` 也还在（B-6 才删）。
-    所以这里不额外造一个提示页（那需要先制造一个 404 才有位置放它）。
+    ⚠️ 2026-10-06 B-6 后：旧前端的源文件（`app.js` / `app.css` / `_archive/dashboard.html`）
+    **已删除**，所以"旧标签页仍能刷新"这件事已不成立 —— 但**本重定向仍然保留**：
+    它是给**书签 / 外部链接**用的（那些人需要被送到新地址），与旧文件在不在无关。
     """
     if filename:
         return redirect("/#/" + filename, code=301)
