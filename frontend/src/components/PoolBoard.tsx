@@ -14,7 +14,10 @@ const TH = 'field pb-2.5'
 function DropMark({ s }: { s: PoolFund['constraint_status'] }) {
   if (s !== 'dropped') return null
   return (
-    <span className="ml-1.5 whitespace-nowrap rounded-full border border-[#3d3117] px-1.5 text-micro text-warn">
+    /* ⚠️ 2026-10-06：原来这里的边框写的是裸色 `#3d3117`（warn 的暗化变体），是**全站唯一**
+       一处裸色白名单。现改用 `warn/30 + bg-warn/10` —— 与 `VerdictCard` 的「卖出」徽标
+       同一套写法，既是同一语义（warn），也让 `verify_frontend` 的裸色白名单**清零**。 */
+    <span className="ml-1.5 whitespace-nowrap rounded-full border border-warn/30 bg-warn/10 px-1.5 text-micro text-warn">
       落选约束
     </span>
   )

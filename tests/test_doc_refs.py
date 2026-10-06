@@ -43,6 +43,14 @@ EXTS = ('.md', '.py', '.ts', '.tsx', '.js', '.css', '.json', '.yaml', '.html', '
 #:   这些路径仍被若干**历史任务书 / 执行报告 / 设计文档**引用（描述当时的状态），
 #:   也被 B-6 的**落地记录**本身引用（记录"删了什么"）。
 #:   仍按先例：**不改历史文档、不删它，只登记**。
+#: · `docs/01-设计/结论权威口径.md` —— 被 `.claude/skills/first-principles-review.md` 引用。
+#:   那个技能是**从作者的毕设项目 `D:\大学\new` 迁过来的**领域技能，正文里的
+#:   `docs/01-设计/...` 是**毕设仓库的目录结构**，在本项目里本就不存在（跨项目引用）。
+#:   ⚠️ 本项目实际使用的是 WorkBuddy 项目技能目录 `.workbuddy/skills/` 下那份；
+#:   `.claude/` 下是原样留存的副本，**不改它的正文**（那是技能原文），只登记。
+#: · `scripts/build_benchmark.py` —— 被 `docs/基金推荐系统设计方案.md` §8.2 的产出脚本表引用，
+#:   表里已明确标注「~~已废弃~~ / ⛔ **不再实现**」（参照系改走 `data/peer_distributions.json`）。
+#:   即这是**有意永远不存在**的路径，不是断链。
 EXCEPTIONS: set[str] = {
     "src/web/templates/dashboard.html",
     "src/web/static/app.js",
@@ -51,10 +59,20 @@ EXCEPTIONS: set[str] = {
     "scripts/check_rise_fall.py",
     "tests/test_curve_render.py",
     "tests/test_recommend_render.py",
+    "docs/01-设计/结论权威口径.md",
+    "scripts/build_benchmark.py",
 }
 
-#: 含这些标记的行直接跳过（跨项目路径 / 通配符 / 命令 / 占位符 / 举例）
-SKIP_MARKERS = ('D:\\', 'D:/', '*', '…', '<', '（待', '将新增', '例如', 'grep ', 'python ', 'git ', 'pip ')
+#: 含这些标记的行直接跳过（跨项目路径 / 命令 / 占位符 / 举例）
+#:
+#: ⚠️⚠️ **2026-10-06 修了一个真洞**：原来的列表里有 `'*'`，本意是跳过**通配符路径**
+#: （如 `docs/**/*.md`）。但 `*` 是**行级**判据，而 Markdown 的 `**加粗**` 也含 `*`
+#: —— 于是**任何带加粗的正文行整行都不再被检查**。实测负对照：往一个 git 跟踪的 `.md`
+#: 追加一行「- **加粗的坑**：见 `docs/绝对不存在的文件_负对照.md`」，守卫**照样 2 passed**
+#: （断链被吞）；把 `'*'` 去掉后同一行立刻判红。
+#: 而 `'*'` 本来也是多余的：`PATH_RE` 的中间字符类**不允许 `*`**，
+#: 所以 `docs/*.md` / `docs/**/*.md` 这类通配符**本来就匹配不上**，无需行级跳过。
+SKIP_MARKERS = ('D:\\', 'D:/', '…', '<', '（待', '将新增', '例如', 'grep ', 'python ', 'git ', 'pip ')
 
 #: 匹配「像仓库内路径」的串：REPO前缀 + 非空白非引号字符 + 已知扩展名
 PATH_RE = re.compile(

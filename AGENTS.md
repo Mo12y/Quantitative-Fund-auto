@@ -50,10 +50,10 @@
 
 | 动作 | 命令 |
 |:---|:---|
-| 跑测试（基线 **831 passed / 2 skipped**，2026-10-06 实测） | `python -m pytest tests/ -q` |
+| 跑测试（基线 **831 passed / 2 skipped**，2026-10-06 实测） | `python -m pytest tests/ -q`<br>⚠️ **沙箱里必须换成**：`CODEBUDDY_SAFE_DELETE_BULK_THRESHOLD=100000 python -m pytest tests/ -q --basetemp=<全新目录>` —— **每次换全新 basetemp、串行跑**。复用目录会让 safe-delete 的 trash 报 `SAFE_DELETE_FAIL_CLOSED`（`OSError [Errno 53/64]`）→ 变成一堆 **ERROR（不是 failed）**；阈值不够则卡在 100% 不退、汇总被吞。 |
 | 起 Web | `python src/main.py web`（默认 :5020） |
 | 前端构建 | `cd frontend && npm run build`（沙箱里 npm 不稳 → `D:/nodejs/node.exe node_modules/vite/bin/vite.js build`） |
-| **前端真机验收**（**65 项**，需先起服务**并先 `precompute` 预热快照**） | `python scripts/verify_frontend.py` |
+| **前端真机验收**（**78 项**，需先起服务**并先 `precompute` 预热快照**） | `python scripts/verify_frontend.py` |
 | **数据契约检查**（24 项，只读） | `python scripts/check_ledger_invariants.py` |
 | 同类结构体检（只读） | `python scripts/analyze_peer_structure.py` |
 | 回填指数估值分位（**写库，先快照**） | `python scripts/backfill_index_percentiles.py [--dry-run]` |
@@ -103,16 +103,22 @@
 |:---|:---|:---|
 | 功能回归 | `python -m pytest tests/ -q` | 831 项功能断言（基线 **831 passed / 2 skipped**）|
 | 数据契约（账本 + 市场数据） | `python scripts/check_ledger_invariants.py` | 值域 / 引用完整性 / 时序 / 覆盖率 / 新鲜度 / **复式记账恒等式**（24 项 = 账本 13 + 市场数据 11）|
-| 前端真机 | `python scripts/verify_frontend.py` | 四入口渲染、导航断点、移动端零溢出、动效绑定、数据链路下钻、**信息密度基线**、**字号 token**、**涨跌色**（**65 项** = 动态 54 + 静态 11）<br>⚠️ **必须先 `precompute` 预热快照**，否则「研究」在 warming 骨架屏上采样会假红 |
+| 前端真机 | `python scripts/verify_frontend.py` | 四入口渲染、导航断点、移动端零溢出、动效绑定、数据链路下钻、**信息密度基线（§5.2 五行全接）**、**字号 token**、**涨跌色**（**78 项** = 动态 67 + 静态 11）<br>⚠️ **必须先 `precompute` 预热快照**，否则「研究」在 warming 骨架屏上采样会假红 |
 | **文档引用完整性** | `pytest tests/test_doc_refs.py -q` | 文档指向**仓库内不存在**的路径 |
 | 同类结构体检 | `python scripts/analyze_peer_structure.py` | 同类相关基线（决定 `corr_overlap` 阈值是否还成立）|
 
 > **为什么单独列出来**：本项目有 53 个测试文件、8,400 行，但 2026-10-01 之前**一条治理守卫都没有** ——
 > 全是功能测试。于是"文档要更新""数字要对齐"只能靠自觉，而实测结果是**文档状态长期滞后**
 > （2026-09-27 一次核查：5 处"未做"里 4 处其实已做）。
-> 参考毕设补上第一条 `test_doc_refs.py` 后，它**当场抓到 2 处真断链**（`src/index.css` 少写 `frontend/`；
+> 参考毕设补上第一条 `test_doc_refs.py` 后，它**当场抓到 2 处真断链**（一处是 `frontend/src/index.css` 漏写了 `frontend/` 前缀；
 > 一处承诺的脚本早已被替代却仍写着"待实现"）。
 > **凡是"以后要记得…"的约定，都该问一句：能不能写成测试。**
+>
+> ⚠️ **2026-10-06 又抓到一次**：这条守卫自己有个洞 —— `SKIP_MARKERS` 里的 `'*'`
+> （本意是跳过通配符路径）把**任何含 `**加粗**` 的行整行**都跳过了。
+> 负数对照：往一个入库的 `.md` 追加一行「- **加粗的坑**：见 `<不存在的路径>`」→ 守卫**照样通过**。
+> 去掉那个 `'*'` 后当场暴出 **6 处长期被吞的真断链**（2 处是漏写 `frontend/` 前缀的旧账）。
+> **教训：行级跳过标记越宽，判据越像装饰。**
 
 ## 六、开工最小读取
 

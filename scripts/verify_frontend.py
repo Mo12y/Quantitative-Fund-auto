@@ -23,7 +23,7 @@
 
 退出码：0 = 全过；1 = 有失败（可直接接进 CI / 提交前自查）。
 
-覆盖范围（截至 2026-10-06 共 **65 项** = 动态 54 + 静态 11）：
+覆盖范围（截至 2026-10-06 共 **78 项** = 动态 67 + 静态 11）：
   ① 四入口渲染与导航可达
   ② hash 路由（深链直达 / 未知 hash 回落）
   ③ 文案卫生（JSX 里写 `**粗体**` 会原样渲染 —— 曾真出现字面 `**只读**`）
@@ -32,7 +32,10 @@
   ⑥ 交互动效已绑定（错峰入场 / 条形生长 / 指针滑入 / 骨架屏 shimmer）
   ⑦ console 无 error
   ⑦b **曲线为"裸曲线"**（2026-10-06 反转：无网格 / 无轴线 / 无 Y 刻度，保留零轴 —— DESIGN §5.1.1）
-  ⑦c **信息密度**（DESIGN §5.2：4 页 × 数字节点上限 + 页高上限 = 8 条，基线上限见 `DENSITY_BASELINE`）
+  ⑦c **信息密度**（DESIGN §5.2 的 **5 行全部**落成断言，共 4 页 × 5 = **20 条**，
+     外加 1 条**前置断言**：四页均不在 warming（冷缓存会让密度假低 → 假绿））：
+     单页数字节点 / 桌面页高（基线上限 `DENSITY_BASELINE`）
+     + 首屏数字 / 最大单卡 / 移动页高（2026-10-06 补，`DENSITY_DETAIL_BASELINE`）
 
 B-0 追加（2026-10-04，计划书 §11.3 的 ⬜ 三项 → ✅；见 §11.4 的判据取舍）：
   ⑧ **排版**：**无裸字号**（字号全部走 `@theme` 的 `--text-*` token，共 7 档）；
@@ -105,12 +108,11 @@ def skip(name: str, why: str) -> None:
 _TEXT_MAX_DISTINCT = 8
 
 # ── 排版 1b：裸色值 ──────────────────────────────────────────────────────
-# 唯一现存例外：PoolBoard 的「低估」标签边框 `#3d3117`（warn 暗化变体，token 里没有）。
-# 列入白名单并在 §11.4 记名，**不再新增**。
-# 键 = 相对 `frontend/src` 的 POSIX 路径，值 = 允许出现的裸色字面量。
-_BARE_COLOR_ALLOW: dict[str, set[str]] = {
-    "components/PoolBoard.tsx": {"#3d3117"},
-}
+# ⚠️ 2026-10-06：**白名单已清零**。原来唯一一处例外是 PoolBoard 的「落选约束」标签边框
+# `#3d3117`（warn 的暗化变体）—— 已改用 `warn/30 + bg-warn/10`（与 VerdictCard 的
+# 「卖出」徽标同一套写法），于是「TSX 无裸色值」这条现在是**零例外**地成立。
+# 机制保留：确需新增时必须在此登记并在 §11.4 记名（**不许悄默声地加**）。
+_BARE_COLOR_ALLOW: dict[str, set[str]] = {}
 
 # ── 留白 1：Card 自身零 margin ───────────────────────────────────────────
 # 纪律是「块间距由父级给」（App 的 `main flex flex-col gap-4`）。
@@ -545,7 +547,7 @@ def run_static_checks() -> None:
 #   每瘦身一轮就把基线往下调一档，直到等于 TARGET —— 这才是"渐进收紧"。
 # ══════════════════════════════════════════════════════════════════════════
 
-DENSITY_TARGET = {"num": 40, "screens": 2.0}          # DESIGN §5.2（桌面目标）
+DENSITY_TARGET = {"num": 40, "fold": 15, "card": 8, "screens": 2.0, "mobile": 3.5}
 
 #: 键 = hash；值 = (含数字节点数, 桌面页高/屏)。⚠️ 同口径下只许往下调，不许上调。
 #: ⚠️ 基线必须是**实测值**（向上取到 0.1 屏 / 逐个数字上取），不能凭印象估 ——
@@ -585,6 +587,22 @@ DENSITY_BASELINE = {
     "settings": (57, 2.1),
 }
 
+#: ⚠️ **2026-10-06：把 DESIGN §5.2 表里"三行从没落成断言"的指标接上**（见 §12/§13 的记录）。
+#:   §5.2 一共 5 行，此前只落了 2 行（单页数字节点、桌面页高）；**首屏 / 单卡 / 移动页高
+#:   一直只是文档里的"愿望"** —— 而它们**实测全部超标**：
+#:     首屏（桌面）  今天 25 · 持仓 51 · 研究 76 · 设置 42    目标 ≤15
+#:     最大单卡      今天 16 · 持仓 34 · 研究 41 · 设置 24    目标 ≤8
+#:     移动页高      今天 1.86 · 持仓 2.77 · 研究 2.36 · 设置 **3.52**   目标 ≤3.5
+#:   "全超标"正是它们**当初没被写成断言**的原因（红着的守卫没人看）。
+#:   现在按同一套**基线上限**起步：先钉住"不许更差"，并打印距目标差额 —— 与另两行同规则。
+#:   键 = hash；值 = (首屏数字 ≤, 最大单卡 ≤, 移动页高 ≤)，取实测 + 约 10%~15% 余量。
+DENSITY_DETAIL_BASELINE: dict[str, tuple[int, int, float]] = {
+    "today": (29, 19, 2.0),
+    "position": (56, 38, 2.9),
+    "research": (81, 45, 2.5),
+    "settings": (47, 27, 3.7),
+}
+
 DENSITY_JS = r"""() => {
   const vh = document.documentElement.clientHeight;
   const vis = el => {
@@ -618,10 +636,24 @@ DENSITY_JS = r"""() => {
     nums.push(el);
   }
   const inFold = nums.filter(el => el.getBoundingClientRect().top < vh);
+  // 单卡：按最近的 `<section>`（= `Card`）分组取最大 —— DESIGN §5.2「单卡含数字节点 ≤8」
+  let maxCard = 0;
+  const byCard = new Map();
+  for (const el of nums) {
+    const k = el.closest('section') || document.body;
+    const v = (byCard.get(k) || 0) + 1;
+    byCard.set(k, v);
+    if (v > maxCard) maxCard = v;
+  }
   return {
     num: nums.length,
     foldNum: inFold.length,
+    maxCard: maxCard,
     screens: +(document.documentElement.scrollHeight / vh).toFixed(2),
+    // ⚠️ 冷缓存自检：后端慢端点在冷算时返回 warming，页面顶部会出现
+    //    `<Warming>` 的「正在计算…还需约 N 秒」。此时量到的是**骨架屏**，
+    //    数字远少于真实值 → 密度**假低** → 守卫**假绿**。调用方据此**判红**。
+    warming: /正在计算…还需约/.test(document.body.innerText),
   };
 }"""
 
@@ -825,13 +857,28 @@ def main() -> int:
             c3.close()
 
         # ── DESIGN §5.2 信息密度（基线上限；见文件上方 DENSITY_BASELINE）──
+        # ⚠️⚠️ 2026-10-06 新增**前置断言**：密度必须在**非 warming** 状态测量。
+        #   冷缓存时后端返回 warming、页面显示**骨架屏**，量到的数字**远少于真实值**
+        #   → 守卫**假绿**。这个坑从交接第一天就写在文档里（"必须先 precompute"），
+        #   却一直没有机械守卫 —— 于是它只能靠人记得。现改为：检测到 warming 就**判红**。
+        #   先量完四页再断言，这样项数是固定的（不会因 warming 而忽多忽少）。
+        measured: dict[str, dict] = {}
         for label, h in HASHES.items():
             c6 = browser.new_context(viewport={"width": 1440, "height": 900})
             pg6 = c6.new_page()
             pg6.goto(f"{base}/#/{h}", wait_until="domcontentloaded")
             pg6.wait_for_timeout(4200)
-            m = pg6.evaluate(DENSITY_JS)
+            measured[label] = pg6.evaluate(DENSITY_JS)
             c6.close()
+        warming = [lb for lb, mm in measured.items() if mm.get("warming")]
+        check(
+            "密度测量前置：四页均不在 warming（冷缓存会量到骨架屏 → **假绿**）",
+            not warming,
+            (f"仍在 warming：{warming} —— 先跑 `python src/main.py precompute` 再测" if warming
+             else "四页均已就绪（快照已预热）"),
+        )
+        for label, m in measured.items():
+            h = HASHES[label]
             base_num, base_scr = DENSITY_BASELINE[h]
             gap = m["num"] - DENSITY_TARGET["num"]
             check(
@@ -842,6 +889,34 @@ def main() -> int:
                 f"密度 · {label}：页高 ≤ 基线 {base_scr} 屏（DESIGN 目标 {DENSITY_TARGET['screens']}）",
                 m["screens"] <= base_scr,
                 f"实测 {m['screens']} 屏 · 首屏数字节点 {m['foldNum']}")
+            # ⚠️ 2026-10-06 新增：§5.2 表里此前**没有断言**的两行（首屏 / 单卡）。
+            base_fold, base_card, _ = DENSITY_DETAIL_BASELINE[h]
+            fgap = m["foldNum"] - DENSITY_TARGET["fold"]
+            check(
+                f"密度 · {label}：首屏数字 ≤ 基线 {base_fold}（DESIGN 目标 {DENSITY_TARGET['fold']}）",
+                m["foldNum"] <= base_fold,
+                (f"实测 {m['foldNum']}，距目标还差 {fgap}（可缩）" if fgap > 0
+                 else f"实测 {m['foldNum']}（已达标）"))
+            cgap = m["maxCard"] - DENSITY_TARGET["card"]
+            check(
+                f"密度 · {label}：最大单卡数字 ≤ 基线 {base_card}（DESIGN 目标 {DENSITY_TARGET['card']}）",
+                m["maxCard"] <= base_card,
+                (f"实测 {m['maxCard']}，距目标还差 {cgap}（可缩）" if cgap > 0
+                 else f"实测 {m['maxCard']}（已达标）"))
+
+        # ── DESIGN §5.2 · 移动页高（390 视口 ≤3.5 屏）—— 2026-10-06 新增 ──
+        for label, h in HASHES.items():
+            c7 = browser.new_context(viewport={"width": 390, "height": 844})
+            pg7 = c7.new_page()
+            pg7.goto(f"{base}/#/{h}", wait_until="domcontentloaded")
+            pg7.wait_for_timeout(4200)
+            m7 = pg7.evaluate(DENSITY_JS)
+            c7.close()
+            base_m = DENSITY_DETAIL_BASELINE[h][2]
+            check(
+                f"密度 · {label}：移动页高 ≤ 基线 {base_m} 屏（DESIGN 目标 {DENSITY_TARGET['mobile']}）",
+                m7["screens"] <= base_m,
+                f"实测 {m7['screens']} 屏 · 首屏数字节点 {m7['foldNum']}")
 
         # ── ⑥ 骨架屏（注入 warming 后必须出现，而不是白屏）────────────
         c4 = browser.new_context(viewport={"width": 1440, "height": 900})

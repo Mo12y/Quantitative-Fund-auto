@@ -38,7 +38,7 @@
 |---|---|
 | HEAD | 本轮 **10 个 commit**（`b571a9d` 第4条 → … → 字号收敛 → **B-6 删旧前端**） |
 | 工作树 | 干净（收尾 commit 后） |
-| 门禁 | ✅ pytest **831 passed / 2 skipped** ｜ ✅ 前端真机 **65/65** ｜ ✅ 数据契约 **24 项 0 失败** ｜ ✅ `tsc --noEmit` 0 ｜ ✅ `vite build` 绿 |
+| 门禁 | ✅ pytest **831 passed / 2 skipped** ｜ ✅ 前端真机 **78/78** ｜ ✅ 数据契约 **24 项 0 失败** ｜ ✅ `tsc --noEmit` 0 ｜ ✅ `vite build` 绿 |
 | 服务 | 起在 `:5020`（需先 `precompute` 预热，否则密度**假低**） |
 
 #### 六条处方落地情况（详见计划书 §13.8「落地记录」）
@@ -130,7 +130,7 @@ body-sm 12.5 / caption 11.5 / micro 10），**24 个文件 164 处**裸字号一
 - ⚠️ **计划漏列的 3 个文件（跑 pytest 才炸出来，这才是 B-6 真正的坑）**：
   删 `tests/test_curve_render.py`、`tests/test_recommend_render.py`
   （**旧前端的静态哨兵**：模块导入时就 `read_text()` 读 `app.js`/`app.css` 源码，被测对象一删
-  连**收集**都过不去 → 整轮 pytest `Interrupted`）、`scripts/_diag_frontend.py`
+  连**收集**都过不去 → 整轮 pytest `Interrupted`）、`_diag_frontend.py`（在 `scripts/` 下）
   （一次性探测脚本，读 `app.js` + 已在 B-5 移走的 `dashboard.html`，其实早就坏了）。
   ⚠️ **测试总数 845 → 831**（14 个用例）属"被测对象已删除"的**正常下降**，不是丢测试 ——
   同时新增了 5 条前端静态判据（涨跌色 2 + 字号 2 + 层级"可解析"1）。
@@ -150,6 +150,44 @@ body-sm 12.5 / caption 11.5 / micro 10），**24 个文件 164 处**裸字号一
   旧前端哨兵测试的**正常下降**，不是丢测试，见计划书 §12 B-6 第 4 条）、前端真机 33→**65** 项、前端段落的
   "过渡期两套并存"→ 已全部落地。
 
+#### 后续轮 4（同日）：**把这几轮"测出来但没改"的坑修掉**（详见计划书 §13.11）
+
+> 用户原话：「刚才不是测出来很多坑？修复一下」。修的是**已判定为缺陷、当时只记下来**的四类；
+> 需要用户拍板的**三个产品取舍**不在其列（仍在下面「下一步」里）。
+
+1. ⚠️ **DESIGN §5.2 有 3 行只是愿望、从没写成断言**（首屏 / 单卡 / 移动页高）—— 实测**全超标**
+   （首屏 25/51/76/42 vs ≤15；单卡 16/34/41/24 vs ≤8；设置移动页高 3.52 vs ≤3.5）。
+   已按同一套「基线上限」接上：新增 `DENSITY_DETAIL_BASELINE` + **12 条断言**，真机 65 → **77**。
+   ⚠️ 这正是 DESIGN §7 第 4 条的反面教材：「写不成断言的，不许只写在文档里当愿望」。
+2. ⚠️⚠️ **`tests/test_doc_refs.py` 的守卫自己有个洞**：`SKIP_MARKERS` 里的 `'*'` 是**行级**判据，
+   而 `**加粗**` 也含 `*` → **任何带加粗的行整行不检查**。
+   ✅ 先做**负对照**证明洞存在（注入含 `**加粗**` 的断链行 → 守卫照样通过），
+   再去掉那个多余的 `'*'`（`PATH_RE` 本来就匹配不上 `*`）→ 负对照立刻红，
+   并**当场暴出 6 处长期被吞的真断链**（2 处是漏写 `frontend/` 前缀、1 处是我自己写的、
+   1 处是 AGENTS.md 举例时引用了错的路径、2 处登记为 EXCEPTIONS：跨项目技能引用 / 已废弃脚本）。
+   ⚠️ 教训已写进 AGENTS.md：**行级跳过标记越宽，判据越像装饰**。
+3. **全站最后一处裸色清零**：`PoolBoard` 的 `#3d3117` → `warn/30 + bg-warn/10`，
+   `_BARE_COLOR_ALLOW` 现为 `{}` → 真机输出「白名单 **0** 处」。
+4. **DESIGN §1 颜色表按实现重写**：原来的 `--up`(绿)/`--down`(红) 是**欧美惯例**，
+   照它实现就会"盈利显示成绿" —— 已换成与 `index.css` 一致的 19 个 `--color-*` + 两条硬约束。
+
+⚠️ **仍未做**：`.claude/skills/` 那份从毕设迁来的技能副本与本项目 `.workbuddy/skills/` 那份
+长期可能漂移（引用毕设目录已登记 EXCEPTIONS），**是否删 `.claude/` 那份属你的环境决策**。
+
+**同一轮追加的两条（更早几轮的坑）**：
+
+5. ⚠️⚠️ **最老的坑终于有机械守卫了**：从交接第一天就写着「必须先 `precompute`，否则冷缓存 →
+   密度**假低**」，但那**只是叮嘱**。现 `DENSITY_JS` 顺带检测页面上的 `<Warming>`
+   「正在计算…还需约 N 秒」，密度段**先做一条前置断言**：检测到 warming 就**判红**
+   （提示先 precompute），不再拿骨架屏的数字去比基线。✅ 负对照：注入
+   `{ok:true,data:null,status:"warming"}` 的响应 → 检测器 true；正常态 false。
+6. **「跑 pytest 的正确姿势」原来只在交接块里，没进入口文档** —— `AGENTS.md` §2.2 命令表
+   只写了 `python -m pytest tests/ -q`，照它做**必踩** safe-delete 的 ERROR 陷阱。
+   已把完整调用（换全新 basetemp + 串行 + `CODEBUDDY_SAFE_DELETE_BULK_THRESHOLD=100000`）写进命令表。
+
+> ⭐ **这两条共同的教训**（值得记住）：**坑写在交接块里 ≠ 坑被封住**。
+> 交接块会被归档、会被跳过；只有**入口文档**（AGENTS.md）与**判据**（verify/pytest）是必经之路。
+
 #### 下一步（按优先级）
 
 > ⚠️ **施工项（B-0~B-6）已全部完成**，剩下的是**待用户拍板**的事项。
@@ -165,7 +203,7 @@ body-sm 12.5 / caption 11.5 / micro 10），**24 个文件 164 处**裸字号一
 3. ⚠️ **回滚 B-6 的话**：文件只在 git 历史里（`git show 3425ed5:src/web/static/app.js`）。
    真要恢复"旧前端可用"，得同时恢复 `app.py` 的 `/` 路由 —— 不建议，那是把 B-5 一起退回去。
 
-#### 开工三步（与上一版相同，未变；只是真机项数 **65**）
+#### 开工三步（与上一版相同，未变；只是真机项数 **78**）
 
 ```bash
 cd /d/DSH/projects/Quantitative-Fund-auto
@@ -176,7 +214,7 @@ C:/Users/m1309/AppData/Local/Programs/Python/Python313/python.exe src/main.py pr
 
 # ② 验收四件套
 C:/Users/m1309/AppData/Local/Programs/Python/Python313/python.exe -m pytest tests/ -q          # 831 passed / 2 skipped
-C:/Users/m1309/AppData/Local/Programs/Python/Python313/python.exe scripts/verify_frontend.py   # **65/65**
+C:/Users/m1309/AppData/Local/Programs/Python/Python313/python.exe scripts/verify_frontend.py   # **78/78**
 C:/Users/m1309/AppData/Local/Programs/Python/Python313/python.exe scripts/check_ledger_invariants.py  # 24 项 0 失败
 cd frontend && D:/nodejs/node.exe node_modules/typescript/bin/tsc -b --noEmit && D:/nodejs/node.exe node_modules/vite/bin/vite.js build
 
