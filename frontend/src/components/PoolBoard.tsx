@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { Fragment, useState } from 'react'
 import type { BoardPool, PoolFund } from '../api/types'
 import { dirClass, dirOf, dirSymbol, fmtSignedPct, plainText } from '../lib/format'
 import { Card } from './Card'
@@ -39,11 +39,23 @@ function Num({ v, digits = 1 }: { v: number | null | undefined; digits?: number 
  * ⚠️ 与上方 `SectorTable` 的板块**不是同一套分类**：那边是申万一级行业（市场行情），
  * 这边是按基金名称关键词归的主题桶。故两者不联动 —— 不给出「点行业就筛基金」的错误暗示。
  * 也说清了池子的性质：**不推荐"买哪只"，只排除有坑的**。
+ *
+ * ⚠️ 2026-10-06（瘦身第 6 条）：**可视列由 6 列收到 4 列**（代码 / 名称 / 夏普 / 近3月），
+ * 「类型 / 风险 / 费率」收进**逐行展开**。理由：这一屏要回答的是"池子里哪几只有像样的
+ * 动量、夏普不为负"，而不是"这只基金的完整档案"；后者是"我要看细节"时才需要的
+ * （DESIGN §5.3 渐进披露）。涨跌色规则不变（涨红跌绿 + ▲▼）。
+ *
+ * ⚠️ 表头**保留**（不是 DESIGN §5.1.1 第 8 条的"列表不带表头"）：那条针对的是首屏的
+ * 小列表（名称 + 一个右对齐数字，语义自明）；这里一行有三个数字（夏普 / 近3月），
+ * 去掉表头就分不清哪个是哪个 —— **数字不带标签就不是信息**（§5.5）。
  */
 export function PoolBoard({ data, className = '' }: { data: BoardPool; className?: string }) {
   const [active, setActive] = useState('')
+  const [open, setOpen] = useState<Record<string, boolean>>({})
   const cur = data.boards.find((b) => b.board === active) ?? data.boards[0]
   if (!cur) return null
+
+  const toggle = (code: string) => setOpen((m) => ({ ...m, [code]: !m[code] }))
 
   return (
     <Card
@@ -87,36 +99,70 @@ export function PoolBoard({ data, className = '' }: { data: BoardPool; className
       <table className="w-full border-collapse">
         <thead>
           <tr>
-            <th className={TH + ' text-left'}>基金</th>
-            <th className={TH + ' hidden text-left md:table-cell'}>类型</th>
-            <th className={TH + ' text-left'}>风险</th>
-            <th className={TH + ' hidden text-right sm:table-cell'}>夏普</th>
+            <th className={TH + ' text-left'}>代码</th>
+            <th className={TH + ' text-left'}>名称</th>
+            <th className={TH + ' text-right'}>夏普</th>
             <th className={TH + ' text-right'}>近3月</th>
-            <th className={TH + ' hidden text-right lg:table-cell'}>费率</th>
           </tr>
         </thead>
         <tbody>
-          {cur.funds.map((f) => (
-            <tr key={f.code} className="row-hover border-t border-line">
-              <td className="py-2 pr-3 text-[13px]">
-                <span className="text-fg">{plainText(f.name)}</span>
-                <span className="mono ml-1.5 text-[11.5px] text-fg-4">{f.code}</span>
-                <DropMark s={f.constraint_status} />
-              </td>
-              <td className="hidden py-2 pr-3 text-[12px] text-fg-3 md:table-cell">{plainText(f.type)}</td>
-              <td className="py-2 text-[12px] text-fg-2">{plainText(f.risk)}</td>
-              <td className="hidden py-2 text-right text-[12.5px] text-fg-2 sm:table-cell">
-                <span className="mono">{f.sharpe == null ? '—' : f.sharpe.toFixed(2)}</span>
-              </td>
-              <td className="py-2 text-right text-[12.5px]">
-                <Num v={f.momentum_3m} />
-              </td>
-              <td className="mono hidden py-2 text-right text-[12.5px] text-fg-3 lg:table-cell">
-                {/* ⚠️ fee 缺失是 null，不是 0 —— 显示 0 会让人以为"这只零费率" */}
-                {f.fee == null ? '—' : `${f.fee.toFixed(2)}%`}
-              </td>
-            </tr>
-          ))}
+          {cur.funds.map((f) => {
+            const on = !!open[f.code]
+            return (
+              /* Fragment：展开行是"行内的第二条 tr"，不额外占一列 —— 否则可视列又变成 5 个 */
+              <Fragment key={f.code}>
+                <tr className="row-hover border-t border-line">
+                  <td className="mono py-2 pr-3 align-baseline text-[11.5px] text-fg-4">{f.code}</td>
+                  <td className="py-2 pr-3 align-baseline text-[13px]">
+                    {/* 名称即展开开关：不新增"详情"列，可视列数保持 4 */}
+                    <button
+                      type="button"
+                      onClick={() => toggle(f.code)}
+                      aria-expanded={on}
+                      className="text-left text-fg transition-colors hover:text-accent"
+                    >
+                      <span className="mr-1 text-fg-4">{on ? '⌃' : '⌄'}</span>
+                      {plainText(f.name)}
+                    </button>
+                    <DropMark s={f.constraint_status} />
+                  </td>
+                  <td className="num py-2 align-baseline text-right text-[12.5px] text-fg-2">
+                    {f.sharpe == null ? '—' : f.sharpe.toFixed(2)}
+                  </td>
+                  <td className="py-2 align-baseline text-right text-[12.5px]">
+                    <Num v={f.momentum_3m} />
+                  </td>
+                </tr>
+                {on && (
+                  <tr>
+                    <td colSpan={4} className="pb-2.5 pl-1 text-[11.5px] leading-relaxed text-fg-3">
+                      <span className="mr-4">
+                        类型 <span className="text-fg-2">{plainText(f.type) || '—'}</span>
+                      </span>
+                      <span className="mr-4">
+                        风险 <span className="text-fg-2">{plainText(f.risk) || '—'}</span>
+                      </span>
+                      <span className="mr-4">
+                         {/* ⚠️ fee 缺失是 null，不是 0 —— 显示 0 会让人以为"这只零费率" */}
+                        费率{' '}
+                        <span className="num text-fg-2">
+                          {f.fee == null ? '—' : `${f.fee.toFixed(2)}%`}
+                        </span>
+                      </span>
+                      <span>
+                        申购 <span className="text-fg-2">{plainText(f.purchase_status) || '—'}</span>
+                      </span>
+                      {f.constraint_reasons?.length ? (
+                        <div className="mt-1">
+                          约束 <span className="text-fg-2">{f.constraint_reasons.join('；')}</span>
+                        </div>
+                      ) : null}
+                    </td>
+                  </tr>
+                )}
+              </Fragment>
+            )
+          })}
         </tbody>
       </table>
     </Card>
