@@ -114,8 +114,17 @@ export function VerdictCard({
 
       <div className="mt-3 grid gap-2">
         {rb.instructions.length === 0 ? (
+          /* ⚠️ 空指令有两种语义，**不能都写成"无需操作"**（2026-10-06 实测踩到）：
+             · `need_rebalance=false`：组合本来就在范围内，今天确实不用动；
+             · `need_rebalance=true` 但没有指令：组合**偏离了目标**（缺口见下方支撑行），
+               只是池子里没有合格候选（后端 verdict 里写着"但池中暂无候选"）——
+               这时说"无需操作"会让用户把"缺着口"当成"已达标"。
+             徽标给的是**今天能不能动手**（三态之一），所以是「不用动手」；
+             缺口本身由下方支撑行与这句话交代。 */
           <div className="rounded-[var(--radius-md)] bg-inset px-3.5 py-2.5 text-[13px] text-fg-2">
-            无需任何买卖操作。
+            {rb.need_rebalance
+              ? '组合偏离目标，但当前没有可执行的买入 / 卖出候选 —— 今天不动手（缺口见下方）。'
+              : '无需任何买卖操作。'}
           </div>
         ) : allHold ? (
           <div className="rounded-[var(--radius-md)] bg-inset px-3.5 py-2.5 text-[13px] text-fg-2">
