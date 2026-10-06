@@ -23,7 +23,7 @@
 
 退出码：0 = 全过；1 = 有失败（可直接接进 CI / 提交前自查）。
 
-覆盖范围（截至 2026-10-06 共 **60 项** = 动态 53 + 静态 7）：
+覆盖范围（截至 2026-10-06 共 **61 项** = 动态 54 + 静态 7）：
   ① 四入口渲染与导航可达
   ② hash 路由（深链直达 / 未知 hash 回落）
   ③ 文案卫生（JSX 里写 `**粗体**` 会原样渲染 —— 曾真出现字面 `**只读**`）
@@ -458,30 +458,40 @@ def run_static_checks() -> None:
 
 DENSITY_TARGET = {"num": 40, "screens": 2.0}          # DESIGN §5.2（桌面目标）
 
-#: 键 = hash；值 = (含数字节点数, 桌面页高/屏)。⚠️ 只许往下调，不许上调。
+#: 键 = hash；值 = (含数字节点数, 桌面页高/屏)。⚠️ 同口径下只许往下调，不许上调。
 #: ⚠️ 基线必须是**实测值**（向上取到 0.1 屏 / 逐个数字上取），不能凭印象估 ——
 #:   2026-10-05 首次写时把持仓写成 1.5、研究写成 1.6（估算），实测 1.52/1.65，
 #:   当场被自己的断言抓出来。页高与节点数会随数据小幅波动，留一点上界是必要的。
 #:
-#: 2026-10-06 「信息密度瘦身」后**整体下调**（计划书 §13.6 的六条处方本轮全部落地）：
-#:   今天   80 / 2.3  →  30 / 1.5  （瘦成 大数字 + 结论 + 曲线 + 市场小条）
-#:   研究  108 / 1.7  →  85 / 1.5  （筛选池可视列 4 个 + 数据链路默认折叠）
-#:   设置  129 / 2.4  →  55 / 2.1  （模型对照表 / 命令表折叠，审计与温度搬入）
-#:   持仓   53 / 1.6  →  53 / 1.6  （本页未瘦：「已实现」搬入的增量由删掉
-#:                                    「已投 X%」（与进度条重复）抵消）
-#: ⚠️ DESIGN 目标 40 目前只有「今天」达到（实测 24）。下调依据是本轮实测，
-#:    逐条 commit 消息里有前后数字。
+#: ⚠️⚠️ **2026-10-06 口径变更 → 本表整体重设，与旧值不可直接比较**：
+#:   旧口径只数"叶子元素"，把 `<span class="mono"><i>▲</i>+1.2%</span>` 这类
+#:   "箭头 + 数值"的混合内容整段漏掉（实测漏计 研究 **55** / 持仓 14 / 今天 7 / 设置 10）。
+#:   涨跌在本项目里大量以这种形式渲染，漏计是主力而非边角 → 已把 `DENSITY_JS` 改成
+#:   数"含数字的**文本段**"（阈值含义不变：屏上有多少个数字读数，只是不再漏数）。
+#:   于是同一天、同一构建下：今天 24→31、持仓 51→65、研究 75→130、设置 43→53。
+#:   下面这组基线 = **本轮瘦身完成后**在新口径下的实测（今天 31 / 持仓 59 / 研究 76 / 设置 53，
+#:   连测两次完全一致）+ 约 8% 余量。
+#:
+#: 本轮（瘦身 · 研究/持仓）改动与实测（新口径）
+#:   研究 130 → **76**：行业板块可视列 6→3（近3月/近6月/波动进逐行展开）、默认行 12→8、
+#:                    动量 chip 去掉重复的「近3月」标签；页高 1.23 → 1.17 屏
+#:   持仓  65 → **59**：建仓计划的 6 格"计划元数据"去掉（与「设置 → 投资计划」逐字重复）
+#:                    + 定投卡副标题去重；页高 1.55 屏不变
+#:   今天 31 / 设置 53：本轮未动
+#: ⚠️ DESIGN 目标 40 对「今天」是合适的（实测 31 已达标）；对**表格页**（研究 / 持仓）
+#:   是否合适 **未定** —— 研究的两张表本身就是页面职责，持仓表 7 只 × 4 字段 ≈ 28 是下限。
+#:   该问题已在计划书 §13.9 记为待用户拍板项，**不擅自改 §5.2 的目标值**。
 DENSITY_BASELINE = {
-    "today": (30, 1.5),
-    "position": (53, 1.6),
-    "research": (85, 1.5),
-    "settings": (55, 2.1),
+    "today": (34, 1.5),
+    "position": (64, 1.6),
+    "research": (82, 1.5),
+    "settings": (57, 2.1),
 }
 
 DENSITY_JS = r"""() => {
   const vh = document.documentElement.clientHeight;
   const vis = el => {
-    // ⚠️ 2026-10-06 修正：**折叠的 `<details>` 内容不算"在屏上"**。
+    // ⚠️ 2026-10-06 修正之一：**折叠的 `<details>` 内容不算"在屏上"**。
     //   Chrome 121+ 把关闭态 details 的实现从 `display:none` 换成了
     //   `content-visibility: hidden` —— 其后代元素的 `display` 仍是 `block`、
     //   `getBoundingClientRect()` 也非零，于是"默认折叠"在旧判据下**完全测不出来**。
@@ -493,11 +503,24 @@ DENSITY_JS = r"""() => {
     const cs = getComputedStyle(el);
     return r.width > 0 && r.height > 0 && cs.display !== 'none' && cs.visibility !== 'hidden';
   };
-  const leaf = [...document.querySelectorAll('body *')]
-    .filter(e => vis(e) && e.children.length === 0 && (e.textContent || '').trim().length > 0);
-  const hasNum = e => /[0-9]/.test(e.textContent);
-  const nums = leaf.filter(hasNum);
-  const inFold = nums.filter(e => e.getBoundingClientRect().top < vh);
+  // ⚠️ 2026-10-06 修正之二：改数**含数字的文本段**，不再数"叶子元素"。
+  //   旧口径要求元素**没有子元素**才计数，于是 `<span class="mono"><i>▲</i>+1.2%</span>`
+  //   这类"箭头 + 数值"的混合内容被整段漏掉（外层有子元素 → 不是叶子；内层箭头没数字）。
+  //   本项目纪律要求涨跌/金额挂 `.num`/`.mono`（本脚本第八维），而涨跌大量以这种形式渲染
+  //   → 漏计不是边角而是主力。实测（同一构建、同一预热态）：
+  //       今天 24→31（+7）｜持仓 51→65（+14）｜研究 75→**130**（+55，全是行业表涨跌列）｜设置 43→53
+  //   故口径改为"文本段"，并**按新口径重设基线**（DESIGN §5.2 的阈值含义不变：
+  //   仍是"屏上有多少个数字读数"，只是不再漏数）。
+  const nums = [];
+  const w = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+  while (w.nextNode()) {
+    const t = (w.currentNode.textContent || '').trim();
+    if (!t || !/[0-9]/.test(t)) continue;
+    const el = w.currentNode.parentElement;
+    if (!el || !vis(el)) continue;
+    nums.push(el);
+  }
+  const inFold = nums.filter(el => el.getBoundingClientRect().top < vh);
   return {
     num: nums.length,
     foldNum: inFold.length,
@@ -592,6 +615,13 @@ def main() -> int:
             " return t ? [...t.querySelectorAll('thead th')].map(th => th.innerText.trim()) : []; }")
         check("「研究」页：筛选池可视列 = 4（代码/名称/夏普/近3月）",
               pool_cols == ["代码", "名称", "夏普", "近3月"], pool_cols)
+        # 瘦身（研究页）：行业板块可视列 = 3（行业/近1月/评分），近3月 / 近6月 / 波动进逐行展开
+        sec_cols = page.evaluate(
+            "() => { const t = [...document.querySelectorAll('table')]"
+            ".find(x => x.querySelector('thead') && x.innerText.includes('近1月'));"
+            " return t ? [...t.querySelectorAll('thead th')].map(th => th.innerText.trim()) : []; }")
+        check("「研究」页：行业板块可视列 = 3（行业/近1月/评分）",
+              sec_cols == ["行业", "近1月", "评分"], sec_cols)
         check("「研究」页：量化模型已移出", "量化模型" not in t)
         # B-3：历史回测验证块。⚠️ 必须同时含「非推荐」字样 —— 那是最容易漂移的一条文案
         # （后端 §4.4 明确它不是推荐；只断言"块存在"会漏掉文案被改回"推荐"的情况）。

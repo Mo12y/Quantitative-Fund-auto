@@ -25,25 +25,13 @@ function PlanProgress({ plan }: { plan: InvestmentPlan | null }) {
   }
   return (
     <Card title="建仓计划" note={`· ${plainText(plan.name)}`}>
-      <div className="mb-3 grid grid-cols-2 gap-x-4 gap-y-1 text-[11.5px] text-fg-3">
-        <div>
-          目标 <span className="mono text-fg-2">{plainText(plan.goal)}</span>
-        </div>
-        <div>
-          期限 <span className="mono text-fg-2">{plainText(plan.horizon)}</span>
-        </div>
-        <div>
-          风险偏好 <span className="text-fg-2">{plainText(plan.risk_pref)}</span>
-        </div>
-        <div>
-          现金弹药 <span className="mono text-fg-2">{fmtMoney(plan.cash_reserve)}</span>
-        </div>
-        <div>
-          计划资金 <span className="mono text-fg-2">{fmtMoney(plan.total_capital)}</span>
-        </div>
-        <div>
-          已投 <span className="mono text-fg-2">{fmtMoney(plan.total_invested)}</span>
-        </div>
+      {/* ⚠️ 2026-10-06（瘦身·持仓页）：原先是 6 格"计划元数据"（目标 / 期限 / 风险偏好 /
+          起始日 / 计划资金 / 已投 / 现金弹药）—— 那是**计划本身的配置**，
+          「设置 → 投资计划」卡里逐字都有，同屏再看一遍只是重复。
+          按 DESIGN §5.4 的页面职责，配置归「设置」，本页只回答"计划**走到哪了**"，
+          故只留逐只进度（下面那组），元数据请去「设置」看。 */}
+      <div className="mb-3 text-[11.5px] text-fg-4">
+        计划的目标 / 期限 / 风险偏好与资金口径见「设置 → 投资计划」。
       </div>
 
       <div className="space-y-2.5">
@@ -77,12 +65,8 @@ function PlanProgress({ plan }: { plan: InvestmentPlan | null }) {
           </div>
         ))}
       </div>
-
-      {plan.notes && (
-        <div className="mt-3 border-t border-line pt-2 text-[11.5px] leading-relaxed text-fg-4">
-          {plainText(plan.notes)}
-        </div>
-      )}
+      {/* ⚠️ plan.notes 是**计划级**说明（"分 4 笔建仓…"），「设置 → 投资计划」已在渲染，
+          本页不再重复（瘦身·持仓页）。 */}
     </Card>
   )
 }
@@ -91,7 +75,7 @@ function PlanProgress({ plan }: { plan: InvestmentPlan | null }) {
 function DcaList({ plans }: { plans: DcaPlan[] }) {
   const due = plans.filter((p) => p.due).length
   return (
-    <Card title="定投计划" note={plans.length ? `· ${plans.length} 条${due ? ` · ${due} 条到期未执行` : ''}` : ''}>
+    <Card title="定投计划" note={plans.length ? `· ${plans.length} 条${due ? '（含到期未执行）' : ''}` : ''}>
       {plans.length === 0 ? (
         <div className="text-sm text-fg-3">当前没有定投计划。</div>
       ) : (
