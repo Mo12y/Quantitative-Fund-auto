@@ -54,6 +54,9 @@ class Database:
         # 建连 + PRAGMA + **写探针**（含 readonly 重试）——见 `_open_writable`
         self.journal_mode = None
         self.conn = self._open_writable()
+        # ⚠️ `immediate()` 的事务深度（见 `_commit` / `immediate` 的 docstring）：
+        #   `>0` = 当前在 `immediate()` 事务内 → 单条写**不提交**，由最外层统一 commit/rollback。
+        self._tx_depth = 0
         self._create_tables()
 
     # ========== 连接建立 ==========
@@ -178,15 +181,53 @@ class Database:
         """BEGIN IMMEDIATE 事务：多步读改写要么全成要么全滚。
 
         IMMEDIATE 一上来就取写锁，避免两个连接各自读到旧值再互相覆盖（丢失更新）。
+
+        ⚠️⚠️ **2026-10-07 修了一个真缺陷（E2）：本方法此前并不真的原子。**
+        原因：本文件的单条写方法（`add_holding` / `add_transaction` / `update_holding` /
+        `add_dca_plan` …）**各自 `self.conn.commit()`** —— 把它们包进 `immediate()` 时，
+        **第一次内部 commit 就把外层事务提前提交了**，后面再失败就留下半截数据。
+        实测被踩到的形态：`portfolio.add_buy_transaction()` 与 `sell()` 都是
+        「`with immediate():` → 调 `add_holding()` / `add_transaction()` / `update_holding()`」，
+        注释还写着"持仓与流水必须一起写，避免只落一半" —— **那个保证其实没有生效**。
+        复现见 `tests/test_db_immediate_atomicity.py`（修复前 `assert 1 == 0`）。
+
+        修法：内部 commit 改走 `self._commit()` —— 事务内**不提交**，延迟到最外层统一提交；
+        异常时由本方法统一 rollback。本方法现在是**可重入**的（已在事务内则复用外层）。
+        复现见 `tests/test_db_immediate_atomicity.py`（负对照：把 `_commit` 打回旧行为即红）。
         """
+        if self._tx_depth:                       # 已在事务里 → 复用外层（不重复 BEGIN）
+            self._tx_depth += 1
+            try:
+                yield self.conn
+            finally:
+                self._tx_depth -= 1
+            return
         self.conn.execute("BEGIN IMMEDIATE")
+        self._tx_depth = 1
         try:
             yield self.conn
         except Exception:
+            self._tx_depth = 0
             self.conn.rollback()
             raise
         else:
+            self._tx_depth = 0
             self.conn.commit()
+
+    def _commit(self) -> None:
+        """单条写的提交 —— **在 `immediate()` 事务内则不提交**（由最外层统一提交）。
+
+        ⚠️ 本文件的写方法都必须用这个方法，**不要直接 `self.conn.commit()`** ——
+        直接 commit 会把外层 `immediate()` 提前提交，原子性就没了（审计 E2，2026-10-07）。
+        纪律由 `tests/test_db_immediate_atomicity.py` 钉住。
+
+        ⚠️ 这里**刻意不记"脏标记"**：`immediate()` 的收尾无论如何必须 `commit()` 或
+        `rollback()`（否则 `BEGIN IMMEDIATE` 取的**写锁不会释放**），所以"有没有写过"
+        对收尾决策没有影响 —— 一个只写不读的标记只会让注释与代码说法不一致。
+        """
+        if self._tx_depth:
+            return
+        self.conn.commit()
 
     def _backup_rows(self, table: str, rows: list):
         """把即将删除的行写到 <db目录>/backups/<table>_<时间>.json，便于事后恢复。
@@ -368,7 +409,7 @@ class Database:
             )
         """)
 
-        self.conn.commit()
+        self._commit()
 
         # 分析结果快照表：把「温度/筛选池/板块总榜」等重计算结果落库，
         # 端点命中快照即为纯 SELECT；进程重启后依然有效（内存缓存做不到）。
@@ -379,7 +420,7 @@ class Database:
                 payload     TEXT NOT NULL
             )
         """)
-        self.conn.commit()
+        self._commit()
 
         # 定投期次表（对账基础：应投/已投/待补录）
         cursor.execute("""
@@ -396,7 +437,7 @@ class Database:
             )
         """)
 
-        self.conn.commit()
+        self._commit()
 
         # 市场温度**历史序列**（2026-10-01 新增）—— 温度原本是实时算、无历史存档，
         # 导致无法给温度做历史回测（见 docs/审计修复记录.md 第四批 §11）。
@@ -414,7 +455,7 @@ class Database:
             )
         """)
 
-        self.conn.commit()
+        self._commit()
 
         # 兼容迁移：dca_plans 增列（auto_sync / last_synced_at）
         try:
@@ -423,7 +464,7 @@ class Database:
                 self.conn.execute("ALTER TABLE dca_plans ADD COLUMN auto_sync INTEGER DEFAULT 1")
             if "last_synced_at" not in have:
                 self.conn.execute("ALTER TABLE dca_plans ADD COLUMN last_synced_at TEXT")
-            self.conn.commit()
+            self._commit()
         except Exception:
             pass
 
@@ -435,7 +476,7 @@ class Database:
             have_fi = {r[1] for r in self.conn.execute("PRAGMA table_info(fund_info)")}
             if "sales_service_fee" not in have_fi:
                 self.conn.execute("ALTER TABLE fund_info ADD COLUMN sales_service_fee REAL")
-            self.conn.commit()
+            self._commit()
         except Exception:
             pass
 
@@ -472,7 +513,7 @@ class Database:
             )
         """)
 
-        self.conn.commit()
+        self._commit()
 
         # ── 写操作提交日志（B-4b-1 撤销机制，2026-10-05）──────────────────
         # 每笔写账本的操作记一条：写前的行快照 + 写后的行快照 + 定位用的 where 片段。
@@ -489,7 +530,7 @@ class Database:
             )
         """)
 
-        self.conn.commit()
+        self._commit()
 
         # 兼容迁移：给 holdings 补 T+1/T+2 相关列（老库自动升级，不重建表）
         self._migrate_holdings_t1()
@@ -507,7 +548,7 @@ class Database:
                 self.conn.execute(ddl)
             except Exception:
                 pass
-        self.conn.commit()
+        self._commit()
 
     def _migrate_holdings_t1(self):
         """幂等给 holdings 添加 T+1/T+2 字段（存在则跳过）"""
@@ -528,7 +569,7 @@ class Database:
                     self.conn.execute(f"ALTER TABLE holdings ADD COLUMN {col} {decl}")
                 except Exception:
                     pass
-        self.conn.commit()
+        self._commit()
 
     def _migrate_dividend(self):
         """幂等添加「分红入账」字段（存在则跳过）。
@@ -563,7 +604,7 @@ class Database:
                 self.conn.execute("ALTER TABLE transactions ADD COLUMN dividend_per_share REAL")
             except Exception:
                 pass
-        self.conn.commit()
+        self._commit()
 
     # ========== 基金信息操作 ==========
 
@@ -630,7 +671,7 @@ class Database:
             "ON CONFLICT(fund_code) DO UPDATE SET " + ", ".join(sets),
             params)
         if commit:
-            self.conn.commit()
+            self._commit()
 
     def get_all_funds(self) -> list:
         """获取所有基金基本信息"""
@@ -757,7 +798,7 @@ class Database:
             val.get("pb_percentile"),
             val.get("dividend_yield"),
         ))
-        self.conn.commit()
+        self._commit()
 
     def get_index_valuation(self) -> list:
         """获取所有指数估值快照"""
@@ -798,7 +839,7 @@ class Database:
             holding.get("accrual_start"),
             holding.get("status", "holding"),
         ))
-        self.conn.commit()
+        self._commit()
         return cursor.lastrowid
 
     def get_current_holdings(self) -> list:
@@ -815,7 +856,7 @@ class Database:
             UPDATE holdings SET status='sold', sell_date=?, sell_amount=?
             WHERE id=?
         """, (sell_date, sell_amount, holding_id))
-        self.conn.commit()
+        self._commit()
 
     def update_holding(self, holding_id: int, **fields) -> bool:
         """
@@ -838,7 +879,7 @@ class Database:
         params.append(holding_id)
         cursor = self.conn.cursor()
         cursor.execute(f"UPDATE holdings SET {', '.join(updates)} WHERE id = ?", params)
-        self.conn.commit()
+        self._commit()
         return cursor.rowcount > 0
 
     def delete_holding(self, holding_id: int) -> bool:
@@ -847,7 +888,7 @@ class Database:
         self._backup_rows("holdings", [row] if row else [])
         cursor = self.conn.cursor()
         cursor.execute("DELETE FROM holdings WHERE id = ?", (holding_id,))
-        self.conn.commit()
+        self._commit()
         return cursor.rowcount > 0
 
     def get_total_invested(self) -> float:
@@ -872,7 +913,7 @@ class Database:
             plan["start_date"],
             plan.get("next_run_date"),
         ))
-        self.conn.commit()
+        self._commit()
 
     def get_dca_plans(self, status: str = None) -> list:
         """获取定投计划列表"""
@@ -897,7 +938,7 @@ class Database:
         params.append(plan_id)
         cursor = self.conn.cursor()
         cursor.execute(f"UPDATE dca_plans SET {', '.join(updates)} WHERE id = ?", params)
-        self.conn.commit()
+        self._commit()
         return cursor.rowcount > 0
 
     def delete_dca_plan(self, plan_id: int) -> bool:
@@ -929,7 +970,7 @@ class Database:
                 planned_date=excluded.planned_date,
                 planned_amount=excluded.planned_amount
         """, (plan_id, period_no, planned_date, planned_amount))
-        self.conn.commit()
+        self._commit()
         cur.execute("SELECT id FROM dca_periods WHERE plan_id=? AND period_no=?", (plan_id, period_no))
         row = cur.fetchone()
         return row[0] if row else 0
@@ -945,7 +986,7 @@ class Database:
         params.append(period_id)
         cur = self.conn.cursor()
         cur.execute(f"UPDATE dca_periods SET {', '.join(updates)} WHERE id = ?", params)
-        self.conn.commit()
+        self._commit()
         return cur.rowcount > 0
 
     def sum_dca_periods(self, plan_id: int, status: str = "executed") -> float:
@@ -989,7 +1030,7 @@ class Database:
             "ON CONFLICT(trade_date) DO UPDATE SET is_open=excluded.is_open",
             rows,
         )
-        self.conn.commit()
+        self._commit()
 
     def get_trade_dates(self, start: str = None, end: str = None) -> list:
         """取交易日列表（升序）"""
@@ -1012,7 +1053,7 @@ class Database:
 
     def clear_trade_calendar(self):
         self.conn.execute("DELETE FROM trade_calendar")
-        self.conn.commit()
+        self._commit()
 
     # ========== 交易流水（buy/sell，支持部分卖出） ==========
 
@@ -1030,7 +1071,7 @@ class Database:
             tx.get("shares"), tx.get("amount"), tx.get("fee", 0),
             tx.get("status", "confirmed"), tx.get("notes", ""),
         ))
-        self.conn.commit()
+        self._commit()
         return cur.lastrowid
 
     def get_transactions(self, holding_id: int = None, fund_code: str = None) -> list:
@@ -1057,7 +1098,7 @@ class Database:
         params.append(tx_id)
         cur = self.conn.cursor()
         cur.execute(f"UPDATE transactions SET {', '.join(updates)} WHERE id = ?", params)
-        self.conn.commit()
+        self._commit()
         return cur.rowcount > 0
 
     # ========== 投资计划（可维护） ==========
@@ -1086,7 +1127,7 @@ class Database:
         """, (plan.get("name"), plan.get("goal"), plan.get("total_capital"),
               plan.get("cash_reserve"), plan.get("start_date"), plan.get("horizon"),
               plan.get("risk_pref"), plan.get("notes"), plan.get("status", "active")))
-        self.conn.commit()
+        self._commit()
         return cur.lastrowid
 
     def update_plan(self, plan_id: int, **fields) -> bool:
@@ -1100,7 +1141,7 @@ class Database:
         cur = self.conn.cursor()
         cur.execute(f"UPDATE investment_plans SET {', '.join(updates)}, "
                     "updated_at = datetime('now','localtime') WHERE id = ?", params)
-        self.conn.commit()
+        self._commit()
         return cur.rowcount > 0
 
     def delete_plan(self, plan_id: int) -> bool:
@@ -1127,7 +1168,7 @@ class Database:
         """, (item.get("plan_id"), item.get("fund_code"), item.get("fund_name"), item.get("role"),
               item.get("target_amount"), item.get("target_pct"), item.get("cadence"),
               item.get("dca_daily"), item.get("tranches"), item.get("notes")))
-        self.conn.commit()
+        self._commit()
         return cur.lastrowid
 
     def update_plan_item(self, item_id: int, **fields) -> bool:
@@ -1140,7 +1181,7 @@ class Database:
         params.append(item_id)
         cur = self.conn.cursor()
         cur.execute(f"UPDATE investment_plan_items SET {', '.join(updates)} WHERE id = ?", params)
-        self.conn.commit()
+        self._commit()
         return cur.rowcount > 0
 
     def delete_plan_item(self, item_id: int) -> bool:
@@ -1148,7 +1189,7 @@ class Database:
         self._backup_rows("investment_plan_items", [row] if row else [])
         cur = self.conn.cursor()
         cur.execute("DELETE FROM investment_plan_items WHERE id = ?", (item_id,))
-        self.conn.commit()
+        self._commit()
         return cur.rowcount > 0
 
     def seed_plan_if_empty(self, plan: dict, items: list) -> Optional[int]:
@@ -1180,7 +1221,7 @@ class Database:
             signal.get("target_equity_pct"),
             signal.get("report_text"),
         ))
-        self.conn.commit()
+        self._commit()
 
     def get_recent_signals(self, limit: int = 12) -> list:
         """获取最近的周度信号"""
@@ -1200,7 +1241,7 @@ class Database:
             INSERT INTO data_log (data_type, last_collected, status, record_count, error_msg)
             VALUES (?, datetime('now','localtime'), ?, ?, ?)
         """, (data_type, status, record_count, error_msg))
-        self.conn.commit()
+        self._commit()
 
     def close(self):
         """关闭数据库连接"""

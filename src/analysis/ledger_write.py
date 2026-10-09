@@ -10,11 +10,19 @@
 ⚠️ **复用 `portfolio._WRITE_LOCK`（同一把锁）**：buy/sell 在 `portfolio.py`、update/delete 在这里，
    必须用**同一把锁**才能让所有写操作互斥；否则两个入口并发写会互相覆盖（丢失更新）。
 
-⚠️ 门面里的写**一律在 `immediate()` 里直接操作 `conn`**，不调用 `database.py` 那些会各自
-   `commit()` 的方法 —— 否则外层事务会被内部 `commit()` 提前提交，`immediate()` 形同虚设。
-   （这是 2026-10-05 盘查发现的更深一层问题：`add_holding`/`add_transaction`/`update_transaction`
-   内部都 `self.conn.commit()`，导致 `portfolio.add_buy_transaction` 包的 `immediate()` 被提前提交。
-   buy/sell 的原子性修复属**独立议题**，已记入计划书 §12 B-2 未决项，本轮不顺手改。）
+⚠️ 门面里的写**一律在 `immediate()` 里直接操作 `conn`**（而不是调 `db.add_holding()` 这类方法）。
+
+  **历史原因（已解决，留作背景）**：2026-10-05 盘查发现更深一层问题 ——
+  `database.py` 的单条写方法（`add_holding`/`add_transaction`/`update_holding`…）**各自
+  `self.conn.commit()`**，于是 `portfolio.add_buy_transaction` 包的 `immediate()` 会被
+  **第一次内部 commit 提前提交**，"持仓与流水一起写"的保证**其实没生效**。
+  ✅ **2026-10-07 已修（审计 E2）**：内部 commit 改走 `db._commit()`（事务内只延迟、不提前提交），
+  `immediate()` 改成**可重入**。复现与固化见 `tests/test_db_immediate_atomicity.py`
+  （负对照：把 `_commit` 打回旧行为，那两条回滚断言会红）。
+
+  **修完之后，这条"直接操作 `conn`"的规矩为什么还留着**：不是因为原子性（已由 `_commit()` 兜住），
+  而是因为门面自己要做**它自己的事** —— 写撤销日志（`record()`）、`_backup_rows()` 行快照、
+  以及需要拿到 `cursor.rowcount`；直接走 SQL 比"调一个语义更宽的方法再猜它干了什么"更可控。
 """
 from __future__ import annotations
 
