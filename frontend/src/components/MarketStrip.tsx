@@ -58,14 +58,26 @@ export function MarketStrip({ className = '' }: { className?: string }) {
             </span>
             {d.quotes.map((q) => {
               const dir = dirOf(q.pct)
+              const price = q.price.toFixed(2)
               return (
-                <span key={q.code} className="inline-flex max-w-full items-baseline gap-1.5">
+                /* ⚠️ 2026-10-06 A3（用户拍板）：指数**点位**不再占可见数字位 ——
+                   它挂 `title`（悬停可见）+ `aria-label`（读屏可读），只留涨跌% 在屏上。
+                   理由：小条要回答的是"市场现在什么状态"，**涨跌% 是信号、点位是参考值**；
+                   而联网态下 4 组"点位 + 涨跌"会把「今天」的数字读数从 31 顶到 42，
+                   越过 DESIGN §5.2 的目标 ≤40。去掉后联网态 38 ≤ 40，达标。
+                   ⚠️ 已知代价：**移动端没有悬停**，点位在手机上等于看不到 ——
+                   这是有意的取舍（用户 2026-10-06 明确选择），点位另有「设置」页的数据源说明。 */
+                <span
+                  key={q.code}
+                  className="inline-flex max-w-full items-baseline gap-1.5"
+                  title={`${plainText(q.name)} ${price}（点位）`}
+                  aria-label={`${plainText(q.name)} 收 ${price}`}
+                >
                   <span className="truncate text-fg-3">{plainText(q.name)}</span>
                   <b className={'num shrink-0 ' + dirClass(dir)}>
                     {dirSymbol(dir)}
                     {q.pct == null ? '—' : fmtSignedPct(q.pct)}
                   </b>
-                  <span className="num shrink-0 text-fg-2">{q.price.toFixed(2)}</span>
                 </span>
               )
             })}

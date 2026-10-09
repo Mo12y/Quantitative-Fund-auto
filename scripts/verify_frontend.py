@@ -23,7 +23,7 @@
 
 退出码：0 = 全过；1 = 有失败（可直接接进 CI / 提交前自查）。
 
-覆盖范围（截至 2026-10-06 共 **78 项** = 动态 67 + 静态 11）：
+覆盖范围（截至 2026-10-06 共 **79 项** = 动态 68 + 静态 11）：
   ① 四入口渲染与导航可达
   ② hash 路由（深链直达 / 未知 hash 回落）
   ③ 文案卫生（JSX 里写 `**粗体**` 会原样渲染 —— 曾真出现字面 `**只读**`）
@@ -32,7 +32,8 @@
   ⑥ 交互动效已绑定（错峰入场 / 条形生长 / 指针滑入 / 骨架屏 shimmer）
   ⑦ console 无 error
   ⑦b **曲线为"裸曲线"**（2026-10-06 反转：无网格 / 无轴线 / 无 Y 刻度，保留零轴 —— DESIGN §5.1.1）
-  ⑦c **信息密度**（DESIGN §5.2 的 **5 行全部**落成断言，共 4 页 × 5 = **20 条**，
+  ⑦c **信息密度**（DESIGN §5.2 的 **5 行全部**落成断言，共 4 页 × 5 = **20 条**
+     （目标值按页职责另定 B1；「首屏」仅在页高 >1.5 屏时判 B2），
      外加 1 条**前置断言**：四页均不在 warming（冷缓存会让密度假低 → 假绿））：
      单页数字节点 / 桌面页高（基线上限 `DENSITY_BASELINE`）
      + 首屏数字 / 最大单卡 / 移动页高（2026-10-06 补，`DENSITY_DETAIL_BASELINE`）
@@ -547,7 +548,25 @@ def run_static_checks() -> None:
 #   每瘦身一轮就把基线往下调一档，直到等于 TARGET —— 这才是"渐进收紧"。
 # ══════════════════════════════════════════════════════════════════════════
 
-DENSITY_TARGET = {"num": 40, "fold": 15, "card": 8, "screens": 2.0, "mobile": 3.5}
+#: ⚠️ 2026-10-06 **B1（用户拍板）：目标按「页面职责」另定，不再用单一 40/8/15**。
+#:   理由：表格页的构成**就是表格本身**（研究两张表 8 行 × 3 字段、持仓表 7 只 × 4 字段）——
+#:   拿仪表页的尺子量它，只会得到一个"永远差 36"的数字，目标就失去指导意义了（计划书 §13.9.3）。
+#:   分两类：
+#:     · **仪表页**（今天）：一眼看完的一页 → 数字 40 / 单卡 8（首屏 15）
+#:     · **明细·操作页**（持仓 / 研究 / 设置）：本来就是清单与表格 → 数字 80 / 单卡 45
+#:   页高与移动页高两类同值（那是"屏幕装不装得下"，与页面职责无关）。
+DENSITY_TARGETS: dict[str, dict[str, float]] = {
+    "today":    {"num": 40, "card": 8,  "fold": 15, "screens": 2.0, "mobile": 3.5},
+    "position": {"num": 80, "card": 45, "fold": 15, "screens": 2.0, "mobile": 3.5},
+    "research": {"num": 80, "card": 45, "fold": 15, "screens": 2.0, "mobile": 3.5},
+    "settings": {"num": 80, "card": 45, "fold": 15, "screens": 2.0, "mobile": 3.5},
+}
+
+#: ⚠️ 2026-10-06 **B2（用户拍板）：「首屏 ≤15」只在页高 > 本值时判**。
+#:   更短的页面里**整页 ≡ 首屏**，该指标退化成"整页密度"的重复（研究页只有 1.18 屏 →
+#:   76 个数字永远"超首屏"，而那 76 个正是整页的 76 个）。不适用时**明确打印"不适用"**，
+#:   并指明该页的整页密度由「单页数字」那条断言管 —— 不是"悄悄放过"。
+FOLD_MIN_SCREENS = 1.5
 
 #: 键 = hash；值 = (含数字节点数, 桌面页高/屏)。⚠️ 同口径下只许往下调，不许上调。
 #: ⚠️ 基线必须是**实测值**（向上取到 0.1 屏 / 逐个数字上取），不能凭印象估 ——
@@ -581,7 +600,10 @@ DENSITY_TARGET = {"num": 40, "fold": 15, "card": 8, "screens": 2.0, "mobile": 3.
 #:   ⚠️ 副作用要如实记：联网态 42 比 DESIGN 目标 40 **多 2**，来源就是那 4 组指数报价。
 #:   要压到 ≤40 只需去掉指数**点位**（只留涨跌%），省 4 个读数 —— 属产品取舍，未做。
 DENSITY_BASELINE = {
-    "today": (46, 1.5),
+    # ⚠️ 2026-10-06 A3 之后：联网态 42 → **38**（4 组指数点位不再上屏）→ 基线收到 **40**，
+    #    正好等于 DESIGN 目标（仪表页 ≤40）：**联网态也算达标**，且守卫不再有 6 个读数的松量。
+    #    离线态（行情端点不可用）只有 27~31，同一个基线自然覆盖。
+    "today": (40, 1.5),
     "position": (64, 1.6),
     "research": (82, 1.5),
     "settings": (57, 2.1),
@@ -751,6 +773,36 @@ def main() -> int:
             " return t ? [...t.querySelectorAll('thead th')].map(th => th.innerText.trim()) : []; }")
         check("「研究」页：行业板块可视列 = 3（行业/近1月/评分）",
               sec_cols == ["行业", "近1月", "评分"], sec_cols)
+
+        # ── D2（2026-10-06 用户拍板补）：三问块「等价哨兵」─────────────────────
+        # ⚠️ B-6 删掉的两个旧哨兵里，`test_recommend_render.py` 锁的是
+        #    "**前端读错后端字段名** → 百分位永远显示 P—"那类 bug（当时的判据写成
+        #    `p.sharpe!==undefined`，而百分位实际在 `p.percentiles` 里）。
+        #    新前端有 `types.ts` + tsc，能挡住"字段**不存在**"；但**挡不住"字段存在却读错了"**
+        #    （把 `kept` 读成 `dropped` —— 类型系统管不了同型字段）。旧前端没有类型，所以
+        #    当年只能靠源码哨兵；现在正确的位置是**运行时一致性断言**：
+        #    后端 `_review_block()` 的 counts 是输入池的一个**划分**
+        #    （`before = kept + dropped + skipped`），读错任一字段都会当场打破这个等式。
+        # ⚠️ 取**最内层**（innerText 最短）的那个 div，而不是 document 顺序里第一个 ——
+        #    第一个往往是包含整页的祖先容器，文本从页头开始，会把 `约束前 …` 挤出截断区
+        #    （实测就是这么假红的：块本身没问题，是选择器选错了层）。
+        tri = page.evaluate(
+            "() => { const c = [...document.querySelectorAll('div')]"
+            ".filter(d => d.innerText && d.innerText.includes('用户约束（'));"
+            " if (!c.length) return null;"
+            " c.sort((a, b) => a.innerText.length - b.innerText.length);"
+            " return c[0].innerText.replace(/\\s+/g, ' ').trim().slice(0, 200); }")
+        mt = re.match(r".*?约束前\s*(\d+)\s*→\s*通过\s*(\d+)\s*·\s*落选\s*(\d+)\s*·\s*未评估\s*(\d+)",
+                      tri or "")
+        if not mt:
+            check("「研究」页：三问块渲染出四个计数（约束前 / 通过 / 落选 / 未评估）", False,
+                  f"未匹配到计数，实际文本：{tri!r}")
+        else:
+            b_n, k_n, d_n, s_n = (int(x) for x in mt.groups())
+            check("「研究」页：三问块四计数自洽（约束前 = 通过 + 落选 + 未评估）",
+                  b_n > 0 and b_n == k_n + d_n + s_n,
+                  f"约束前 {b_n} = 通过 {k_n} + 落选 {d_n} + 未评估 {s_n}"
+                  + ("" if b_n == k_n + d_n + s_n else f" ❌ 差 {b_n - k_n - d_n - s_n}（疑似读错字段）"))
         check("「研究」页：量化模型已移出", "量化模型" not in t)
         # B-3：历史回测验证块。⚠️ 必须同时含「非推荐」字样 —— 那是最容易漂移的一条文案
         # （后端 §4.4 明确它不是推荐；只断言"块存在"会漏掉文案被改回"推荐"的情况）。
@@ -879,29 +931,37 @@ def main() -> int:
         )
         for label, m in measured.items():
             h = HASHES[label]
+            tg = DENSITY_TARGETS[h]
             base_num, base_scr = DENSITY_BASELINE[h]
-            gap = m["num"] - DENSITY_TARGET["num"]
+            gap = m["num"] - tg["num"]
             check(
-                f"密度 · {label}：数字节点 ≤ 基线 {base_num}（DESIGN 目标 {DENSITY_TARGET['num']}）",
+                f"密度 · {label}：数字节点 ≤ 基线 {base_num}（DESIGN 目标 {tg['num']:.0f}）",
                 m["num"] <= base_num,
-                (f"实测 {m['num']}，距目标还差 {gap}（可缩）" if gap > 0 else f"实测 {m['num']}（已达标）"))
+                (f"实测 {m['num']}，距目标还差 {gap:.0f}（可缩）" if gap > 0 else f"实测 {m['num']}（已达标）"))
             check(
-                f"密度 · {label}：页高 ≤ 基线 {base_scr} 屏（DESIGN 目标 {DENSITY_TARGET['screens']}）",
+                f"密度 · {label}：页高 ≤ 基线 {base_scr} 屏（DESIGN 目标 {tg['screens']}）",
                 m["screens"] <= base_scr,
                 f"实测 {m['screens']} 屏 · 首屏数字节点 {m['foldNum']}")
             # ⚠️ 2026-10-06 新增：§5.2 表里此前**没有断言**的两行（首屏 / 单卡）。
             base_fold, base_card, _ = DENSITY_DETAIL_BASELINE[h]
-            fgap = m["foldNum"] - DENSITY_TARGET["fold"]
+            if m["screens"] > FOLD_MIN_SCREENS:
+                fgap = m["foldNum"] - tg["fold"]
+                check(
+                    f"密度 · {label}：首屏数字 ≤ 基线 {base_fold}（DESIGN 目标 {tg['fold']:.0f}）",
+                    m["foldNum"] <= base_fold,
+                    (f"实测 {m['foldNum']}，距目标还差 {fgap:.0f}（可缩）" if fgap > 0
+                     else f"实测 {m['foldNum']}（已达标）"))
+            else:
+                # B2：整页就是首屏 → 该指标退化，不单独判（**明确说"不适用"**，不是放过）
+                check(
+                    f"密度 · {label}：首屏数字 —— 不适用（页高 {m['screens']} ≤ {FOLD_MIN_SCREENS} 屏，整页即首屏）",
+                    True,
+                    f"本页整页 {m['num']} 个数字由「单页数字」那条断言管（DESIGN §5.2 · B2）")
+            cgap = m["maxCard"] - tg["card"]
             check(
-                f"密度 · {label}：首屏数字 ≤ 基线 {base_fold}（DESIGN 目标 {DENSITY_TARGET['fold']}）",
-                m["foldNum"] <= base_fold,
-                (f"实测 {m['foldNum']}，距目标还差 {fgap}（可缩）" if fgap > 0
-                 else f"实测 {m['foldNum']}（已达标）"))
-            cgap = m["maxCard"] - DENSITY_TARGET["card"]
-            check(
-                f"密度 · {label}：最大单卡数字 ≤ 基线 {base_card}（DESIGN 目标 {DENSITY_TARGET['card']}）",
+                f"密度 · {label}：最大单卡数字 ≤ 基线 {base_card}（DESIGN 目标 {tg['card']:.0f}）",
                 m["maxCard"] <= base_card,
-                (f"实测 {m['maxCard']}，距目标还差 {cgap}（可缩）" if cgap > 0
+                (f"实测 {m['maxCard']}，距目标还差 {cgap:.0f}（可缩）" if cgap > 0
                  else f"实测 {m['maxCard']}（已达标）"))
 
         # ── DESIGN §5.2 · 移动页高（390 视口 ≤3.5 屏）—— 2026-10-06 新增 ──
@@ -914,7 +974,7 @@ def main() -> int:
             c7.close()
             base_m = DENSITY_DETAIL_BASELINE[h][2]
             check(
-                f"密度 · {label}：移动页高 ≤ 基线 {base_m} 屏（DESIGN 目标 {DENSITY_TARGET['mobile']}）",
+                f"密度 · {label}：移动页高 ≤ 基线 {base_m} 屏（DESIGN 目标 {DENSITY_TARGETS[h]['mobile']}）",
                 m7["screens"] <= base_m,
                 f"实测 {m7['screens']} 屏 · 首屏数字节点 {m7['foldNum']}")
 
