@@ -6,35 +6,10 @@ import threading
 import time
 import webbrowser
 
-from src.analysis.fund_scorer import FundScreener
 from src.analysis.dca import DcaManager
 from src.analysis.portfolio import PortfolioTracker
 from src.analysis import ledger_write
-from src.analysis.thermometer import MarketThermometer
 from src.data.database import Database
-from src.output.reporter import WeeklyReporter
-
-
-def cmd_report():
-    """生成完整周报 (v3.0 质量筛选 + 消息面)"""
-    db = Database("data/fund_quant.db")
-    screener = FundScreener(db)
-    thermometer = MarketThermometer.from_profile(db)
-    portfolio = PortfolioTracker(db)
-    reporter = WeeklyReporter(db)
-
-    # 消息面扫描
-    holdings = portfolio.get_portfolio_summary(reconcile=True)   # 周报先对账，反映最新结算
-    holding_codes = [h["fund_code"] for h in holdings.get("holdings_detail", [])]
-
-    # 2026-10-14 S1'：消息面模块已归档冻结（legacy/）；周报不再附消息面。
-    sentiment_data = None
-
-    reporter.generate_full_report(screener, thermometer, portfolio, sentiment_data)
-
-    # 定投状态
-    _print_dca_status(db)
-    db.close()
 
 
 def _print_dca_status(db):

@@ -1,124 +1,13 @@
 """
-分析命令：score / temp / sentiment / portfolio / rebalance / sector / recommend / plan。
+分析命令：portfolio / plan / counterfactual / sell_rules / breakeven / behavior / drift / precompute。
+
+⚠️ 2026-10-14 S1'-c2：`score` / `temp` / `rebalance` / `sentiment` / `sector` / `recommend` / `oos`
+已随其命题层模块一并归档（`legacy/`），不再注册。
 """
 
-from src.analysis.fund_classify import format_fee
-from src.analysis.fund_scorer import FundScreener
 from src.analysis.investment_plan import get_plan, get_progress
 from src.analysis.portfolio import PortfolioTracker
-from src.analysis.rebalance_advisor import RebalanceAdvisor
-from src.analysis.thermometer import MarketThermometer
 from src.data.database import Database
-
-
-def cmd_score():
-    """基金质量筛选（v3.0: 替代评分排名）"""
-    db = Database("data/fund_quant.db")
-    screener = FundScreener(db)
-    thermometer = MarketThermometer.from_profile(db)
-
-    print("🔍 基金质量筛选 v3.0")
-    print()
-
-    temp = thermometer.get_temperature()
-    print(f"🌡️ 当前市场温度: {temp['temperature']}°C — {temp['level_desc']}")
-    print()
-
-    df = screener.screen_funds()
-    if df.empty:
-        print("❌ 暂无通过质量筛选的基金。")
-    else:
-        summary = screener.get_pool_summary(df)
-        print(f"📊 筛选结果: {summary['total']}只通过质量筛选")
-        for label, count in summary.get("by_risk", {}).items():
-            print(f"   {label}: {count}只")
-        print()
-        print("─" * 70)
-
-        # 分组展示
-        for risk_label in ["🟢 稳健", "🟡 注意", "🔴 高风险"]:
-            subset = df[df["risk_label"] == risk_label]
-            if subset.empty:
-                continue
-            print(f"\n{risk_label}:")
-            for _, row in subset.iterrows():
-                checks = row.get("quality_checks", {})
-                metrics = row.get("metrics", {})
-                mom = metrics.get("momentum_3m", 0) or 0
-                dd = metrics.get("max_drawdown_1y", 0) or 0
-                # 综合评分（批次 4.1）：类型桶内归一化，同风险等级内的排序依据
-                score = row.get("quality_score")
-                score_txt = f"{score:.0f}" if score is not None and score == score else "--"
-
-                # mgt_fee 缺失时（长历史基金很常见）必须显示"无数据"而不是 0.00%，
-                # 否则会被读成"零费率"
-                _fee_txt = format_fee(row.get("mgt_fee"))
-                print(f"  {row['fund_code']} {str(row['fund_name'])[:28]:<30} "
-                      f"评分{score_txt:>4} 费率{_fee_txt:<8} 近3月{mom:+.0f}%  回撤{dd:.0f}%")
-
-                reasons = row.get("risk_reasons", [])
-                for r in reasons:
-                    print(f"    ↳ {r}")
-
-    db.close()
-
-
-def cmd_temp():
-    """查看市场温度 (v2.0: 含真实成交量+风格判断+分歧检测)"""
-    db = Database("data/fund_quant.db")
-    thermometer = MarketThermometer.from_profile(db)
-
-    temp = thermometer.get_temperature()
-
-    # 温度条
-    t = temp['temperature']
-    comp = temp["components"]
-
-    print("🌡️ 市场温度计 v2.0")
-    print("=" * 50)
-    if t is None:
-        # 全维度缺失：不给温度读数（F-02）
-        print("  [数据不足] —— PE/PB/ERP/量能/情绪五个维度都没有数据，无法给出温度")
-        print(f"  状态: {temp['level_desc']}")
-        print(f"  建议: {temp['action']}")
-    else:
-        bar = "█" * int(t / 5) + "░" * (20 - int(t / 5))
-        print(f"  [{bar}] {t}°C")
-        print(f"  状态: {temp['level_desc']}")
-        print(f"  建议: {temp['action']}")
-        print(f"  建议权益仓位: {temp['target_equity_pct']}%")
-    print()
-    def _d(v):
-        return f"{v:.0f}°" if v is not None else "缺失"
-
-    print("  📊 五维分解:")
-    print(f"    PE估值分位数:  {_d(comp['pe_score'])}  (越高越贵)")
-    print(f"    PB估值分位数:  {_d(comp['pb_score'])}  (越高越贵)")
-    print(f"    股债性价比:    {_d(comp['erp_score'])}  (越高股票越贵)")
-    print(f"    成交量热度:    {_d(comp['volume_score'])}  (天量=高温)")
-    print(f"    市场情绪:      {_d(comp['sentiment_score'])}  (贪婪=高温)")
-    if temp.get("degraded_dimensions"):
-        print(f"    ⚠️ 数据缺失维度已剔除并按剩余权重归一化: {', '.join(temp['degraded_dimensions'])}")
-
-    # 估值分歧
-    div = temp.get("divergence", {})
-    print()
-    print(f"  🔍 估值分歧度: {div.get('level', '未知')}")
-    print(f"     {div.get('message', '')}")
-
-    # 市场风格
-    style = temp.get("market_style", {})
-    if style.get("dominant") != "unknown":
-        print()
-        print(f"  🎨 市场风格: {style.get('dominant', '')}")
-        print(f"     {style.get('detail', '')}")
-        returns = style.get("returns", {})
-        if returns:
-            for name, ret in returns.items():
-                arrow = "📈" if ret > 0 else "📉"
-                print(f"     {arrow} {name}: {ret:+.1f}% (20日)")
-
-    db.close()
 
 
 def cmd_portfolio():
@@ -151,73 +40,6 @@ def cmd_portfolio():
         print("  资产配置:")
         for ftype, pct in summary["asset_allocation"].items():
             print(f"    {ftype}: {pct}%")
-
-    db.close()
-
-
-def cmd_rebalance():
-    """辅助调仓: 对比实际持仓 vs 目标仓位, 输出具体买卖指令"""
-    db = Database("data/fund_quant.db")
-    advisor = RebalanceAdvisor(db)
-
-    holdings = db.get_current_holdings()
-
-    if not holdings:
-        print("📋 暂无持仓。先录入:")
-        print("   python src/main.py buy")
-        db.close()
-        return
-
-    # 总资金口径 = 持仓市值 + 投资计划的现金弹药（cash_reserve）。
-    # 旧版用 total_invested * 1.1 拍脑袋估算，与计划卡数字互相打架。
-    try:
-        plan = get_plan(db) or {}
-        cash_reserve = float(plan.get("cash_reserve") or 0)
-    except Exception:
-        cash_reserve = 0.0
-
-    result = advisor.analyze(cash_reserve=cash_reserve)
-
-    # === 输出 ===
-    temp = result["temperature"]
-    summary = result["summary"]
-    instructions = result["instructions"]
-
-    print()
-    print("=" * 55)
-    print("🔄 辅助调仓建议")
-    print("=" * 55)
-
-    # 状态
-    t = temp["temperature"]
-    if t is None:
-        print(f"\n🌡️ 温度: [数据不足] — {temp['level_desc']}")
-        print(f"📊 当前权益: {result['current_equity_pct']:.0f}% → 目标: 数据不足")
-    else:
-        bar = "█" * int(t / 5) + "░" * (20 - int(t / 5))
-        print(f"\n🌡️ 温度: [{bar}] {t}°C — {temp['level_desc']}")
-        print(f"📊 当前权益: {result['current_equity_pct']:.0f}% → 目标: {result['target_equity_pct']}%")
-    print(f"💰 总资产约: ¥{result['total_capital']:.0f} (含现金)")
-
-    # 调仓建议
-    print(f"\n📋 {summary['verdict']}")
-    print(f"   {summary['detail']}")
-
-    if instructions:
-        print()
-        for inst in instructions:
-            icon = {"卖出": "🔴", "买入": "🟢", "持有": "⚪"}
-            print(f"  {icon.get(inst['action'], '•')} [{inst['action']}] {inst['fund_code']} {inst['fund_name'][:28]:<30}")
-            print(f"     金额: ¥{inst['amount']:.0f} | 仓位: {inst['current_pct']:.1f}%→{inst['target_pct']:.1f}%")
-            print(f"     原因: {inst['reason']}")
-            print()
-
-    # 提醒
-    print("⚠️ 操作提醒:")
-    print("   1. 以上为系统建议, 最终决策由你做出")
-    print("   2. 场外基金持有<7天赎回费1.5%, 请确认持有天数")
-    print("   3. 在支付宝手动操作后, 用 python src/main.py buy/sell 记录")
-    print("=" * 55)
 
     db.close()
 

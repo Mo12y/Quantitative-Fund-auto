@@ -12,8 +12,34 @@ from flask import Flask, jsonify, redirect, render_template, request, send_from_
 from flask.json.provider import DefaultJSONProvider
 from src.data.database import Database
 from src.analysis.fund_classify import type_bucket
-from src.analysis.fund_scorer import FundScreener
-from src.analysis.thermometer import MarketThermometer
+# 2026-10-14 S1'-c2：fund_scorer 已归档冻结（→ legacy/）。占位降级（筛选池返回空）。
+class FundScreener:              # noqa: D101
+    def __init__(self, db=None):
+        self.db = db
+
+    def screen_funds(self, **kw):
+        import pandas as pd
+        return pd.DataFrame()
+
+    def get_pool_summary(self, df=None):
+        return {"total": 0, "by_risk": {}}
+# 2026-10-14 S1'-c2：thermometer 已归档冻结（→ legacy/）。占位降级。
+TEMPERATURE_SCOPE = {}
+
+
+def is_temp_applicable(*a, **k):   # noqa: D103
+    return False
+
+
+class MarketThermometer:         # noqa: D101
+    @classmethod
+    def from_profile(cls, db=None):
+        return cls()
+
+    def get_temperature(self):
+        return {"temperature": None, "level": "unknown",
+                "level_desc": "已下线（温度模块归档 legacy/）", "action": "—",
+                "components": {}, "divergence": {}, "market_style": {}, "degraded_dimensions": []}
 from src.analysis.portfolio import PortfolioTracker
 from src.analysis import ledger_write
 from src.analysis.dca import DcaManager
@@ -21,7 +47,15 @@ from src.analysis.dca import DcaManager
 class SentimentMonitor:      # noqa: D101
     def full_scan(self, **kw):
         return None
-from src.analysis.rebalance_advisor import RebalanceAdvisor
+# 2026-10-14 S1'-c2：rebalance_advisor 已归档冻结（→ legacy/）。占位降级。
+class RebalanceAdvisor:          # noqa: D101
+    def __init__(self, db=None):
+        self.db = db
+
+    def analyze(self, **kw):
+        return {"temperature": {}, "summary": {"verdict": "已下线", "detail": "调仓模块归档（legacy/）"},
+                "instructions": [], "current_equity_pct": 0.0, "target_equity_pct": 0.0,
+                "total_capital": 0.0, "need_rebalance": False}
 # 2026-10-14 S1'：sector_analyzer 已归档冻结（→ legacy/）。占位类让路由降级为空。
 class SectorAnalyzer:        # noqa: D101
     def analyze(self):

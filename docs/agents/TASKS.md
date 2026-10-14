@@ -10,9 +10,10 @@
 | 批次 | 主题 | 状态 |
 |:---|:---|:---|
 | S0 | 治理骨架 + 重构蓝图 | ✅ 完成（2026-10-14）|
-| S1 | 归档冻结命题层 | 🟡 安全子集 + S1' 部分完成 |
+| S1 | 归档冻结命题层 | ✅ 全部完成（14 模块 → legacy/）|
+| S1'' | src/ 目录分层（ingest/…/deliver）| ⏳ 待做 |
 | S2 | ML 目标重定向（行为建模）| ⏳ 待做 |
-| S3 | 一页行为审计交付物 + 论文口径 | ⏳ 待做 |
+| S3 | 一页行为审计交付物 + 前端 + 论文口径 | ⏳ 待做 |
 
 ---
 
@@ -32,8 +33,10 @@
   `fund_scorer` re-export；`reporter`/`web`/`cli` 改指向。｜验收：`pytest -q` **804 passed**
 - [x] **S1'-c1**：归档 `historical_recommender` `oos_validate`（+ 测试 2）；摘 CLI `recommend`/`oos`。
   ｜验收：`pytest -q` **772 passed**、CLI 无 `recommend`/`oos`
-- [ ] **S1'-c2**：冻 `thermometer` `fund_scorer` `rebalance_advisor` `strategy_engine` `backtest`
-  —— ⚠️ 各连带改 `reporter`/`web`/`cli` + **约 14 个测试**（逐个判「归档」还是「改指向」）。｜验收：`pytest -q` 全绿
+- [x] **S1'-c2**：归档 `thermometer` `fund_scorer` `rebalance_advisor` `strategy_engine` `backtest`
+  + `src/output/reporter.py` + `src/cli/backtest_cmds.py`（+ 测试 15）；摘 CLI
+  `score`/`temp`/`rebalance`/`strategy`/`backtest*`/`report`。｜验收：`pytest -q` **538 passed**、
+  `import src.web.app` OK、CLI 25 命令
 - [ ] **S1''（最后做）**：`src/` 目录分层 `ingest/governance/warehouse/features/ledger/audit/ml/deliver`。
   ｜验收：`pytest -q` 全绿 + `python src/main.py --help` 正常。
 

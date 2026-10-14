@@ -26,32 +26,26 @@
 ### 交接：2026-10-14（DSH → 下一位）
 
 **当前进度：**
-重构 **S0 + S1 + S1'-a/b/c1** 已完成。`legacy/` 现有 **11 个模块**：
-S1 五个（`vol_model_comparison` `garch_baseline` `factor_test` `return_cluster` `temperature_history`）
-+ S1'-a（`sector_analyzer` `sentiment_monitor`）+ S1'-c1（`historical_recommender` `oos_validate`）
-+ 脚本 2 + 测试 6。
-**S1'-b 口径拆分**：新建**保留**模块 `src/analysis/fund_classify.py`（`type_bucket`/`format_fee`/申购标记），
-`fund_scorer` re-export，`reporter`/`web`/`cli` 已改指向它。
-CLI 已摘 `sector`/`sentiment`/`recommend`/`oos`；web 侧 3 处 import 改**占位降级**。
-**门禁**：`pytest -q` **772 passed**、boot_budget 3 passed、数据契约 24 项 0 失败。
+重构 **S0 + S1 + S1' 全部**已完成。`legacy/` 现有 **14 个命题层模块 + 21 个测试**：
+S1 五个 + S1'-a 两个 + S1'-c1 两个 + **S1'-c2 五个**（`thermometer` `fund_scorer` `rebalance_advisor`
+`strategy_engine` `backtest`）+ `src/output/reporter.py` + `src/cli/backtest_cmds.py`。
+**S1'-b 口径拆分**：保留模块 `src/analysis/fund_classify.py`（`type_bucket`/`format_fee`）。
+**CLI 命令表 38 → 25**；web 侧全部被冻模块改**占位降级**，`src/web/app.py` 可启动（实测）。
+**门禁**：`pytest -q` **538 passed**、boot_budget 3 passed、数据契约 24 项 0 失败。
 
-**下一步（S1'-c2，按顺序，每步跑 pytest）：**
-冻 `thermometer` `fund_scorer` `rebalance_advisor` `strategy_engine` `backtest`。各**连带**改：
-- `src/output/reporter.py`（`thermometer` + `FundScreener`）、`src/web/app.py`
-  （`/api/overview` `/api/explain` `/api/rebalance` `/api/funds` `/api/all` `/api/quant_models` 及 `_all_*` 助手）、
-  `src/cli/analysis_cmds.py`（`cmd_score`/`cmd_temp`/`cmd_rebalance`）、`output_cmds.py`（`cmd_report`）、
-  `backtest_cmds.py`（整组 `backtest*`/`strategy`）；摘 CLI 注册 `score`/`temp`/`rebalance`/`strategy`/`backtest*`；
-- 测试（约 14 个）：`test_explain_api` `test_temp_insufficient` `test_temp_scope` `test_thermometer`
-  `test_rebalance_advisor` `test_strategy_engine` `test_backtest` `test_equity_ssot` `test_api_degraded`
-  `test_constraint_api` `test_e2_materialized` `test_fee_ter` `test_purchase_status` `test_batch_a_thresholds` `test_web_api`
-  —— 逐个判断「测的是命题层 → 一并归档」还是「测的是保留口径 → 改指向」。
-- 之后 **S1''**（`src/` 目录分层）、**S2**（ML 重定向）、**S3**（一页审计）。
+**下一步（按顺序，每步跑 pytest）：**
+1. **S1''**：`src/` 目录分层 `ingest/governance/warehouse/features/ledger/audit/ml/deliver`
+   —— ⚠️ 大面积改 import（kept 模块 + `cli` + `web`）。建议用 `git mv` 分批 + 逐批跑 pytest。
+2. **S3（前端 + 交付物）**：`frontend/` 仍引用被冻路由（`/api/sectors` `/api/sentiment` `/api/funds`
+   `/api/rebalance` `/api/overview` `/api/explain` `/api/recommend` `/api/quant_models`，现返回空）
+   —— 改为**行为审计一页**（`behavior` + `counterfactual` + `portfolio` → 一页漏损报告）。
+3. **S2**：ML 目标重定向（PIT 面板复用，标签 →「该笔是否亏损/是否触发 7 天惩罚费」）。
 
 **注意事项（坑）：**
-- ⚠️ **口径先拆再冻**（S1'-b 已验证）：`type_bucket` 这类 load-bearing 口径不剥出来，就冻不动 `fund_scorer`。
-- ⚠️ **web 侧用「占位降级」**，别删 import；路由保留但返回空。
-- ⚠️ 冻结后 `test_doc_refs` 必报断链 → 历史文档登记 `EXCEPTIONS`（现 20 条），当前文档改路径。
-- ⚠️ **未 commit**：本轮改动全在工作区；回滚点 `refactor-baseline-20261014`。
+- ⚠️ **冻结前先按「谁 import 了它」分类**；有引用方必须连带改（含**直接读源文件的测试**）。
+- ⚠️ **口径先拆再冻**；**web 用占位降级**别删 import。
+- ⚠️ 冻结后 `test_doc_refs` 必报断链 → 历史文档登记 `EXCEPTIONS`（现 **41** 条）。
+- ⚠️ 本轮**已 commit** `ab22557`（S0+S1）；S1'-a/b/c1/c2 的改动**尚未 commit**。
 
 **关键文件：** `docs/05-重构/00_重构蓝图.md`、`docs/agents/STATUS.md`（顶部=现在）、
-`legacy/`（归档区，11 模块）、`src/analysis/fund_classify.py`（新保留口径）、`tests/test_doc_refs.py`（EXCEPTIONS 20 条）。
+`legacy/`（归档区，14 模块）、`src/analysis/fund_classify.py`（保留口径）、`tests/test_doc_refs.py`（EXCEPTIONS 41 条）。

@@ -61,6 +61,12 @@ EXTS = ('.md', '.py', '.ts', '.tsx', '.js', '.css', '.json', '.yaml', '.html', '
 #:   `oos_validate` 亦 `git mv` 到 `legacy/`（web 侧保留路由但改为**占位降级**）。
 #:   `修复任务书_审计问题.md` / `数据源扩展计划书.md` / `外部参考整合方案与任务书.md`
 #:   是历史/计划文档，仍按当时路径引用 —— 同上，只登记。
+#: · 2026-10-14 归档冻结（S1'-c2）：`thermometer` / `fund_scorer` / `rebalance_advisor` /
+#:   `strategy_engine` / `backtest` / `output/reporter` / `cli/backtest_cmds` 及其 13 个测试
+#:   一并 `git mv` 到 `legacy/`（命题层归档）。多份历史文档（upgrade_audit_and_plan /
+#:   参照系接入执行报告 / 黑箱验收审计报告 / 审计修复记录 / 数据源扩展计划书 /
+#:   外部参考整合方案与任务书 / 下一批次计划书 / 修复任务书_审计问题 / 执行状态与续作指引 /
+#:   _archive 交接块）仍按当时路径引用 —— 一律**只登记，不改历史文档**。
 EXCEPTIONS: set[str] = {
     "src/web/templates/dashboard.html",
     "src/web/static/app.js",
@@ -82,6 +88,29 @@ EXCEPTIONS: set[str] = {
     "src/analysis/sentiment_monitor.py",
     "src/analysis/historical_recommender.py",
     "src/analysis/oos_validate.py",
+    # S1'-c2（2026-10-14，命题层归档）
+    "src/analysis/thermometer.py",
+    "src/analysis/fund_scorer.py",
+    "src/analysis/rebalance_advisor.py",
+    "src/analysis/strategy_engine.py",
+    "src/analysis/backtest.py",
+    "src/output/reporter.py",
+    "src/cli/backtest_cmds.py",
+    "tests/test_thermometer.py",
+    "tests/test_temp_scope.py",
+    "tests/test_temp_insufficient.py",
+    "tests/test_fund_scorer.py",
+    "tests/test_batch_a_thresholds.py",
+    "tests/test_e2_materialized.py",
+    "tests/test_equity_ssot.py",
+    "tests/test_fee_ter.py",
+    "tests/test_purchase_status.py",
+    "tests/test_rebalance_advisor.py",
+    "tests/test_strategy_engine.py",
+    "tests/test_backtest.py",
+    "tests/test_explain_api.py",
+    "tests/test_fee_semantics.py",
+    "tests/test_constraint_api.py",
 }
 
 #: 含这些标记的行直接跳过（跨项目路径 / 命令 / 占位符 / 举例）

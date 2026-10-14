@@ -48,7 +48,7 @@
 
 | 动作 | 命令 |
 |:---|:---|
-| 跑测试（基线 **772 passed**，2026-10-14 实测） | `python -m pytest tests/ -q`<br>⚠️ **沙箱里必须换成**：`CODEBUDDY_SAFE_DELETE_BULK_THRESHOLD=100000 python -m pytest tests/ -q --basetemp=<全新目录>` —— **每次换全新 basetemp、串行跑**。复用目录会让 safe-delete 的 trash 报 `SAFE_DELETE_FAIL_CLOSED`（`OSError [Errno 53/64]`）→ 变成一堆 **ERROR（不是 failed）**；阈值不够则卡在 100% 不退、汇总被吞。 |
+| 跑测试（基线 **538 passed**，2026-10-14 实测） | `python -m pytest tests/ -q`<br>⚠️ **沙箱里必须换成**：`CODEBUDDY_SAFE_DELETE_BULK_THRESHOLD=100000 python -m pytest tests/ -q --basetemp=<全新目录>` —— **每次换全新 basetemp、串行跑**。复用目录会让 safe-delete 的 trash 报 `SAFE_DELETE_FAIL_CLOSED`（`OSError [Errno 53/64]`）→ 变成一堆 **ERROR（不是 failed）**；阈值不够则卡在 100% 不退、汇总被吞。 |
 | 起 Web | `python src/main.py web`（默认 :5020） |
 | 前端构建 | `cd frontend && npm run build`（沙箱里 npm 不稳 → `D:/nodejs/node.exe node_modules/vite/bin/vite.js build`） |
 | **前端真机验收**（**79 项**，需先起服务**并先预热快照**） | `python scripts/verify_frontend.py` |
@@ -73,7 +73,7 @@
    （表现为"持仓=0、最新净值=None"，极易误判成数据丢失）。
 3. **【铁律·先复现再修改】**：结论与文档不符时**停下来报告**，不要硬改。
    口径不同 ≠ bug —— 本项目反复栽在"把口径当 bug 修"和"把 bug 当口径放过"两头。
-4. **【铁律·测试全绿】**：现有 **772** 个测试必须继续全绿；每项修复配新测试。
+4. **【铁律·测试全绿】**：现有 **538** 个测试必须继续全绿；每项修复配新测试。
 5. **【铁律·不新增运行时依赖】**：确需新增先停下来问。（开发工具如 Playwright 不算，不进 `requirements.txt`。）
 6. **【铁律·不顺手扩大范围】**：做完所列事项即停；发现的新问题**记下来**，不顺手改。
 7. **【铁律·付费服务先设闸】**：任何计费外部 API（同花顺等）先报告预估用量与金额、配硬上限、
@@ -99,7 +99,7 @@
 
 | 守卫 | 命令 | 挡住什么 |
 |:---|:---|:---|
-| 功能回归 | `python -m pytest tests/ -q` | 772 项功能断言（基线 **772 passed**，S1'-c1 后）|
+| 功能回归 | `python -m pytest tests/ -q` | 538 项功能断言（基线 **538 passed**，S1'-c2 后）|
 | 数据契约（账本 + 市场数据） | `python scripts/check_ledger_invariants.py` | 值域 / 引用完整性 / 时序 / 覆盖率 / 新鲜度 / **复式记账恒等式**（24 项 = 账本 13 + 市场数据 11）|
 | 前端真机 | `python scripts/verify_frontend.py` | 四入口渲染、导航断点、移动端零溢出、动效绑定、数据链路下钻、**信息密度基线（§5.2 五行全接，目标按页职责分档）**、**字号 token**、**涨跌色**（**79 项** = 动态 68 + 静态 11）<br>⚠️ **必须先预热快照**，否则「研究」在 warming 骨架屏上采样会假红；⚠️ 前端请求的是 **`funds_board_8_300`**，而 `precompute` 只预热 `funds_board_20_300` |
 | **文档引用完整性** | `pytest tests/test_doc_refs.py -q` | 文档指向**仓库内不存在**的路径 |
