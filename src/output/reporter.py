@@ -25,7 +25,8 @@ except ImportError:
 from ..data.database import Database
 from ..analysis.thermometer import MarketThermometer
 from ..analysis.portfolio import PortfolioTracker
-from ..analysis.fund_scorer import FundScreener, format_fee, type_bucket
+from ..analysis.fund_classify import format_fee, type_bucket
+from ..analysis.fund_scorer import FundScreener
 
 
 class WeeklyReporter:

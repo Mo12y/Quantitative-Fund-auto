@@ -25,44 +25,19 @@ from . import fund_fee
 from . import fund_metrics_store
 from . import nav_metrics
 
-# 申购状态分类（D2）——
-#   `暂停申购` / `封闭期`：**买不进去**，直接排除出推荐池；
-#   `限大额`：限额度 ≠ 不能买（每天 ¥10 定投完全合规）→ 保留，但标注单日上限；
-#   空串 / NULL / 无法归类的文字：**视为未知**，沿用 `_check_size` 的“无数据(跳过检查)”
-#   做法，**不得静默当作可申购**。
-_BLOCKED_PURCHASE_MARKERS = ("暂停申购", "封闭期")
-_LIMITED_PURCHASE_MARKERS = ("限大额", "限购")
+# 2026-10-14 S1'-b 口径拆分：分类口径（申购状态标记 / 权益桶 / 费率显示）已剥到
+# `fund_classify.py`（**保留模块**）；此处仅 re-export，维持向后兼容。
+# 见 `docs/05-重构/00_重构蓝图.md` §四。
+from .fund_classify import (                     # noqa: E402,F401
+    type_bucket,
+    format_fee,
+    _BLOCKED_PURCHASE_MARKERS,
+    _LIMITED_PURCHASE_MARKERS,
+)
 
 #: E2 用的"**未提供**"哨兵 —— 用来区分「上游没给指标」（要实时算）
 #: 与「上游给了、但结果是 None」（数据不足，**不该**再算一遍）。
 _NOT_GIVEN = object()
-
-
-def type_bucket(fund_type: str) -> str:
-    """粗分类型桶：权益（equity） / 非权益（bond）—— **全项目「权益类」的唯一定义（SSOT）**。
-
-    批次 4.1/4.4 的归一化口径：债基与权益的回撤、动量区间天然不可比，
-    综合评分的百分位归一化必须**在同一个桶内**进行，否则债基的"低回撤"
-    会变成挤掉权益的免费分。`historical_recommender` / `strategy_engine` /
-    `rebalance_advisor` / `reporter` 全部复用本函数。
-
-    匹配方式是**子串**（`kw in t`），因此：
-      · "指数型-海外股票"（QDII 联接）→ 命中"指数" → equity ✓
-      · "混合型-偏股" / "混合型-灵活配置" → 命中"混合" → equity ✓
-      · "债券型-长债" / "货币型" → bond ✓
-
-    ⚠️ **以下场景「不是」本函数**（名字像、语义不同，2026-09-27 §8.4 清理时逐一确认）：
-      · `vol_predictor.VOL_MODEL_FUND_TYPES` —— 波动模型的**可预测性白名单**，
-        **刻意排除 QDII**，比权益类更窄；
-      · `FundScreener.screen_funds(fund_types=...)` —— 筛选**范围参数**；
-        默认不含 QDII 是"默认采不采"的选择，不是资产类别判断；
-      · `recsys_dataset._bucket` —— 五分类（index/equity/mixed/bond/qdii），
-        需要把"指数"从权益里单独拆出来；
-      · `strategy_engine.MARKET_STATE_FUND_TYPES` —— 温度→**建议买入类型**，
-        是策略选择而非资产类别。
-    """
-    t = str(fund_type or "")
-    return "equity" if any(kw in t for kw in ("股票", "混合", "指数", "QDII")) else "bond"
 
 
 class FundScreener:
@@ -696,13 +671,4 @@ class FundScreener:
 FundScorer = FundScreener
 
 
-def format_fee(mgt_fee) -> str:
-    """费率显示文本：缺失或为 0 时显示「无数据」，而不是 0.00%。
-
-    长历史基金的 `mgt_fee` 大量缺失；直接打印成 0.00% 会被读成"零费率"。
-    """
-    try:
-        v = float(mgt_fee or 0)
-    except (TypeError, ValueError):
-        return "无数据"
-    return f"{v:.2f}%" if v > 0 else "无数据"
+# format_fee 已剥到 `fund_classify.py`（保留模块）并在上方 re-export；此处不再重复定义。

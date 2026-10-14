@@ -11,15 +11,31 @@ os.environ.setdefault("QFA_MARKET_LIVE", "0")
 from flask import Flask, jsonify, redirect, render_template, request, send_from_directory
 from flask.json.provider import DefaultJSONProvider
 from src.data.database import Database
-from src.analysis.fund_scorer import FundScreener, type_bucket
+from src.analysis.fund_classify import type_bucket
+from src.analysis.fund_scorer import FundScreener
 from src.analysis.thermometer import MarketThermometer
 from src.analysis.portfolio import PortfolioTracker
 from src.analysis import ledger_write
 from src.analysis.dca import DcaManager
-from src.analysis.sentiment_monitor import SentimentMonitor
+# 2026-10-14 S1'：sentiment_monitor 已归档冻结（→ legacy/）。占位类让路由降级为空，不破坏 app 启动。
+class SentimentMonitor:      # noqa: D101
+    def full_scan(self, **kw):
+        return None
 from src.analysis.rebalance_advisor import RebalanceAdvisor
-from src.analysis.sector_analyzer import SectorAnalyzer
-from src.analysis.historical_recommender import HistoricalRecommender
+# 2026-10-14 S1'：sector_analyzer 已归档冻结（→ legacy/）。占位类让路由降级为空。
+class SectorAnalyzer:        # noqa: D101
+    def analyze(self):
+        return {"all_sectors": []}
+
+    def recommend_for_portfolio(self, sectors):
+        return {}
+# 2026-10-14 S1'：historical_recommender 已归档冻结（→ legacy/）。占位类降级。
+class HistoricalRecommender:     # noqa: D101
+    def __init__(self, db=None):
+        self.db = db
+
+    def recommend(self, **kw):
+        return {"error": "historical_recommender 已归档冻结（legacy/）"}
 from src.analysis.investment_plan import get_plan, get_progress, ensure_seed
 from src.analysis import fund_boards
 from src.analysis import peer_percentile

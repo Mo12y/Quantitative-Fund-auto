@@ -18,17 +18,15 @@
 
 ## 一、这是什么项目
 
-个人量化基金投资助手（**单人自用、真实资金**）。Python + SQLite + Flask，
-数据层 `collector.py`/`database.py` → 分析层约 20 个模块 → 输出层 CLI 周报 + Web 仪表盘。
+**《基于多源金融数据的个人投资者交易行为分析与建模》**（原「量化基金系统」，2026-10 方向重构）。
+定位：**多源金融数据平台（采集 → 治理 → 分层 → PIT 特征）＋ 投资者行为审计与建模**。单人自用、真实资金。
 
-- 数据规模：`fund_info` 约 2.8 万只；`fund_nav` 约 2,290 万行 / 2.4 万只有净值
-- 账本：`data/fund_quant.db`（`holdings` / `transactions` / `fund_nav` / `fund_info` / `trade_calendar` …）
-- 前端：**方案 B 已全部落地（2026-10-06）**。React 新前端（`frontend/`，构建产物由 Flask 托管）
-  挂在 **`/`**；`/assets/<file>` 走 dist；`/v2*` → **301** 到 `/`（给书签/外链用，**保留**）。
-  **旧前端已删除**（B-6：`src/web/static/app.js` / `app.css` / `src/web/_archive/dashboard.html` /
-  `scripts/check_rise_fall.py`）；`src/web/static/` 只剩 `favicon.svg`（**新前端在用，别删**）。
-  施工详规与逐条落地记录见 `docs/前端重构计划书.md` **§10 / §12（B-0~B-6）/ §13**。
-  ⚠️ 回滚只在 git 历史里（例如 `git show 3425ed5:src/web/static/app.js`）。
+- **题目与换锚理由**：`docs/05-重构/00_重构蓝图.md`
+- **数据规模 / 账本 / 门禁（唯一权威）**：`docs/00-规范/结论权威口径.md`
+- ⚠️ **旧命题「温度择时 / 选基排序 / 预测收益」已废止**（回测 alpha 不显著，p=0.38/0.56）；
+  其模块**归档冻结**在 `legacy/`（`git mv`，**不是删除**）。
+- 账本：`data/fund_quant.db`；前端：React（`frontend/`）由 Flask 托管挂 `/`。
+- 技术栈：Python + SQLite + Flask + React/Vite。
 
 ## 二、操作记忆：环境与命令
 
@@ -50,7 +48,7 @@
 
 | 动作 | 命令 |
 |:---|:---|
-| 跑测试（基线 **835 passed / 2 skipped**，2026-10-09 实测） | `python -m pytest tests/ -q`<br>⚠️ **沙箱里必须换成**：`CODEBUDDY_SAFE_DELETE_BULK_THRESHOLD=100000 python -m pytest tests/ -q --basetemp=<全新目录>` —— **每次换全新 basetemp、串行跑**。复用目录会让 safe-delete 的 trash 报 `SAFE_DELETE_FAIL_CLOSED`（`OSError [Errno 53/64]`）→ 变成一堆 **ERROR（不是 failed）**；阈值不够则卡在 100% 不退、汇总被吞。 |
+| 跑测试（基线 **772 passed**，2026-10-14 实测） | `python -m pytest tests/ -q`<br>⚠️ **沙箱里必须换成**：`CODEBUDDY_SAFE_DELETE_BULK_THRESHOLD=100000 python -m pytest tests/ -q --basetemp=<全新目录>` —— **每次换全新 basetemp、串行跑**。复用目录会让 safe-delete 的 trash 报 `SAFE_DELETE_FAIL_CLOSED`（`OSError [Errno 53/64]`）→ 变成一堆 **ERROR（不是 failed）**；阈值不够则卡在 100% 不退、汇总被吞。 |
 | 起 Web | `python src/main.py web`（默认 :5020） |
 | 前端构建 | `cd frontend && npm run build`（沙箱里 npm 不稳 → `D:/nodejs/node.exe node_modules/vite/bin/vite.js build`） |
 | **前端真机验收**（**79 项**，需先起服务**并先预热快照**） | `python scripts/verify_frontend.py` |
@@ -75,13 +73,13 @@
    （表现为"持仓=0、最新净值=None"，极易误判成数据丢失）。
 3. **【铁律·先复现再修改】**：结论与文档不符时**停下来报告**，不要硬改。
    口径不同 ≠ bug —— 本项目反复栽在"把口径当 bug 修"和"把 bug 当口径放过"两头。
-4. **【铁律·测试全绿】**：现有 **835** 个测试必须继续全绿；每项修复配新测试。
+4. **【铁律·测试全绿】**：现有 **772** 个测试必须继续全绿；每项修复配新测试。
 5. **【铁律·不新增运行时依赖】**：确需新增先停下来问。（开发工具如 Playwright 不算，不进 `requirements.txt`。）
 6. **【铁律·不顺手扩大范围】**：做完所列事项即停；发现的新问题**记下来**，不顺手改。
 7. **【铁律·付费服务先设闸】**：任何计费外部 API（同花顺等）先报告预估用量与金额、配硬上限、
    监控"累计花费"而非"进度"。未核实计费的服务**不接入**。
 8. **【铁律·大操作即记录】**：改代码 / 采集 / 账本变更 / 里程碑完成后，**立即**更新
-   `docs/agents/HANDOFF.md`（换人时）或 `docs/审计修复记录.md`（审计/修复类）并 commit。
+   `docs/agents/STATUS.md`（顶部"现在"）+ `docs/agents/HANDOFF.md`（换人时）并 commit。
    **记录是默认动作，不是可选动作。**
 
 ## 四、操作记忆：表达纪律
@@ -101,10 +99,11 @@
 
 | 守卫 | 命令 | 挡住什么 |
 |:---|:---|:---|
-| 功能回归 | `python -m pytest tests/ -q` | 835 项功能断言（基线 **835 passed / 2 skipped**）|
+| 功能回归 | `python -m pytest tests/ -q` | 772 项功能断言（基线 **772 passed**，S1'-c1 后）|
 | 数据契约（账本 + 市场数据） | `python scripts/check_ledger_invariants.py` | 值域 / 引用完整性 / 时序 / 覆盖率 / 新鲜度 / **复式记账恒等式**（24 项 = 账本 13 + 市场数据 11）|
 | 前端真机 | `python scripts/verify_frontend.py` | 四入口渲染、导航断点、移动端零溢出、动效绑定、数据链路下钻、**信息密度基线（§5.2 五行全接，目标按页职责分档）**、**字号 token**、**涨跌色**（**79 项** = 动态 68 + 静态 11）<br>⚠️ **必须先预热快照**，否则「研究」在 warming 骨架屏上采样会假红；⚠️ 前端请求的是 **`funds_board_8_300`**，而 `precompute` 只预热 `funds_board_20_300` |
 | **文档引用完整性** | `pytest tests/test_doc_refs.py -q` | 文档指向**仓库内不存在**的路径 |
+| **开工必读链预算** | `pytest tests/test_boot_budget.py -q` | 必读文件超行数/字符预算（AGENTS ≤200 / STATUS ≤160 / HANDOFF ≤160 / TASKS ≤200）|
 | 同类结构体检 | `python scripts/analyze_peer_structure.py` | 同类相关基线（决定 `corr_overlap` 阈值是否还成立）|
 
 > **为什么单独列出来**：本项目有 53 个测试文件、8,400 行，但 2026-10-01 之前**一条治理守卫都没有** ——
@@ -120,27 +119,33 @@
 > 去掉那个 `'*'` 后当场暴出 **6 处长期被吞的真断链**（2 处是漏写 `frontend/` 前缀的旧账）。
 > **教训：行级跳过标记越宽，判据越像装饰。**
 
-## 六、开工最小读取
+## 六、开工最小读取（**分三层，别越层读**）
 
-1. 本文件 §二（命令）+ §三（铁律）
-2. `docs/agents/HANDOFF.md` **最上面一个交接块**（上一轮做到哪 + 下一步 + 坑）
-3. 你要做的那个任务对应的权威文档（见 §六）
+| 层 | 何时读 | 读什么 | 预算 |
+|:--|:--|:--|:--|
+| **L0** | 每次会话自动加载 | 本文件 `AGENTS.md` 全文 | ≤200 行 |
+| **L1** | 一开工就读 | `docs/agents/STATUS.md` 全文（只装"现在"）+ `docs/agents/HANDOFF.md` **最上面一个交接块** | 各 ≤160 行 |
+| **L2** | ⛔ 不要通读，用到再跳 | `docs/agents/TASKS.md`（只跳你手上那条）、`docs/00-规范/结论权威口径.md`、`docs/05-重构/00_重构蓝图.md` | 见 §七 |
 
-> **只能读一个文件的话：读 `docs/agents/HANDOFF.md` 顶部交接块。**
+> **只能读一个文件的话：`docs/agents/STATUS.md`**（顶部即"现在"）。
+> **预算由守卫钉住**：`pytest tests/test_boot_budget.py -q` —— 这几个文件再长回去就红。
 
 ## 七、项目记忆：去哪查（不重新推导）
 
 | 要什么 | 去哪 |
 |:---|:---|
-| 项目是什么 / 模块地图 | `README.md` |
-| **前端重构**（技术栈/分阶段/验收/已知缺口） | `docs/前端重构计划书.md` |
-| ⭐ **前端合并方案 B**（决策 + 工作量 + B-0~B-6 施工详规 + 视觉判据） | `docs/前端重构计划书.md` **§10 / §11 / §12**（当前最高优先级工作） |
-| **审计与修复史**（含三批事故与教训） | `docs/审计修复记录.md` |
+| **核心数字（唯一权威）** | `docs/00-规范/结论权威口径.md` |
+| **改数字前查引用** | `docs/00-规范/口径引用索引.md` |
+| **题目 / 全链路 / 保留-冻结边界 / ML 重定向** | `docs/05-重构/00_重构蓝图.md` |
+| 现在到哪了 | `docs/agents/STATUS.md` **全文**（顶部即"现在"）+ `docs/agents/HANDOFF.md` 顶部交接块 |
+| 做什么 / 验收 | `docs/agents/TASKS.md` —— ⚠️ 只跳到你手上那一条 |
+| 文档总索引 | `docs/README.md` |
+| 过期/历史文档（可 grep，**不作口径**） | `docs/_archive/` |
 | 设计约束（token / 前端冻结项） | `DESIGN.md` |
-| 推荐系统设计与实施顺序 | `docs/基金推荐系统设计方案.md` |
-| 数据源扩展计划 | `docs/数据源扩展计划书.md` |
-| 现在到哪了 / 上一轮交接 | `docs/agents/HANDOFF.md` 顶部 |
+| 项目是什么 / 模块地图 | `README.md` |
 | 个人速记（**不在 git 里，仅本机**） | `.workbuddy/memory/` |
 
-> ⚠️ **引用 `docs/` 里"未做/未落地"的结论前，先 grep 代码核实** ——
-> 本项目文档的状态标注**长期滞后**（2026-09-27 一次核查：5 处"未做"里 4 处已做）。
+> ⚠️ **引用旧 `docs/*.md` 里"未做/未落地"的结论前，先 grep 代码核实** ——
+> 本项目文档状态标注**长期滞后**（2026-09-27 一次核查：5 处"未做"里 4 处已做）。
+> ⚠️ 重构前的旧文档（前端重构计划书 / 审计修复记录 / 基金推荐系统设计方案 …）**尚未归并**，
+> S1 完成后按「权威 → `00-规范/`、过期 → `_archive/`」二分归位。

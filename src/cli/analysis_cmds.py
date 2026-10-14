@@ -2,13 +2,11 @@
 分析命令：score / temp / sentiment / portfolio / rebalance / sector / recommend / plan。
 """
 
-from src.analysis.fund_scorer import FundScreener, format_fee
-from src.analysis.historical_recommender import HistoricalRecommender
+from src.analysis.fund_classify import format_fee
+from src.analysis.fund_scorer import FundScreener
 from src.analysis.investment_plan import get_plan, get_progress
 from src.analysis.portfolio import PortfolioTracker
 from src.analysis.rebalance_advisor import RebalanceAdvisor
-from src.analysis.sector_analyzer import SectorAnalyzer
-from src.analysis.sentiment_monitor import quick_scan as sentiment_quick_scan
 from src.analysis.thermometer import MarketThermometer
 from src.data.database import Database
 
@@ -123,11 +121,6 @@ def cmd_temp():
     db.close()
 
 
-def cmd_sentiment():
-    """消息面扫描: 市场新闻 + 基金公告 + 情绪打分"""
-    sentiment_quick_scan()
-
-
 def cmd_portfolio():
     """查看持仓"""
     db = Database("data/fund_quant.db")
@@ -229,150 +222,6 @@ def cmd_rebalance():
     db.close()
 
 
-def cmd_sector():
-    """板块分析: 31个行业动量排名 + 超跌候选 + 针对你持仓的建议"""
-    db = Database("data/fund_quant.db")
-
-    # 获取用户持仓的行业暴露
-    holdings = db.get_current_holdings()
-    held_sectors = set()
-    if holdings:
-        for h in holdings:
-            info = None
-            for f in db.get_all_funds():
-                if f["fund_code"] == h["fund_code"]:
-                    info = f; break
-            if info:
-                ftype = info.get("fund_type", "")
-                name = info.get("fund_name", "")
-                # 映射基金名→行业
-                for kw, sector in [("半导体","电子"),("芯片","电子"),("科创","电子"),
-                                     ("电力","电力设备"),("电网","电力设备"),("新能源","电力设备"),
-                                     ("计算机","计算机"),("AI","计算机"),("纳斯达克","QDII"),
-                                     ("通信","通信"),("机器人","机械设备"),
-                                     ("医药","医药生物"),("消费","食品饮料"),("食品","食品饮料"),
-                                     ("银行","银行"),("红利","银行")]:
-                    if kw in name or kw in ftype:
-                        held_sectors.add(sector)
-
-    print("📊 31个申万一级行业分析中...")
-    analyzer = SectorAnalyzer()
-    result = analyzer.analyze()
-
-    if "error" in result:
-        print(f"  ❌ {result['error']}")
-        db.close()
-        return
-
-    print()
-    print("=" * 60)
-    print("📊 申万31行业综合排名 Top 15")
-    print("=" * 60)
-    print(f"  {'排名':<4} {'行业':<10} {'综合分':>6} {'近1月':>7} {'近3月':>7} {'波动':>6}")
-    print("  " + "-" * 42)
-    for s in result["rankings"]:
-        marker = " ← 你已持有" if s["name"] in held_sectors else ""
-        print(f"  {s['rank']:<4} {s['name']:<10} {s['score']:>6.2f} {s['ret_1m']:>+6.1f}% {s['ret_3m']:>+6.1f}% {s['volatility']:>5.0f}%{marker}")
-
-    print()
-    print("=" * 60)
-    print("🔥 动量领涨 (顺势)        💧 超跌候选 (逆向)")
-    print("=" * 60)
-    ml = result.get("momentum_leaders", [])
-    vc = result.get("value_candidates", [])
-    for i in range(max(len(ml), len(vc))):
-        left = f"  {ml[i]['name']:<10} 近1月{ml[i]['ret_1m']:+.1f}%" if i < len(ml) else " " * 30
-        right = f"  {vc[i]['name']:<10} 近1月{vc[i]['ret_1m']:+.1f}%" if i < len(vc) else ""
-        print(f"{left}    {right}")
-
-    if held_sectors:
-        print()
-        print("=" * 60)
-        print("🎯 针对你的持仓")
-        print("=" * 60)
-        rec = analyzer.recommend_for_portfolio(list(held_sectors))
-        print(f"  你已持有: {', '.join(held_sectors)}")
-        print()
-        if rec.get("complements"):
-            print("  互补方向 (与你持仓低相关, 分散风险):")
-            for s in rec["complements"]:
-                print(f"    🟢 {s['name']}: 近1月{s['ret_1m']:+.1f}%  近3月{s['ret_3m']:+.1f}%")
-        if rec.get("value_non_tech"):
-            print()
-            print("  超跌非科技 (值得关注):")
-            for s in rec["value_non_tech"]:
-                print(f"    💧 {s['name']}: 近1月{s['ret_1m']:+.1f}%")
-        print()
-        print(f"  ⚠️ {rec.get('temperature_note','')}")
-
-    db.close()
-
-
-def cmd_recommend():
-    """历史回测验证（辅助参考路径）：基于回测找出持续被选中且真的赚了钱的基金"""
-    db = Database("data/fund_quant.db")
-    hr = HistoricalRecommender(db)
-
-    print("🔄 历史回测验证引擎运行中...")
-    print("   (候选池按类型分层随机抽样 · 每月末打分 · 约1.5年数据)")
-    print()
-    print("⚠️ 口径说明（批次 4.3/4.9）：")
-    print("   - 这是**历史回测验证**，不是主推荐；主推荐 = 温度驱动的实时筛选（score 命令）。")
-    print("   - 下列结果为**样本内**历史表现：用已实现的前向收益筛选“赢家”存在")
-    print("     同义反复，不构成样本外的选基能力证据，仅作参考。")
-    print("   - 【2026-09-27 实测】批次 4.3 已做**滚动样本外验证**（`oos` 命令，51 个不重叠窗口）：")
-    print("     该口径超额中位仅 +0.11pp、逐窗胜率 51.0% —— **看不出优于对照的选基能力**。")
-    print("     故 `proven_winners` 宜读作「打分法偏好的类型分布」，不要当成「验证过的赢家」。")
-    print()
-    result = hr.recommend(lookback_years=1.5)
-
-    if "error" in result:
-        print(f"❌ {result['error']}")
-        db.close()
-        return
-
-    stats = result["stats"]
-    print("=" * 60)
-    print("📊 历史回测统计")
-    print("=" * 60)
-    print(f"  回测周期: {stats['date_range']} ({stats['total_months']}个月)")
-    print(f"  候选基金: {stats['total_candidates']}只"
-          f"（权益 {stats.get('candidates_equity', '?')} / 非权益 {stats.get('candidates_bond', '?')}，"
-          f"分层随机抽样）")
-    print(f"  被选中过的: {stats['funds_ever_picked']}只")
-    print(f"  历史验证: {stats['funds_with_proven_record']}只有效数据")
-    print(f"    正收益{stats['proven_good']}只 / 负收益{stats['proven_bad']}只")
-    print(f"  Top10平均3月后收益: {stats['top10_avg_3m_return']:+.1f}%")
-    pw_dist = stats.get("proven_type_dist") or {}
-    cp_dist = stats.get("current_type_dist") or {}
-    if pw_dist:
-        print(f"  历史最强类型分布: 权益 {pw_dist.get('equity', 0)} / 非权益 {pw_dist.get('bond', 0)}"
-              f"（按类型分组评分，批次 4.4）")
-    if cp_dist:
-        print(f"  当前推荐类型分布: 权益 {cp_dist.get('equity', 0)} / 非权益 {cp_dist.get('bond', 0)}")
-
-    print()
-    print("=" * 60)
-    print("🏆 历史验证最强 (高选中率 + 实际正收益)")
-    print("=" * 60)
-    print(f"  {'基金':<10} {'名称':<28} {'综合':>5} {'选中率':>6} {'均1月':>6} {'均3月':>6} {'胜率':>5}")
-    print("  " + "-" * 68)
-    for p in result["proven_winners"][:15]:
-        print(f"  {p['code']:<10} {str(p['name'])[:26]:<28} {p['composite_score']:>5.0f} {p['pick_rate']:>5.0f}% {p['avg_return_1m']:>+5.1f}% {p['avg_return_3m']:>+5.1f}% {int(p['win_rate_3m']):>4}%")
-
-    print()
-    print("=" * 60)
-    print("🎯 当前推荐 (最新评分 + 历史验证)")
-    print("=" * 60)
-    for p in result["current_picks"][:10]:
-        hist = ""
-        if p.get("hist_avg_3m") is not None:
-            hist = f" | 历史选中{p['times_picked']}次, 均3月+{p['hist_avg_3m']:.1f}%"
-        print(f"  {p['code']} {str(p['name'])[:30]:<32} 评分{p['score']:.0f}{hist}")
-
-    db.close()
-
-
 def cmd_plan():
     """查看投资计划 + 当前进度"""
     db = Database("data/fund_quant.db")
@@ -433,88 +282,6 @@ def cmd_plan():
 
     db.close()
 
-
-
-def cmd_oos():
-    """滚动样本外验证（批次 4.3）——「打分法到底有没有选基能力」。
-
-    与 `recommend` 的区别：`recommend` 是**样本内**（用同一批已实现收益选赢家，
-    同义反复）；本命令把选择期与验证期**切开**，并给出三组对照。
-    结论可能是负的 —— 那也是有价值的结果，本命令不提供让结果好看的开关。
-    """
-    from src.analysis.oos_validate import run as run_oos
-    from src.data.database import Database
-
-    print("🔄 滚动样本外验证（walk-forward）")
-    print("   选择期 18 个月 → 验证期 6 个月，逐窗滚动；两段**不重叠**（选择期看不到验证期）。")
-    print("   对照：① 全池中位数  ② 随机等量  ③ 选择期末打分 TopK")
-    print()
-    db = Database()
-    try:
-        out = run_oos(db)
-    finally:
-        db.close()
-
-    if out.get("error"):
-        print("❌ %s" % out["error"])
-        return
-
-    meta = out.get("meta", {})
-    print("候选池：%s · 载入净值 %d 只" % (meta.get("pool"), meta.get("nav_loaded", 0)))
-    print("持有期：%d 个交易日（≈%d 个月）" % (
-        (out["windows"][0]["hold_days"] if out["windows"] else 0), meta.get("step_months", 6)))
-    print("每期持有 %s 只（top_pct=%s = 十分位）· 随机对照重复 %s 次 · 市场序列：%s"
-          % (meta.get("top_k"), meta.get("top_pct"), meta.get("c2_repeats"), meta.get("market")))
-    print()
-
-    print("%-12s %-16s %8s %8s %8s %8s %9s" % (
-        "验证起点", "选择期", "S1高频", "S2打分", "全池中位", "随机", "S1-中位"))
-    for w in out["windows"]:
-        f = lambda v: ("%+7.2f%%" % v) if v is not None else "     n/a"   # noqa: E731
-        print("%-12s %-16s %8s %8s %8s %8s %9s" % (
-            w["as_of"], "%s起%d月" % (w["sel_start"], w["sel_months"]),
-            f(w["s1"]), f(w["s2"]), f(w["c1_pool"]), f(w["c2_random"]), f(w["s1_minus_c1"])))
-
-    s = out["summary"]
-    print("\n=== 汇总（%d 个互不重叠的验证窗口，%s）===" % (s["n_windows"], s.get("span")))
-    for k, label in (("s1_frequent_pick", "S1 选择期高频选中"),
-                     ("s2_top_score", "S2 选择期末打分TopK"),
-                     ("c1_pool", "C1 全池等权（=所有候选等权持有）"),
-                     ("c2_random", "C2 随机等量")):
-        d = s.get(k)
-        if d:
-            print("  %-22s 中位 %+6.2f%%  均值 %+6.2f%%  （n=%d）" % (
-                label, d["median"], d["mean"], d["n"]))
-    for k, label in (("s1_minus_c1", "S1 − 全池中位"), ("s1_minus_c2", "S1 − 随机")):
-        d = s.get(k)
-        if d:
-            wr = s.get("win_rate_vs_c1" if k.endswith("c1") else "win_rate_vs_c2")
-            print("  %-22s 中位 %+6.2f pp  逐窗胜率 %.1f%%" % (label, d["median"], wr or 0))
-
-    print("\n=== 显著性（4 个比较，Bonferroni-Hochberg 校正）===")
-    labels = s.get("p_labels") or []
-    for i, lb in enumerate(labels):
-        wc = (s.get("win_counts") or {}).get(lb, {})
-        print("  %-10s 胜 %2d/%-2d  p=%.4f → 校正后 p=%.4f %s" % (
-            lb, wc.get("win", 0), wc.get("n", 0),
-            (s.get("p_raw") or [1])[i], (s.get("p_adjusted") or [1])[i],
-            "✅ 显著" if (s.get("p_adjusted") or [1])[i] < s.get("bh_alpha", 0.05) else ""))
-
-    a = s.get("alpha")
-    print("\n=== 因子中性 α（y = S1 − 全池等权 的**相对**超额 ~ 沪深300 同期收益）===")
-    if a:
-        t = ("%.2f" % a["t_alpha"]) if a["t_alpha"] is not None else "n/a"
-        print("  α = %+.3f%%  β = %.3f  t(α) = %s  R² = %.3f  n = %d"
-              % (a["alpha"], a["beta"], t, a["r2"], a["n"]))
-        print("  读法：α 是**剥离市场 beta 后仍剩下的相对超额**；|t(α)| < ~2 即与 0 无法区分。")
-        print("        （若 y 用绝对收益，测的只是『基金组合 vs 沪深300』，与选基能力无关。）")
-    else:
-        print("  未计算（%s）" % meta.get("market", "缺市场序列"))
-
-    print("\n判定：%s" % out["verdict"])
-    print("\n⚠️ 口径：本结果是**样本外**（选择期与验证期不重叠）；"
-          "但候选池仍是当前存续基金 → 存在**幸存者偏差**，绝对收益偏高，"
-          "看的是 S1 与对照的**差**，不是绝对数。")
 
 
 def cmd_counterfactual():

@@ -170,8 +170,8 @@ Quantitative-Fund-auto/
 │   │   ├── vol_predictor.py     #   波动率预测（离线研究）
 │   │   ├── drawdown_warning.py  #   回撤预警（离线研究）
 │   │   ├── portfolio_simulation.py    # 组合模拟（离线研究）
-│   │   ├── vol_model_comparison.py    # 波动率多模型对比（离线研究）
-│   │   ├── factor_test.py       #   因子检验（离线研究）
+│   │   ├── vol_model_comparison.py    # 波动率多模型对比（**已归档 legacy/，S1**）
+│   │   ├── factor_test.py       #   因子检验（**已归档 legacy/，S1**）
 │   │   ├── strategy_engine.py   #   策略引擎（月频+温度阈值）
 │   │   ├── rebalance_advisor.py #   调仓建议
 │   │   ├── sentiment_monitor.py #   消息面监控
@@ -411,10 +411,10 @@ python -m pytest tests/ -q
 | 报告 | 复现命令 |
 |------|---------|
 | `docs/vol_prediction_report.md` | `python src/analysis/vol_predictor.py --max-funds 200` |
-| `docs/vol_model_comparison_report.md` | `python src/analysis/vol_model_comparison.py` |
+| `docs/vol_model_comparison_report.md` | `python legacy/src/analysis/vol_model_comparison.py` |
 | `docs/drawdown_warning_report.md` | `python src/analysis/drawdown_warning.py --thresholds 3,5,8` |
 | `docs/portfolio_simulation_report.md` | `python src/analysis/portfolio_simulation.py --dd-threshold 8` |
-| `docs/factor_test_report.md` | `python src/analysis/factor_test.py` |
+| `docs/factor_test_report.md` | `python legacy/src/analysis/factor_test.py` |
 
 **这几个模块的共同口径**（2026-09 审计后统一）：
 

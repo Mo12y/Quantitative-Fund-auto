@@ -51,6 +51,16 @@ EXTS = ('.md', '.py', '.ts', '.tsx', '.js', '.css', '.json', '.yaml', '.html', '
 #: · `scripts/build_benchmark.py` —— 被 `docs/基金推荐系统设计方案.md` §8.2 的产出脚本表引用，
 #:   表里已明确标注「~~已废弃~~ / ⛔ **不再实现**」（参照系改走 `data/peer_distributions.json`）。
 #:   即这是**有意永远不存在**的路径，不是断链。
+#: · 2026-10-14 归档冻结（S1）：`vol_model_comparison` / `garch_baseline` / `factor_test` /
+#:   `return_cluster` / `temperature_history` 及其脚本 `cluster_peer_check` / `build_temperature_history`
+#:   已 `git mv` 到 `legacy/`（**命题层归档，不是删除**）。多个**历史/生成**文档
+#:   （`vol_final_review.md` / `vol_model_comparison_report.md` / `factor_test_report.md` /
+#:   `外部参考整合方案与任务书.md` / `审计修复记录.md` / `_archive/` 交接块）仍按**当时路径**引用它们。
+#:   按先例：**不改历史文档、不删，只登记**。
+#: · 2026-10-14 归档冻结（S1'）：`sector_analyzer` / `sentiment_monitor` / `historical_recommender` /
+#:   `oos_validate` 亦 `git mv` 到 `legacy/`（web 侧保留路由但改为**占位降级**）。
+#:   `修复任务书_审计问题.md` / `数据源扩展计划书.md` / `外部参考整合方案与任务书.md`
+#:   是历史/计划文档，仍按当时路径引用 —— 同上，只登记。
 EXCEPTIONS: set[str] = {
     "src/web/templates/dashboard.html",
     "src/web/static/app.js",
@@ -61,6 +71,17 @@ EXCEPTIONS: set[str] = {
     "tests/test_recommend_render.py",
     "docs/01-设计/结论权威口径.md",
     "scripts/build_benchmark.py",
+    "src/analysis/vol_model_comparison.py",
+    "src/analysis/garch_baseline.py",
+    "src/analysis/factor_test.py",
+    "src/analysis/return_cluster.py",
+    "src/analysis/temperature_history.py",
+    "scripts/cluster_peer_check.py",
+    "scripts/build_temperature_history.py",
+    "src/analysis/sector_analyzer.py",
+    "src/analysis/sentiment_monitor.py",
+    "src/analysis/historical_recommender.py",
+    "src/analysis/oos_validate.py",
 }
 
 #: 含这些标记的行直接跳过（跨项目路径 / 命令 / 占位符 / 举例）
