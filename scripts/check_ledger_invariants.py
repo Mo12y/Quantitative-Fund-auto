@@ -85,6 +85,41 @@ def info(name: str, why: str, detail: str, explain: bool = False) -> None:
         print("        依据：%s" % why)
 
 
+#: 第 19 条（净值新鲜度覆盖率）的口径 —— 2026-10-15 T0.3：原判据"物化表 asof 追平最新净值日"
+#: 用**全局 MAX 对 MAX**，会被少数被刷新的基金顶绿（2026-10-15 实测：7 只持仓被顶到 09-24，
+#: 而 22,738 只主体停在 09-18）→ 依据《结论权威口径》§四改**覆盖率判据**。
+#: 窗口 5 个交易日（约一周）= 容忍"部分停更"的上限；90% 为覆盖率下限。
+#: ⚠️ 两个参数可调，但**调了必须同步 tests/test_data_contract.py**（负对照三例用同一口径）。
+FRESH_WINDOW_TDAYS = 5
+FRESH_COVER_MIN_PCT = 90
+
+
+def nav_freshness_stats(c, total_funds: int) -> "tuple[bool, str]":
+    """第 19 条：净值新鲜度覆盖率。
+
+    基准日 = `index_daily` 最近第 ``FRESH_WINDOW_TDAYS`` 个交易日（含最新）；
+    判据 = 最新净值日 >= 基准日的基金占"有净值的基金"之比 >= ``FRESH_COVER_MIN_PCT``%。
+
+    ⚠️ 任何"取不到数据"（无交易日 / 无净值）**一律判红** —— 判据看不见数据时沉默通过，
+    正是本项目反复栽过的"假绿"（见 AGENTS.md §五）。
+    """
+    window = [r[0] for r in c.execute(
+        "SELECT DISTINCT trade_date FROM index_daily WHERE trade_date IS NOT NULL"
+        " ORDER BY trade_date DESC LIMIT ?", (FRESH_WINDOW_TDAYS,))]
+    if not window:
+        return False, "index_daily 无交易日 → 无法确定新鲜度基准（判红）"
+    base = window[-1]
+    if not total_funds:
+        return False, "fund_nav 无基金 → 无法评估覆盖率（判红）"
+    # "最新净值日 >= 基准日"⟺"存在 nav_date >= 基准日的行"→ 可用索引范围扫（不必逐只 GROUP BY）
+    covered = c.execute(
+        "SELECT COUNT(DISTINCT fund_code) FROM fund_nav WHERE nav_date >= ?",
+        (base,)).fetchone()[0]
+    ok = covered * 100 >= total_funds * FRESH_COVER_MIN_PCT
+    return ok, "基准 %s（窗口 %d 个交易日）：%d/%d = %.1f%%" % (
+        base, len(window), covered, total_funds, covered * 100.0 / total_funds)
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--explain", action="store_true", help="打印每条不变量的学科依据")
@@ -254,7 +289,7 @@ def main() -> int:
                 orphan_metrics == 0, "孤儿 %d 个" % orphan_metrics, ex)
     else:
         info("物化表 fund_metrics", "DWS 层：缺失时 `load_or_compute` 会回退实时算，故不是单点故障",
-             "不存在 → 跳过第 17 / 19 条", ex)
+             "不存在 → 跳过第 17 条（第 19 条为净值覆盖率判据，不依赖本表）", ex)
 
     # ── 新鲜度 ────────────────────────────────────────────────────
     future = one("SELECT COUNT(*) FROM index_daily WHERE trade_date > date('now')") + \
@@ -263,16 +298,17 @@ def main() -> int:
             "时序·无前视：未来日期的指数/温度会把回测变成作弊（同第 5 条对净值的要求）",
             future == 0, "未来 %d 条" % future, ex)
 
-    # DWS 层新鲜度：物化表不得落后于 ODS
+    # 净值新鲜度覆盖率（2026-10-15 T0.3：原"物化表 asof 追平最新净值日"被全局 MAX 顶绿 → 改覆盖率）
+    # nav_max / fm_max 仍被第 21 条与 INFO「各表最新日期」使用，保留计算
     nav_max = one("SELECT MAX(nav_date) FROM fund_nav")
     fm_max = one("SELECT MAX(asof) FROM fund_metrics") if has_metrics else None
-    if has_metrics:
-        blocker("第 19 条：物化表 asof 追平最新净值日",
-                "数据工程·新鲜度（DWS 不得落后于 ODS）：`fund_metrics` 是筛选/同类分位/回撤预警的"
-                "物化来源，一旦落后就说明消费者拿到的是**旧指标** → 修复方式是重跑 "
-                "`python scripts/refresh_fund_metrics.py`",
-                (fm_max or "") >= (nav_max or ""),
-                "fund_metrics %s vs fund_nav %s" % (fm_max, nav_max), ex)
+    ok19, detail19 = nav_freshness_stats(c, n_covered)
+    blocker("第 19 条：净值新鲜度覆盖率 ≥ 90%",
+            "数据工程·覆盖率新鲜度：'追平最新'不能看全局 MAX —— 它会被少数被刷新的基金顶高"
+            "（2026-10-15 实测 7 只顶到 09-24，而 22,738 只主体停在 09-18）。改为：>= %d%% 的"
+            "基金最新净值日落在最近 %d 个交易日窗口内（窗口以 index_daily 交易日为准）"
+            % (FRESH_COVER_MIN_PCT, FRESH_WINDOW_TDAYS),
+            ok19, detail19, ex)
 
     # 新鲜度一致性：温度与指数不得互相脱节
     temp_max = one("SELECT MAX(trade_date) FROM market_temperature")

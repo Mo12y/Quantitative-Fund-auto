@@ -23,29 +23,33 @@
 
 ## 交接记录
 
-### 交接：2026-10-14（DSH → 下一位）
+### 交接：2026-10-15（DSH → 执行智能体）【决策支持系统重构 · 进行中】
 
 **当前进度：**
-重构 **S0 + S1 + S1' 全部**已完成。`legacy/` 现有 **14 个命题层模块 + 21 个测试**：
-S1 五个 + S1'-a 两个 + S1'-c1 两个 + **S1'-c2 五个**（`thermometer` `fund_scorer` `rebalance_advisor`
-`strategy_engine` `backtest`）+ `src/output/reporter.py` + `src/cli/backtest_cmds.py`。
-**S1'-b 口径拆分**：保留模块 `src/analysis/fund_classify.py`（`type_bucket`/`format_fee`）。
-**CLI 命令表 38 → 25**；web 侧全部被冻模块改**占位降级**，`src/web/app.py` 可启动（实测）。
-**门禁**：`pytest -q` **538 passed**、boot_budget 3 passed、数据契约 24 项 0 失败。
+决策支持系统重构 **阶段 0（T0.3）已完成**：守卫第 19 条由"物化表 `asof` 追平最新净值日"
+（全局 MAX 对 MAX，被 7 只持仓顶绿）改为**净值新鲜度覆盖率 ≥ 90%**（窗口 = `index_daily`
+最近 5 个交易日）；"判据看不见数据一律判红"。
+负对照固化于 `tests/test_data_contract.py`（**15 passed**，含"红 → 恢复 → 绿"与函数级两例）。
+主库守卫 **24 项 0 失败**（第 19 条实测 94.7%）；全量 `pytest` **541 passed**。
 
-**下一步（按顺序，每步跑 pytest）：**
-1. **S1''**：`src/` 目录分层 `ingest/governance/warehouse/features/ledger/audit/ml/deliver`
-   —— ⚠️ 大面积改 import（kept 模块 + `cli` + `web`）。建议用 `git mv` 分批 + 逐批跑 pytest。
-2. **S3（前端 + 交付物）**：`frontend/` 仍引用被冻路由（`/api/sectors` `/api/sentiment` `/api/funds`
-   `/api/rebalance` `/api/overview` `/api/explain` `/api/recommend` `/api/quant_models`，现返回空）
-   —— 改为**行为审计一页**（`behavior` + `counterfactual` + `portfolio` → 一页漏损报告）。
-3. **S2**：ML 目标重定向（PIT 面板复用，标签 →「该笔是否亏损/是否触发 7 天惩罚费」）。
+**下一步（按计划书 §7 流水线；顶层计划 `docs/05-重构/01_决策支持系统_执行计划书.md`）：**
+1. **T1.1**（题目 + `README` / `DESIGN` / `AGENTS` §一 / `docs/README`）→ **T1.2**（权威口径重写）。
+2. **T2.0**（行为口径对照表，前置）→ **T2.1**（决策台 7 个 API）→ **T2.2**（删壳 + `precompute` 同步删 job）→ **T2.3**（`main.py` 无参数修复）。
+3. **阶段 3**（前端决策台三页）→ **阶段 4** → **阶段 5**。可并行：T2.0 / T4.2 / T5.1。
 
 **注意事项（坑）：**
-- ⚠️ **冻结前先按「谁 import 了它」分类**；有引用方必须连带改（含**直接读源文件的测试**）。
-- ⚠️ **口径先拆再冻**；**web 用占位降级**别删 import。
-- ⚠️ 冻结后 `test_doc_refs` 必报断链 → 历史文档登记 `EXCEPTIONS`（现 **41** 条）。
-- ⚠️ 本轮**已 commit** `ab22557`（S0+S1）；S1'-a/b/c1/c2 的改动**尚未 commit**。
+- ⚠️ 第 19 条旧口径"物化表追平"**已弃**（其形态本身即假绿）→ 物化表同步**不再**由守卫检查；
+  若要保留，需另立条目（决策者拍板）。
+- ⚠️ `FRESH_WINDOW_TDAYS=5` / `FRESH_COVER_MIN_PCT=90` 是两个工程参数：改它们**必须同步**
+  `tests/test_data_contract.py`。且"只刷新部分数据"的操作会让第 19 条变红——**设计意图**
+  （提示"部分刷新/错位"），全市场刷新后回落绿。
+- ⚠️ **新发现未修**：守卫第 13 条对**空 `index_daily`** 会崩（`MIN(close)` 为 NULL → `%.2f`
+  TypeError）—— 影响"空/新库跑守卫会中断"；修法 = 重排第 13 条 detail 构造（可随 T2.x 捎带）。
+  见 `docs/agents/STATUS.md` 已知坑。
+- ⚠️ 计划书自身 2 处"未来产出物"引用（T2.0 / T2.1 的验收物）已登记 `tests/test_doc_refs.py`
+  的 `EXCEPTIONS`（现 **44** 条）—— **产出后删这两条登记**，让它们回到被检查状态。
+- ⚠️ 跑测试仍须：串行 + 全新 `--basetemp` + `CODEBUDDY_SAFE_DELETE_BULK_THRESHOLD=100000`。
 
-**关键文件：** `docs/05-重构/00_重构蓝图.md`、`docs/agents/STATUS.md`（顶部=现在）、
-`legacy/`（归档区，14 模块）、`src/analysis/fund_classify.py`（保留口径）、`tests/test_doc_refs.py`（EXCEPTIONS 41 条）。
+**关键文件：** `docs/05-重构/01_决策支持系统_执行计划书.md`（顶层计划）、
+`scripts/check_ledger_invariants.py`（第 19 条已改覆盖率判据）、`tests/test_data_contract.py`（15 passed）、
+`tests/test_doc_refs.py`（EXCEPTIONS 44 条）。

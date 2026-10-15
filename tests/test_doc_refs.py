@@ -111,6 +111,12 @@ EXCEPTIONS: set[str] = {
     "tests/test_explain_api.py",
     "tests/test_fee_semantics.py",
     "tests/test_constraint_api.py",
+    # T0.3 顺带发现（2026-10-15）：`docs/05-重构/01_决策支持系统_执行计划书.md`（bb72922）
+    # 引用了它自己 T2.0 / T2.1 的**未来产出物**——提交计划书时漏跑本守卫 → 2 处断链。
+    # 属"**待创建**"（不是"有意不存在"）→ 登记放行。
+    # ⚠️ T2.0 / T2.1 产出这两个文件后**删除本登记**，让它们回到被检查状态。
+    "docs/00-规范/行为口径对照表.md",
+    "tests/test_web_behavior_api.py",
 }
 
 #: 含这些标记的行直接跳过（跨项目路径 / 命令 / 占位符 / 举例）
