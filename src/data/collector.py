@@ -660,9 +660,23 @@ class DataCollector:
 
     @staticmethod
     def _parse_size(size_str: str) -> float:
-        """解析规模字符串: '49.59亿' → 49.59"""
+        """解析规模字符串 → **亿元**口径数值。
+
+        '49.59亿' → 49.59 ｜ '49.59亿元' → 49.59 ｜ '9640.99万' → 0.964 ｜ 无单位 → 原样。
+
+        ⚠️ 2026-10-16 修 bug（T0.1 刷新暴露）：旧实现 `replace("亿","").replace("万","")`
+        只去"字"、**不做万→亿换算** —— 源里的"9640.99万"（= 0.96 亿）被写成 9640.99，
+        触发守卫「基金规模 ≤500 亿」红灯（首跑报红 224 条）——本项目"万元/亿元混装"事故的同族再犯。
+        快照对比是铁证：012699 刷新前 0.99 亿 → 被写成 9890.39（= 0.989 亿的"万数"）。
+        事后逐行比对：本次共 **257 行**为万元口径（含 33 行 ≤500 亿、不触发守卫），全部 ÷10000 回写。
+        """
         try:
-            return float(size_str.replace("亿", "").replace("万", ""))
+            s = str(size_str).strip()
+            # 去"亿万/元"字（容忍 "49.59亿元" 这种带"元"写法）+ 万→亿换算
+            v = float(re.sub(r"[亿万]元?", "", s))
+            if "万" in s and "亿" not in s:
+                v = v / 10000.0
+            return v
         except (ValueError, TypeError):
             return 0.0
 
@@ -727,8 +741,12 @@ def parse_daily_snapshot(daily_df: pd.DataFrame):
             unit = DataCollector._to_float(row[unit_cols[d]])
             if not unit:
                 continue  # 货币基金等无单位净值 → 跳过
-            acc = DataCollector._to_float(row[acc_cols[d]]) if d in acc_cols else 0.0
-            acc = acc if 0.1 <= acc < 100 else 0.0
+            # ⚠️ 2026-10-16 修 bug（T0.1 刷新暴露）：越界/缺失的累计净值**原写 0.0** ——
+            #    0 是"占位符/坏数据"，会触发守卫第 4/14 条「净值不可能 ≤0」（货币基金 21 条报红）。
+            #    改为 None（=缺数据；与 unit 的"跳过"同一语义，NULL 与 0 必须分开）。
+            acc = DataCollector._to_float(row[acc_cols[d]]) if d in acc_cols else None
+            if acc is not None and not (0.1 <= acc < 100):
+                acc = None
             nav_records.append((code, d, unit, acc, ret if d == latest else 0.0))
     return nav_records, info_rows, snap_dates
 

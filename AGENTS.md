@@ -50,21 +50,26 @@
 
 | 动作 | 命令 |
 |:---|:---|
-| 跑测试（基线 **534 passed**，2026-10-16 实测） | `python -m pytest tests/ -q`<br>⚠️ **沙箱里必须换成**：`CODEBUDDY_SAFE_DELETE_BULK_THRESHOLD=100000 python -m pytest tests/ -q --basetemp=<全新目录>` —— **每次换全新 basetemp、串行跑**。复用目录会让 safe-delete 的 trash 报 `SAFE_DELETE_FAIL_CLOSED`（`OSError [Errno 53/64]`）→ 变成一堆 **ERROR（不是 failed）**；阈值不够则卡在 100% 不退、汇总被吞。 |
+| 跑测试（基线 **544 passed**，2026-10-16 T0.1 刷新后实测） | `python -m pytest tests/ -q`<br>⚠️ **沙箱里必须换成**：`CODEBUDDY_SAFE_DELETE_BULK_THRESHOLD=100000 python -m pytest tests/ -q --basetemp=<全新目录>` —— **每次换全新 basetemp、串行跑**。复用目录会让 safe-delete 的 trash 报 `SAFE_DELETE_FAIL_CLOSED`（`OSError [Errno 53/64]`）→ 变成一堆 **ERROR（不是 failed）**；阈值不够则卡在 100% 不退、汇总被吞。 |
 | 起 Web | `python src/main.py web`（默认 :5020） |
 | 前端构建 | `cd frontend && npm run build`（沙箱里 npm 不稳 → `D:/nodejs/node.exe node_modules/vite/bin/vite.js build`） |
 | **前端真机验收**（**61 项**，需先起服务；首次可先 curl 一轮暖机） | `python scripts/verify_frontend.py` |
 | **数据契约检查**（24 项，只读） | `python scripts/check_ledger_invariants.py` |
 | 同类结构体检（只读） | `python scripts/analyze_peer_structure.py` |
 | 回填指数估值分位（**写库，先快照**） | `python scripts/backfill_index_percentiles.py [--dry-run]` |
-| 重建温度历史序列（**写库，先快照**） | `python scripts/build_temperature_history.py` |
 | 构建类对相关基线（**只读账本**；corr_overlap 相对模式的门限底数，缺失→该约束声明未评估） | `python scripts/build_overlap_baselines.py` |
 | 回填流水 shares / sell_amount（**写库，先快照**；幂等，只补缺失不覆盖） | `python scripts/backfill_transaction_shares.py [--apply]` |
 | 预计算快照（让 Web 首屏免冷算） | `python src/main.py precompute` |
 
-其它 CLI（`python src/main.py <cmd>`）：`collect` `index` `nav` `snapshot` `calendar` `temp` `score`
-`sector` `sentiment` `recommend` `strategy` `portfolio` `buy` `sell` `rebalance` `dca` `plan` `report` `oos`
-`counterfactual` `sell_rules` `breakeven` `behavior` `drift`。
+⚠️ 温度历史重建脚本（`build_temperature_history.py`）已随温度模块归档到 `legacy/scripts/`
+—— **不要复活**（`market_temperature` 冻结于 2026-09-24；守卫第 20/21 条已按"冻结"口径修订）。
+
+其它 CLI（`python src/main.py <cmd>`，共 25 个；完整清单以 `python src/main.py` 无参数输出为准）：
+`init` `test` `collect` `index` `nav` `snapshot` `enrich` `hithink` `calendar` `fees` ｜
+`behavior` `counterfactual` `sell_rules` `breakeven` `drift` ｜
+`portfolio` `buy` `sell` `update` `delete` `dca` `plan` ｜ `web` `precompute` `schedule`。
+⚠️ 旧命题命令（`temp`/`score`/`sector`/`sentiment`/`recommend`/`strategy`/`backtest*`/`report`/`oos`/`rebalance`）
+**已随模块归档删除**（T2.2/T2.3），不要再引用。
 
 ## 三、操作记忆：铁律
 
@@ -75,7 +80,7 @@
    （表现为"持仓=0、最新净值=None"，极易误判成数据丢失）。
 3. **【铁律·先复现再修改】**：结论与文档不符时**停下来报告**，不要硬改。
    口径不同 ≠ bug —— 本项目反复栽在"把口径当 bug 修"和"把 bug 当口径放过"两头。
-4. **【铁律·测试全绿】**：现有 **534** 个测试必须继续全绿；每项修复配新测试。
+4. **【铁律·测试全绿】**：现有 **544** 个测试必须继续全绿；每项修复配新测试。
 5. **【铁律·不新增运行时依赖】**：确需新增先停下来问。（开发工具如 Playwright 不算，不进 `requirements.txt`。）
 6. **【铁律·不顺手扩大范围】**：做完所列事项即停；发现的新问题**记下来**，不顺手改。
 7. **【铁律·付费服务先设闸】**：任何计费外部 API（同花顺等）先报告预估用量与金额、配硬上限、
@@ -91,7 +96,7 @@
    `【文献】`附可查来源｜`【推测】`写明依据 + 什么证据能推翻它。
 2. **不迎合**：与用户判断冲突时**先摆证据再给建议**；确信度低就直说没把握，
    **不许为显得独立而制造分歧**，也不许明知有错却顺着说。
-3. **机械验收**：任务的"验收"必须写**命令 + 预期输出**（如 `pytest -q 得 534 passed`），
+3. **机械验收**：任务的"验收"必须写**命令 + 预期输出**（如 `pytest -q 得 544 passed`），
    **不写 prose**（如"数字一致"）。
 4. **提醒预算**：只在"会改变结论是否成立"或"成本量级变化"时提醒，每轮最多 3 条、
    单独成节、不混进主回答；**没有达标项就一条都不写**。
@@ -101,7 +106,7 @@
 
 | 守卫 | 命令 | 挡住什么 |
 |:---|:---|:---|
-| 功能回归 | `python -m pytest tests/ -q` | 534 项功能断言（基线 **534 passed**，T2.2 后）|
+| 功能回归 | `python -m pytest tests/ -q` | 544 项功能断言（基线 **544 passed**，T0.1 刷新后）|
 | 数据契约（账本 + 市场数据） | `python scripts/check_ledger_invariants.py` | 值域 / 引用完整性 / 时序 / 覆盖率 / 新鲜度 / **复式记账恒等式**（24 项 = 账本 13 + 市场数据 11）|
 | 前端真机 | `python scripts/verify_frontend.py` | 三入口（决策台/账本/数据状态）渲染、七卡、导航断点、移动端零溢出、动效绑定、深链与旧 hash 回落、**信息密度基线（§5.2 五行全接 · 三页目标）**、**字号 token**、**涨跌色**（**61 项** = 动态 50 + 静态 11）<br>⚠️ 需先起服务；首次可先 curl 一轮暖机（`/api/explain` 冷算约 37s） |
 | **文档引用完整性** | `pytest tests/test_doc_refs.py -q` | 文档指向**仓库内不存在**的路径 |

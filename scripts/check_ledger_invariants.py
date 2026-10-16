@@ -310,23 +310,31 @@ def main() -> int:
             % (FRESH_COVER_MIN_PCT, FRESH_WINDOW_TDAYS),
             ok19, detail19, ex)
 
-    # 新鲜度一致性：温度与指数不得互相脱节
+    # 新鲜度一致性：温度不得**超前**指数（2026-10-16 修订）
+    # 原判据"两者最新日必须相等"——其前提"温度会被持续更新"已随温度模块归档（2026-10-14 S1'）失效：
+    # 温度表**冻结**是预期，而指数随数据刷新前进，两者必然发散（实测 温度 09-24 vs 指数 10-15）。
+    # 新判据只挡**派生链超前**这种真异常（温度由指数派生 → 必须 ≤ 指数）。
     temp_max = one("SELECT MAX(trade_date) FROM market_temperature")
     idx_max = one("SELECT MAX(trade_date) FROM index_daily")
-    blocker("第 20 条：温度与指数的最新日期一致",
-            "数据工程·新鲜度一致性：温度是**由指数数据派生**的，两者最新日不一致 = 派生链断在半路",
-            (temp_max or "") == (idx_max or ""),
+    _frozen = ("｜温度表已随模块归档冻结于 %s（冻结 ≠ 异常）" % temp_max
+               if (temp_max or "") < (idx_max or "") else "")
+    blocker("第 20 条：温度不得超前指数（派生方向）",
+            "数据工程·新鲜度一致性：温度由指数数据派生 → 温度最新日 ≤ 指数最新日。"
+            "⚠️ 2026-10-16 修订：原「两者必须相等」在温度模块归档后失效；"
+            "留此条防『派生链超前』的真异常。" + _frozen,
+            (temp_max or "") <= (idx_max or ""),
             "温度 %s vs 指数 %s" % (temp_max, idx_max), ex)
 
     # 交易日历滞后回归护栏（粗粒度上限，防"日历长期不刷新"）
     cal_max = one("SELECT MAX(trade_date) FROM trade_calendar")
     cal_lag = one("SELECT CAST(julianday(?) - julianday(?) AS INTEGER)", nav_max, cal_max) \
         if (cal_max and nav_max) else -1
-    blocker("第 21 条：交易日历滞后最新净值日 ≤ 60 自然日",
+    blocker("第 21 条：交易日历不落后净值日超过 60 天",
             "数据工程·新鲜度：交易日历用于 T+1 确认与『定投跳过节假日』；"
-            "长期不刷新会让近期流水无法判断确认日。此处只要**回归护栏**（上限放宽），"
-            "具体覆盖范围见下方 INFO",
-            0 <= cal_lag <= 60, "滞后 %d 天" % cal_lag, ex)
+            "⚠️ 2026-10-16 修订：原式 `0 <= lag <= 60` 把『日历覆盖到未来』判成红 —— "
+            "而 akshare 本就给未来排期、定投排期**正需要**它（实遇 lag=-77 误报）。"
+            "改为只挡『日历太旧』：净值日 − 日历末日 ≤ 60（负值 = 覆盖到未来 = 正常）。",
+            cal_lag <= 60, "滞后 %d 天（负值=日历覆盖到未来，正常）" % cal_lag, ex)
 
     # ── 只记录、不判定 ────────────────────────────────────────────
     known("fund_nav 净值双列全空的行数",

@@ -1,6 +1,6 @@
 # 基于多源金融数据的个人基金投资决策支持系统
 
-> 系统用 **2,290 万行**市场面板算出：**一面行为镜（核心）+ 四个信号（上下文）+ 反事实归因（证据）**，
+> 系统用 **2,296 万行**市场面板算出：**一面行为镜（核心）+ 四个信号（上下文）+ 反事实归因（证据）**，
 > 递到用户手上；**用户自己下判断**，系统不代替决策。
 >
 > ⚠️ **「系统 vs 实例」诚实声明**：当前只有 **1 个 pilot 用户**（项目作者本人，真实资金）。
@@ -193,7 +193,7 @@ Quantitative-Fund-auto/
 │   ├── web/                     # Flask 后端 API（React 前端的宿主）
 │   ├── config.py                # 配置中心（settings.yaml 类型化访问）
 │   └── main.py                  # 🚀 主入口（CLI 分发）
-├── tests/                       # ✅ 单元测试（pytest，534 用例）
+├── tests/                       # ✅ 单元测试（pytest，544 用例）
 └── requirements.txt
 ```
 
@@ -202,7 +202,7 @@ Quantitative-Fund-auto/
 ```mermaid
 flowchart LR
     subgraph L1[数据平台 · 共享]
-        A[多源采集<br/>efinance / akshare / curl] --> B[(SQLite 账本 + 市场面板<br/>2,290 万行净值)]
+        A[多源采集<br/>efinance / akshare / curl] --> B[(SQLite 账本 + 市场面板<br/>2,296 万行净值)]
         B --> C[治理与守卫<br/>复式恒等式 + 24 项契约]
         B --> D[PIT 特征层<br/>分位 / 波动 / 费率]
     end
@@ -224,7 +224,7 @@ flowchart LR
 | 组件 | 选型 | 理由 |
 |------|------|------|
 | 数据源 | efinance（净值主）+ akshare（备）+ curl + 东方财富（交易日历） | 净值历史优先 efinance（更稳、含累计净值），失败回退 akshare；Python 直连外网不稳时交易日历用 curl 子进程 |
-| 存储 | SQLite（WAL） | 单机个人使用，零配置零运维；当前 **2.79 万只基金基本信息 + 2,290 万条净值记录**完全够用；已开 WAL + busy_timeout，配合 Flask 多线程降低锁冲突。**不为"像大数据"硬塞 Spark/Hive**（2.4 GB 不是大数据体量） |
+| 存储 | SQLite（WAL） | 单机个人使用，零配置零运维；当前 **2.79 万只基金基本信息 + 2,296 万条净值记录**完全够用；已开 WAL + busy_timeout，配合 Flask 多线程降低锁冲突。**不为"像大数据"硬塞 Spark/Hive**（2.4 GB 不是大数据体量） |
 | 语言 | Python 3.10+ | 金融数据生态成熟（pandas / numpy） |
 | CLI | rich | 终端彩色输出、表格、进度条，报告可读性好 |
 | Web | Flask + React/Vite | 后端单文件可起服务；前端独立构建、由 Flask 托管（个人工具不需要更重的东西） |
@@ -236,7 +236,7 @@ flowchart LR
 CODEBUDDY_SAFE_DELETE_BULK_THRESHOLD=100000 python -m pytest tests/ -q
 ```
 
-当前基线 **534 passed**（重构中会随命题层模块归档而变化，历史轨迹记录在
+当前基线 **544 passed**（重构中会随命题层模块归档 / 数据刷新而变化，历史轨迹记录在
 `docs/00-规范/结论权威口径.md` §三）。覆盖：数据契约守卫自身（逐条注入违规必须点名报红）、
 行为画像与反事实口径、T+1/T+2 交易规则与持仓落账、定投期次、组合曲线、账本写入门面的
 原子性（`immediate()` 负对照）、同类分位参照系、TER 费率口径、文档引用完整性与必读链预算等。

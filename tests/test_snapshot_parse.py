@@ -4,7 +4,9 @@
 这里用合成 DataFrame 离线验证解析规则，不触网：
 - 两个交易日都入库，日增长率只挂在最新一天；
 - 货币基金（无单位净值）跳过；
-- 累计净值越界归 0；费率缺失保持 None（交给 upsert 保留旧值）；
+- 累计净值越界/缺失 → **None**（缺数据；2026-10-16 修订：原"归 0"会把占位符写进库、
+  触发守卫第 4/14 条「净值不可能 ≤0」——T0.1 刷新时 21 条货币基金当场报红）；
+- 费率缺失保持 None（交给 upsert 保留旧值）；
 - 'nan' 名称/状态不覆盖库内已有好值。
 """
 import os
@@ -15,7 +17,7 @@ import pytest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from src.data.collector import parse_daily_snapshot
+from src.data.collector import DataCollector, parse_daily_snapshot
 from src.data.database import Database
 
 
@@ -52,11 +54,16 @@ class TestParseDailySnapshot:
         assert by_key[("000001", "2026-09-18")] == ("000001", "2026-09-18", 1.5, 1.8, 1.35)
         assert by_key[("000001", "2026-09-17")][4] == 0.0
 
-    def test_bad_acc_nav_zeroed(self):
+    def test_bad_acc_nav_nulled(self):
+        """越界/缺失的累计净值 → None（缺数据），**不再写 0**（2026-10-16 修订）。
+
+        旧行为"归 0"会把"占位符"当数据写进库 —— 真库上 21 条货币基金行因此触发守卫
+        第 4/14 条「净值不可能 ≤0」。0 与 NULL 必须分开（NULL = 缺数据）。
+        """
         records, _, _ = parse_daily_snapshot(_snapshot_df())
         by_key = {(r[0], r[1]): r for r in records}
-        assert by_key[("000002", "2026-09-18")][3] == 0.0   # 250 越界 → 0
-        assert by_key[("000002", "2026-09-17")][3] == 1.2   # 合法值保留
+        assert by_key[("000002", "2026-09-18")][3] is None   # 250 越界 → None
+        assert by_key[("000002", "2026-09-17")][3] == 1.2    # 合法值保留
 
     def test_money_fund_skipped_in_nav_but_info_kept(self):
         records, info, _ = parse_daily_snapshot(_snapshot_df())
@@ -90,3 +97,31 @@ class TestParseDailySnapshot:
         row = dict(db.conn.execute(
             "SELECT * FROM fund_info WHERE fund_code='000009'").fetchone())
         assert row["mgt_fee"] == 1.0
+
+
+class TestParseSize:
+    """`_parse_size`：规模串 → **亿元**口径。
+
+    ⚠️ 2026-10-16 修 bug（T0.1 刷新暴露）：旧实现只去"亿/万"字、**不做万→亿换算** ——
+    源里"9640.99万"（= 0.96 亿）被写成 9640.99，触发守卫「基金规模 ≤500 亿」红灯（首跑 224 条），
+    是本项目"万元/亿元混装"事故的同族再犯（快照对比铁证：012699 刷新前 0.99 → 被写 9890.39）。
+    事后逐行比对：共 **257 行**为万元口径，全部 ÷10000 回写（现值最大 66 亿）。
+    """
+
+    def test_yi_plain(self):
+        assert DataCollector._parse_size("49.59亿") == 49.59
+
+    def test_yi_with_suffix(self):
+        assert DataCollector._parse_size("49.59亿元") == 49.59
+
+    def test_wan_converted_to_yi(self):
+        assert DataCollector._parse_size("9640.99万") == pytest.approx(0.964099)
+
+    def test_wan_small(self):
+        assert DataCollector._parse_size("500万") == pytest.approx(0.05)
+
+    def test_no_unit_passthrough(self):
+        assert DataCollector._parse_size("123.4") == 123.4
+
+    def test_garbage_returns_zero(self):
+        assert DataCollector._parse_size("--") == 0.0

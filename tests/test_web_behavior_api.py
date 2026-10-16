@@ -6,7 +6,7 @@
 
 ⚠️ 为什么跑**真实库**（不建临时库）：行为审计 / 反事实的输入是真实账本 ——
 临时的合成库造不出「59 笔买入 + 30 个已卖批次 + 7 只持仓」的真实结构，
-而这正是"与 CLI 输出一致"的前提。代价：**锚点断言（如 chase_spread≈2.51）绑定当前账本快照**，
+而这正是"与 CLI 输出一致"的前提。代价：**锚点断言（如 chase_spread≈2.58）绑定当前账本快照**，
 账本新增交易或重采历史净值后需同步更新（这是真实数据测试的固有代价，接受）。
 """
 import os
@@ -42,8 +42,9 @@ def test_behavior_real_data_and_same_source(client):
     from src.data.database import Database
 
     data = _get(client, "/api/behavior")
-    # 真实数据锚点（T2.0 spot-check 已知值）
-    assert data["buy"]["chase_spread"] == pytest.approx(2.51, abs=0.02)
+    # 真实数据锚点（T2.0 spot-check 已知值；2.51→2.58 因 2026-10-16 T0.1 数据刷新
+    # —— 净值序列更新后追高对照窗口随之变化，属"真实数据锚点的固有代价"）
+    assert data["buy"]["chase_spread"] == pytest.approx(2.58, abs=0.03)
     assert data["buy"]["n_buys"] == 59
     assert data["sell"]["n_lots"] == 30
     assert data["sell"]["frac_loss"] == pytest.approx(0.7333, abs=0.001)
@@ -88,7 +89,8 @@ def test_breakeven_real_data(client):
     assert data["n_lots"] == 29
     assert len(data["lots"]) == data["n_lots"]
     assert data["n_in_penalty"] == 0          # 最近买入距今均 >7 天
-    assert data["total_market_value"] == pytest.approx(854.52, abs=2.0)
+    # 854.52 → 780.18：2026-10-16 T0.1 刷新（净值 09-24 → 10-15，三周市场变动）
+    assert data["total_market_value"] == pytest.approx(780.18, abs=3.0)
     assert "today" in data and "notes" in data
 
 
