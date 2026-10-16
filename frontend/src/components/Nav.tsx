@@ -29,7 +29,7 @@ export function Nav({ entry, onGo }: { entry: Entry; onGo: (e: Entry) => void })
             style={{ boxShadow: '0 0 16px -2px rgba(90,162,255,.75)' }}
             aria-hidden="true"
           />
-          量化基金
+          基金决策台
           <span className="text-caption font-normal text-fg-4">个人账本</span>
         </span>
 

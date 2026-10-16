@@ -53,7 +53,7 @@
 | 跑测试（基线 **534 passed**，2026-10-16 实测） | `python -m pytest tests/ -q`<br>⚠️ **沙箱里必须换成**：`CODEBUDDY_SAFE_DELETE_BULK_THRESHOLD=100000 python -m pytest tests/ -q --basetemp=<全新目录>` —— **每次换全新 basetemp、串行跑**。复用目录会让 safe-delete 的 trash 报 `SAFE_DELETE_FAIL_CLOSED`（`OSError [Errno 53/64]`）→ 变成一堆 **ERROR（不是 failed）**；阈值不够则卡在 100% 不退、汇总被吞。 |
 | 起 Web | `python src/main.py web`（默认 :5020） |
 | 前端构建 | `cd frontend && npm run build`（沙箱里 npm 不稳 → `D:/nodejs/node.exe node_modules/vite/bin/vite.js build`） |
-| **前端真机验收**（**79 项**，需先起服务**并先预热快照**） | `python scripts/verify_frontend.py` |
+| **前端真机验收**（**61 项**，需先起服务；首次可先 curl 一轮暖机） | `python scripts/verify_frontend.py` |
 | **数据契约检查**（24 项，只读） | `python scripts/check_ledger_invariants.py` |
 | 同类结构体检（只读） | `python scripts/analyze_peer_structure.py` |
 | 回填指数估值分位（**写库，先快照**） | `python scripts/backfill_index_percentiles.py [--dry-run]` |
@@ -103,7 +103,7 @@
 |:---|:---|:---|
 | 功能回归 | `python -m pytest tests/ -q` | 534 项功能断言（基线 **534 passed**，T2.2 后）|
 | 数据契约（账本 + 市场数据） | `python scripts/check_ledger_invariants.py` | 值域 / 引用完整性 / 时序 / 覆盖率 / 新鲜度 / **复式记账恒等式**（24 项 = 账本 13 + 市场数据 11）|
-| 前端真机 | `python scripts/verify_frontend.py` | 四入口渲染、导航断点、移动端零溢出、动效绑定、数据链路下钻、**信息密度基线（§5.2 五行全接，目标按页职责分档）**、**字号 token**、**涨跌色**（**79 项** = 动态 68 + 静态 11）<br>⚠️ **必须先预热快照**，否则「研究」在 warming 骨架屏上采样会假红；⚠️ 前端请求的是 **`funds_board_8_300`**，而 `precompute` 只预热 `funds_board_20_300` |
+| 前端真机 | `python scripts/verify_frontend.py` | 三入口（决策台/账本/数据状态）渲染、七卡、导航断点、移动端零溢出、动效绑定、深链与旧 hash 回落、**信息密度基线（§5.2 五行全接 · 三页目标）**、**字号 token**、**涨跌色**（**61 项** = 动态 50 + 静态 11）<br>⚠️ 需先起服务；首次可先 curl 一轮暖机（`/api/explain` 冷算约 37s） |
 | **文档引用完整性** | `pytest tests/test_doc_refs.py -q` | 文档指向**仓库内不存在**的路径 |
 | **开工必读链预算** | `pytest tests/test_boot_budget.py -q` | 必读文件超行数/字符预算（AGENTS ≤200 / STATUS ≤160 / HANDOFF ≤160 / TASKS ≤200）|
 | 同类结构体检 | `python scripts/analyze_peer_structure.py` | 同类相关基线（决定 `corr_overlap` 阈值是否还成立）|

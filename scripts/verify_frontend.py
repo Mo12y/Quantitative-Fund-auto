@@ -66,8 +66,10 @@ from pathlib import Path
 # ⚠️ playwright 在 `main()` 里**延迟导入**（见那里的注释）—— 静态判据（B-0）不需要它，
 #    没装 playwright 的机器也应能跑 `--static-only`。
 
-ENTRIES = ["今天", "持仓", "研究", "设置"]
-HASHES = {"今天": "today", "持仓": "position", "研究": "research", "设置": "settings"}
+#: ⚠️ 2026-10-16 T3：入口由旧四页（今天/持仓/研究/设置）改为三页（决策台/账本/数据状态）；
+#: 默认落地页 = 决策台。
+ENTRIES = ["决策台", "账本", "数据状态"]
+HASHES = {"决策台": "decision", "账本": "ledger", "数据状态": "data"}
 
 # 仓库根（本文件在 <root>/scripts/ 下）
 ROOT = Path(__file__).resolve().parent.parent
@@ -239,8 +241,11 @@ NAV_JS = r"""() => {
   const tb = document.querySelector('[class*="lg:hidden"]');
   const aside = document.querySelector('aside');
   const disp = el => (el ? getComputedStyle(el).display : 'MISSING');
-  const visible = [...document.querySelectorAll('button')].filter(
-    b => b.getBoundingClientRect().width > 0 && /^(今天|持仓|研究|设置)$/.test(b.textContent.trim())
+  // 导航按钮 = `nav` 里的 button，用可见性过滤（两套导航都在 DOM，一套 display:none）。
+  // ⚠️ 2026-10-16 T3 踩过：旧版把入口名写进正则（「今天|持仓|研究|设置」）——
+  //    入口改名成三页后 visible 恒 0 **假红**。断言不许写死会变的东西。
+  const visible = [...document.querySelectorAll('nav button')].filter(
+    b => b.getBoundingClientRect().width > 0
   ).length;
   return {topbar: disp(tb), sidebar: disp(aside), visible};
 }"""
@@ -555,11 +560,18 @@ def run_static_checks() -> None:
 #:     · **仪表页**（今天）：一眼看完的一页 → 数字 40 / 单卡 8（首屏 15）
 #:     · **明细·操作页**（持仓 / 研究 / 设置）：本来就是清单与表格 → 数字 80 / 单卡 45
 #:   页高与移动页高两类同值（那是"屏幕装不装得下"，与页面职责无关）。
+#: ⚠️ 2026-10-16 T3：键改三页、**全表按新页实测重设**（与旧四页值不可比）。
+#:   目标 = 实测 + 约 10~15% 余量（决策台的数字还包含"行情端点可用态"的 ±8 组指数报价）。
+#:   首测实测（1440×900 / 390×844，预热态）：
+#:     决策台 119 数字 · 2.69 屏 · 首屏 26 · 单卡 41 · 移动 4.24
+#:     账本    88 数字 · 2.39 屏 · 首屏 50 · 单卡 34 · 移动 3.75
+#:     数据状态  8 数字 · 1.00 屏 ·（整页即首屏）· 单卡 5 · 移动 1.35
+#:   ⚠️ 待拍板：新页的"目标值"目前 = 上述余量上限（全部达标）；是否应对齐旧
+#:     「仪表页 40/8」的哲学、或对表格页沿用 §13.9.3 的待定问题 —— 留给决策者。
 DENSITY_TARGETS: dict[str, dict[str, float]] = {
-    "today":    {"num": 40, "card": 8,  "fold": 15, "screens": 2.0, "mobile": 3.5},
-    "position": {"num": 80, "card": 45, "fold": 15, "screens": 2.0, "mobile": 3.5},
-    "research": {"num": 80, "card": 45, "fold": 15, "screens": 2.0, "mobile": 3.5},
-    "settings": {"num": 80, "card": 45, "fold": 15, "screens": 2.0, "mobile": 3.5},
+    "decision": {"num": 135, "card": 45, "fold": 32, "screens": 3.2, "mobile": 4.6},
+    "ledger":   {"num": 100, "card": 45, "fold": 55, "screens": 2.6, "mobile": 4.0},
+    "data":     {"num": 15,  "card": 45, "fold": 30, "screens": 1.5, "mobile": 3.5},
 }
 
 #: ⚠️ 2026-10-06 **B2（用户拍板）：「首屏 ≤15」只在页高 > 本值时判**。
@@ -599,14 +611,12 @@ FOLD_MIN_SCREENS = 1.5
 #:   一次 verify 就被自己的断言抓出来。现在取**正常态（联网）**的 42 + 约 10% 余量作为基线。
 #:   ⚠️ 副作用要如实记：联网态 42 比 DESIGN 目标 40 **多 2**，来源就是那 4 组指数报价。
 #:   要压到 ≤40 只需去掉指数**点位**（只留涨跌%），省 4 个读数 —— 属产品取舍，未做。
+#: ⚠️⚠️ 2026-10-16 T3：键改三页、**基线重置**（新页面是全新形态，旧四页基线不可沿用）。
+#:   流程同 2026-10-05 的建立过程：首次跑拿实测值 → 按"实测 + 约 10% 余量"落成上限。
 DENSITY_BASELINE = {
-    # ⚠️ 2026-10-06 A3 之后：联网态 42 → **38**（4 组指数点位不再上屏）→ 基线收到 **40**，
-    #    正好等于 DESIGN 目标（仪表页 ≤40）：**联网态也算达标**，且守卫不再有 6 个读数的松量。
-    #    离线态（行情端点不可用）只有 27~31，同一个基线自然覆盖。
-    "today": (40, 1.5),
-    "position": (64, 1.6),
-    "research": (82, 1.5),
-    "settings": (57, 2.1),
+    "decision": (135, 3.2),
+    "ledger":   (100, 2.6),
+    "data":     (15, 1.5),
 }
 
 #: ⚠️ **2026-10-06：把 DESIGN §5.2 表里"三行从没落成断言"的指标接上**（见 §12/§13 的记录）。
@@ -619,10 +629,9 @@ DENSITY_BASELINE = {
 #:   现在按同一套**基线上限**起步：先钉住"不许更差"，并打印距目标差额 —— 与另两行同规则。
 #:   键 = hash；值 = (首屏数字 ≤, 最大单卡 ≤, 移动页高 ≤)，取实测 + 约 10%~15% 余量。
 DENSITY_DETAIL_BASELINE: dict[str, tuple[int, int, float]] = {
-    "today": (29, 19, 2.0),
-    "position": (56, 38, 2.9),
-    "research": (81, 45, 2.5),
-    "settings": (47, 27, 3.7),
+    "decision": (32, 45, 4.6),
+    "ledger":   (55, 45, 4.0),
+    "data":     (30, 45, 3.5),
 }
 
 DENSITY_JS = r"""() => {
@@ -725,118 +734,52 @@ def main() -> int:
         page.on("pageerror", lambda e: console.append(str(e)))
 
         page.goto(base + "/", wait_until="domcontentloaded")
-        page.wait_for_selector("text=今天要做什么", timeout=40000)
+        page.wait_for_selector("text=行为镜", timeout=40000)
         page.wait_for_timeout(3000)
 
-        check("导航含四个入口", all(e in page.inner_text("nav") for e in ENTRIES))
-        check("「今天」页渲染", "总资产" in page.inner_text("body"))
-        # 2026-10-06 瘦身第 5 条：行情与消息面已合成**一块「市场小条」**，不再各占一张卡
+        check("导航含三个入口", all(e in page.inner_text("nav") for e in ENTRIES))
         t0 = page.inner_text("body")
-        check("「今天」页：市场小条（指数行情 + 消息面）已接入",
-              "指数行情" in t0 and "消息面" in t0)
-        # 瘦身第 2 条：① 结论必须落到三态之一（DESIGN §5.1）
-        check("「今天」页：结论落到三态之一（要动手 / 不用动手 / 待数据）",
-              any(s in t0 for s in ("要动手", "不用动手", "待数据")))
-        # ② 首屏要有"大数字"：≥ 正文的 3 倍（正文 14px → ≥42px；DESIGN §5.1.1 第 2 条）
-        big = page.evaluate(
-            "() => Math.max(0, ...[...document.querySelectorAll('main .num')]"
-            ".map(e => parseFloat(getComputedStyle(e).fontSize) || 0))")
-        check("「今天」页：首屏大数字 ≥ 正文 3 倍（≥42px）", big >= 42, f"{big}px")
-        # 瘦身第 3 条：审计 / 溯源不得出现在首屏（此处「今天」整页都不该有）
-        check("「今天」页：审计（数据链路）已移出", "数据链路" not in t0)
+        # 决策台 = 七卡（一等 3：行为镜/反事实/费率门槛；二等 4：风险/排雷/分位/研究快照）
+        check("「决策台」渲染：七卡齐全",
+              all(s in t0 for s in ("行为镜", "反事实归因", "费率门槛",
+                                    "风险刻画", "排雷", "同类分位", "研究快照")))
+        # 样本充分性声明是设计纪律（不许把"样本不足"藏起来）—— 必须有一个状态词上屏
+        check("「决策台」：行为镜带样本充分性声明",
+              ("样本不足" in t0) or ("样本可用" in t0))
+        check("「决策台」：费率门槛核心数字在", "惩罚期内持仓" in t0)
+        # 审计（数据链路）不得出现在决策台首屏页 —— 它在「数据状态」页
+        check("「决策台」：审计（数据链路）已移出", "数据链路" not in t0)
 
         def go(label: str) -> str:
             page.get_by_role("button", name=label, exact=True).click()
-            page.wait_for_timeout(3500)
+            page.wait_for_timeout(4500)
             return page.inner_text("body")
 
-        t = go("持仓")
-        check("「持仓」页：调仓 + 建仓计划 + 定投", "调仓" in t and "建仓计划" in t and "定投计划" in t)
-        # B-4b：写操作面板（写入口不再是"只读"）
-        check("「持仓」页：写操作面板已接入（记一笔 + 确认卡说明）",
+        t = go("账本")
+        check("「账本」页：组合 + 持仓 + 计划 + 定投",
+              "组合" in t and "持仓" in t and "建仓计划" in t and "定投计划" in t)
+        # 写操作面板（买卖改删 + 撤销；每个写操作先出确认卡）
+        check("「账本」页：写操作面板已接入（记一笔 + 确认卡）",
               "记一笔" in t and "确认卡" in t)
+        # 首屏大数字（组合总资产）≥ 正文 3 倍 —— 原「今天」页判据随页面迁到「账本」
+        big = page.evaluate(
+            "() => Math.max(0, ...[...document.querySelectorAll('main .num')]"
+            ".map(e => parseFloat(getComputedStyle(e).fontSize) || 0))")
+        check("「账本」页：组合大数字 ≥ 正文 3 倍（≥42px）", big >= 42, f"{big}px")
 
-        t = go("研究")
-        check("「研究」页：行业板块 + 筛选池", "行业板块" in t and "筛选池" in t)
-        # 瘦身第 6 条：筛选池可视列 = 4（类型/风险/费率进逐行展开）。
-        # ⚠️ 用 DOM 取表头而不是 grep 文案：池子说明里本来就写着"费率"二字，会假绿。
-        pool_cols = page.evaluate(
-            "() => { const t = [...document.querySelectorAll('table')]"
-            ".find(x => x.querySelector('thead') && x.innerText.includes('夏普'));"
-            " return t ? [...t.querySelectorAll('thead th')].map(th => th.innerText.trim()) : []; }")
-        check("「研究」页：筛选池可视列 = 4（代码/名称/夏普/近3月）",
-              pool_cols == ["代码", "名称", "夏普", "近3月"], pool_cols)
-        # 瘦身（研究页）：行业板块可视列 = 3（行业/近1月/评分），近3月 / 近6月 / 波动进逐行展开
-        sec_cols = page.evaluate(
-            "() => { const t = [...document.querySelectorAll('table')]"
-            ".find(x => x.querySelector('thead') && x.innerText.includes('近1月'));"
-            " return t ? [...t.querySelectorAll('thead th')].map(th => th.innerText.trim()) : []; }")
-        check("「研究」页：行业板块可视列 = 3（行业/近1月/评分）",
-              sec_cols == ["行业", "近1月", "评分"], sec_cols)
-
-        # ── D2（2026-10-06 用户拍板补）：三问块「等价哨兵」─────────────────────
-        # ⚠️ B-6 删掉的两个旧哨兵里，`test_recommend_render.py` 锁的是
-        #    "**前端读错后端字段名** → 百分位永远显示 P—"那类 bug（当时的判据写成
-        #    `p.sharpe!==undefined`，而百分位实际在 `p.percentiles` 里）。
-        #    新前端有 `types.ts` + tsc，能挡住"字段**不存在**"；但**挡不住"字段存在却读错了"**
-        #    （把 `kept` 读成 `dropped` —— 类型系统管不了同型字段）。旧前端没有类型，所以
-        #    当年只能靠源码哨兵；现在正确的位置是**运行时一致性断言**：
-        #    后端 `_review_block()` 的 counts 是输入池的一个**划分**
-        #    （`before = kept + dropped + skipped`），读错任一字段都会当场打破这个等式。
-        # ⚠️ 取**最内层**（innerText 最短）的那个 div，而不是 document 顺序里第一个 ——
-        #    第一个往往是包含整页的祖先容器，文本从页头开始，会把 `约束前 …` 挤出截断区
-        #    （实测就是这么假红的：块本身没问题，是选择器选错了层）。
-        tri = page.evaluate(
-            "() => { const c = [...document.querySelectorAll('div')]"
-            ".filter(d => d.innerText && d.innerText.includes('用户约束（'));"
-            " if (!c.length) return null;"
-            " c.sort((a, b) => a.innerText.length - b.innerText.length);"
-            " return c[0].innerText.replace(/\\s+/g, ' ').trim().slice(0, 200); }")
-        mt = re.match(r".*?约束前\s*(\d+)\s*→\s*通过\s*(\d+)\s*·\s*落选\s*(\d+)\s*·\s*未评估\s*(\d+)",
-                      tri or "")
-        if not mt:
-            check("「研究」页：三问块渲染出四个计数（约束前 / 通过 / 落选 / 未评估）", False,
-                  f"未匹配到计数，实际文本：{tri!r}")
-        else:
-            b_n, k_n, d_n, s_n = (int(x) for x in mt.groups())
-            check("「研究」页：三问块四计数自洽（约束前 = 通过 + 落选 + 未评估）",
-                  b_n > 0 and b_n == k_n + d_n + s_n,
-                  f"约束前 {b_n} = 通过 {k_n} + 落选 {d_n} + 未评估 {s_n}"
-                  + ("" if b_n == k_n + d_n + s_n else f" ❌ 差 {b_n - k_n - d_n - s_n}（疑似读错字段）"))
-        check("「研究」页：量化模型已移出", "量化模型" not in t)
-        # B-3：历史回测验证块。⚠️ 必须同时含「非推荐」字样 —— 那是最容易漂移的一条文案
-        # （后端 §4.4 明确它不是推荐；只断言"块存在"会漏掉文案被改回"推荐"的情况）。
-        check("「研究」页：历史回测验证已接入且标注非推荐",
-              "历史回测验证" in t and "非推荐" in t)
-        # 数据链路下钻（2026-10-04 接进「研究」）—— 复用「今天」页同一个 DrillDown 组件
-        check("「研究」页：数据链路下钻已接入",
-              "数据链路" in t and "采集" in t and "评估" in t)
-
-        t = go("设置")
-        check("「设置」页：计划 + 画像 + 运维", "投资计划" in t and "用户画像与生效约束" in t and "数据源与运维" in t)
-        # 瘦身第 2 条：温度卡从「今天」搬来，与「用户画像与生效约束」（温度模型的输出）相邻
-        check("「设置」页：市场温度已搬入", "市场温度" in t)
-        # 模型对照表按 DESIGN §5.1「审计 / 口径一律默认折叠」收起
-        # （计划书 §13.2 点名的那张「DM / AUC / QLIKE / MZ β」表）—— 展开后内容仍在
-        check("「设置」页：量化模型已移入且对照表默认折叠",
-              "量化模型" in t and "波动率预测模型" not in t)
-        page.locator("summary", has_text="三张模型对照表").first.click()
-        page.wait_for_timeout(500)
-        check("「设置」页：模型对照表展开后内容完整",
-              "波动率预测模型" in page.inner_text("body"))
-        # 数据链路（审计）2026-10-06 从「今天」搬来，且按 DESIGN §5.1 **默认折叠**
-        check("「设置」页：数据链路（审计）已搬入且默认折叠",
-              "数据链路" in t and "这条结论是怎么算出来的" in t)
+        t = go("数据状态")
+        check("「数据状态」页：新鲜度 + 日历 + 链路 + 运维",
+              "数据新鲜度" in t and "交易日历" in t and "数据链路" in t and "采集与运维" in t)
         # 运维命令表按 DESIGN §5.1「命令表一律默认折叠」收进折叠区 —— 正文不应出现命令
-        check("「设置」页：命令表默认折叠（正文不出现命令全文）",
+        check("「数据状态」页：命令表默认折叠（正文不出现命令全文）",
               "python src/main.py snapshot" not in t)
-        page.locator("summary", has_text="运维命令清单").first.click()
+        page.locator("summary", has_text="运维命令").first.click()
         page.wait_for_timeout(500)
-        check("「设置」页：命令表展开后内容完整",
+        check("「数据状态」页：命令表展开后内容完整",
               "python src/main.py snapshot" in page.inner_text("body"))
-        # B-4b-3：写操作面板（设置页不再是"只读"）
-        check("「设置」页：写操作面板已接入（含高危笔数明示）",
-              "数据运维与写入" in t and "确认卡" in t and "待确认" in t)
+        # 数据链路（审计）按 DESIGN §5.1 默认折叠
+        check("「数据状态」页：数据链路（审计）默认折叠",
+              "这条结论是怎么算出来的" in t)
 
         # ③ 文案卫生：JSX 文本节点里的 `**粗体**` 会被原样渲染
         for label in ENTRIES:
@@ -844,15 +787,18 @@ def main() -> int:
             check(f"「{label}」无 markdown 记号泄漏", "**" not in body)
 
         # ── ② hash 路由 ───────────────────────────────────────────────
-        page.goto(base + "/#/research", wait_until="domcontentloaded")
+        page.goto(base + "/#/ledger", wait_until="domcontentloaded")
         page.wait_for_timeout(4000)
-        check("hash 深链 #/research 直达研究页", "行业板块" in page.inner_text("body"))
+        check("hash 深链 #/ledger 直达账本页", "持仓" in page.inner_text("body"))
         page.goto(base + "/#/nonsense", wait_until="domcontentloaded")
         page.wait_for_timeout(3500)
-        check("未知 hash 回落「今天」", "今天要做什么" in page.inner_text("body"))
+        check("未知 hash 回落「决策台」", "行为镜" in page.inner_text("body"))
+        page.goto(base + "/#/today", wait_until="domcontentloaded")
+        page.wait_for_timeout(3000)
+        check("旧 hash #/today 回落「决策台」", "行为镜" in page.inner_text("body"))
 
         # ── ⑥ 图表：裸曲线（DESIGN §5.1.1 第 4 条，2026-10-06 判据反转） ──
-        page.goto(base + "/#/today", wait_until="domcontentloaded")
+        page.goto(base + "/#/ledger", wait_until="domcontentloaded")
         # 绘图区现在是**懒加载**（Recharts 不进首屏）→ 必须等它到位再量，
         # 否则会误报"没有网格"（其实图还没渲染）。
         page.wait_for_selector(".recharts-surface", timeout=20000)
@@ -870,17 +816,11 @@ def main() -> int:
         a = page.evaluate(ANIM_JS)
         check("动效：卡片错峰延迟生效", len(set(a["stagger"])) > 1, a["stagger"])
 
-        go("持仓")
+        go("账本")
         check("动效：进度条生长动画已绑定",
               page.evaluate("() => { const e=document.querySelector('.grow-x'); "
                             "return e ? getComputedStyle(e).animationName : null; }") == "qfa-grow")
-        # ⚠️ 2026-10-06（瘦身第 2 条）：温度卡已从「今天」搬到「设置」，指针动画随之移动 ——
-        #    断言必须跟着走，否则它会永远红（而"温度尺"本身没坏）。
-        page.goto(base + "/#/settings", wait_until="domcontentloaded")
-        page.wait_for_timeout(3800)
-        check("动效：温度指针滑入已绑定（温度卡现挂「设置」）",
-              page.evaluate("() => { const e=document.querySelector('.slide-thumb'); "
-                            "return e ? getComputedStyle(e).animationName : null; }") == "qfa-slide-thumb")
+        # ⚠️ 2026-10-16 T3：温度卡（`.slide-thumb` 指针动画）已随旧命题删除 —— 不再断言。
 
         check("console 无 error", not console, console[:3])
         ctx.close()
@@ -894,7 +834,7 @@ def main() -> int:
             n = pg2.evaluate(NAV_JS)
             check(f"断点 {w}：{'侧栏' if want_side else '顶部条'}生效且只有一套可见",
                   (n["sidebar"] != "none") == want_side and (n["topbar"] == "none") == want_side
-                  and n["visible"] == 4, n)
+                  and n["visible"] == len(ENTRIES), n)
             c2.close()
 
         # ── ④ 移动端零横向溢出 ────────────────────────────────────────
@@ -978,15 +918,14 @@ def main() -> int:
                 m7["screens"] <= base_m,
                 f"实测 {m7['screens']} 屏 · 首屏数字节点 {m7['foldNum']}")
 
-        # ── ⑥ 骨架屏（注入 warming 后必须出现，而不是白屏）────────────
+        # ── ⑥ 骨架屏（请求挂起时必须出现，而不是白屏）────────────────
+        # ⚠️ 2026-10-16 T3：旧判据注入 warming 响应 —— 新决策台端点**没有 warming 态**
+        #    （都是直算、秒级返回），故改为**挂起请求**：数据未回、页面应显示骨架屏。
         c4 = browser.new_context(viewport={"width": 1440, "height": 900})
         pg4 = c4.new_page()
-        for ep in ("sectors", "funds/board"):
-            pg4.route(f"**/api/{ep}*", lambda r: r.fulfill(
-                status=200, content_type="application/json",
-                body=json.dumps({"ok": True, "data": None, "status": "warming", "retry_in": 10})))
-        pg4.goto(base + "/#/research", wait_until="domcontentloaded")
-        pg4.wait_for_timeout(2600)
+        pg4.route("**/api/behavior*", lambda r: None)   # 挂起不响应 → 页面停在加载态
+        pg4.goto(base + "/#/decision", wait_until="domcontentloaded")
+        pg4.wait_for_timeout(2200)
         sk = pg4.evaluate("() => document.querySelectorAll('.skeleton').length")
         check("加载中显示骨架屏（非白屏）", sk > 0, f"{sk} 块")
         c4.close()
@@ -994,7 +933,7 @@ def main() -> int:
         # ── prefers-reduced-motion：全部动效关闭 ──────────────────────
         c5 = browser.new_context(viewport={"width": 1440, "height": 900}, reduced_motion="reduce")
         pg5 = c5.new_page()
-        pg5.goto(base + "/#/today", wait_until="domcontentloaded")
+        pg5.goto(base + "/#/decision", wait_until="domcontentloaded")
         pg5.wait_for_timeout(3500)
         rm = pg5.evaluate("() => { const e=document.querySelector('.rise-in'); "
                           "return e ? getComputedStyle(e).animationName : null; }")

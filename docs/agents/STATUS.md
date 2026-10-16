@@ -4,7 +4,7 @@
 
 ---
 
-**最后更新：2026-10-16（T0.3 ~ T2.2 完成）｜更新人：DSH**
+**最后更新：2026-10-16（T0.3 ~ T3.2 完成）｜更新人：DSH**
 
 ## 现在是什么项目
 **《基于多源金融数据的个人投资者交易行为分析与建模》**（原「量化基金系统」）。
@@ -43,11 +43,16 @@
   删 `test_api_degraded.py` 等 **15** 个死路由测试（EXCEPTIONS 登记）；死缓存快照已清。
 - **T2.3 已完成**：`main.py` 无参数改为打印帮助（退出码 0，原调已删的 `report` 会崩）；
   docstring 对齐真实 25 命令。**阶段 2 收口**。
-- **下一步**：阶段 3（前端决策台三页：T3.1 三页重做 → T3.2 前端重建）→ 阶段 4/5。
+- **T3.1 / T3.2 已完成**：前端重做为三页 —— `Decision`（决策台，7 个新 API）/ `Ledger`（账本）/
+  `Data`（数据状态）+ 三入口路由；删旧四页与 5 个死组件；`verify_frontend.py` 改造
+  （**61 项全绿** = 三入口 + 新判据 + **密度基线按新页重设**）；品牌改「基金决策台」。**阶段 3 收口**。
+- **下一步**：阶段 4（T4.2 绝对路径，可选）→ 阶段 5（T5.1 反事实回填权威口径 → T5.2 论文叙事）。
 
 ## 门禁（实测）
 - `pytest -q` → **534 passed**（S1' 后 538；T0.3 +3、T2.1 +8、T2.2 −15〔死路由测试随删壳移除〕）。
 - `python src/main.py precompute` → 只剩 overview，**0.2s**（原含筛选池 ~110s）。
+- `python scripts/verify_frontend.py` → **61 项全绿**（T3：三入口 + 密度基线按新页重设）。
+- `npm run build`（frontend/）→ 成功（`tsc -b` 0 错 + vite ~7s）。
 - `python src/main.py`（无参数）→ 打印帮助，**退出码 0**；输出含 `behavior`/`counterfactual`、不含 `score`/`temp`（T2.3）。
 - `pytest tests/test_web_behavior_api.py -q` → **8 passed**（决策台 7 路由：真实锚点 + 同源一致）。
 - `pytest tests/test_data_contract.py -q` → **15 passed**（T0.3 负对照含"红→恢复→绿"完整演绎）。
@@ -72,7 +77,8 @@
 - ⚠️ **口径先拆再冻**（S1'-b 已验证）：load-bearing 口径（`type_bucket` 等）必须剥到保留模块。
 - ⚠️ **web 侧「占位降级」模式已废止**（T2.2 完成删壳）：冻结模块的残留应**整链删除**
   （占位类 + 死路由 + 辅助 + 测试 + CLI job + 缓存键），而不是降级保留 —— 降级只是 S1' 的过渡态。
-- ⚠️ 冻结后 `test_doc_refs` 必报断链 → 历史文档登记 `EXCEPTIONS`（现 **43** 条），当前文档改路径。
+- ⚠️ 冻结/删除后 `test_doc_refs` 必报断链 → 历史文档与计划书（描述性引用）登记
+  `EXCEPTIONS`（现 **45** 条），当前文档改路径。
 - ⚠️ 有的**测试直接读源文件**（如 `test_fee_semantics.py` 读 `fund_scorer.py`）→ 归档模块时必连带归档。
 - 数据新鲜度守卫（第 19 条）**已修（T0.3）**：原「全局 `max(nav_date)` 顶绿」已改**覆盖率判据**
   —— 见上「决策支持系统重构」节。
@@ -82,5 +88,6 @@
 - ⚠️ `trade_calendar` 只到 `2026-09-09`（**13 条持仓批次**未覆盖）。
 - ⚠️ `transactions` 卖出 **34** vs `holdings` 已卖 **30**；已卖批次 `shares` 全空。
 - ⚠️ `market_temperature.pe_score=50.0` 有 **274/5210 天**是占位值。
-- ⚠️ **`test_doc_refs` 的归档跳过有 bug**（`os.sep` 匹配不上 git 的 `/`）。
+- ✅ `test_doc_refs` 的归档跳过 bug **已修**（2026-10-16 T3：`os.sep` 混合斜杠导致
+  `_archive/` 从未被跳过；T3 删旧页面时它曾当场暴出 6 处历史断链）。
 - ⚠️ `pytest` 须串行、每次换全新 `--basetemp`；沙箱内需 `CODEBUDDY_SAFE_DELETE_BULK_THRESHOLD=100000`。

@@ -116,6 +116,16 @@ EXCEPTIONS: set[str] = {
     #   一并移除。计划书（现状表 / T2.2 任务描述）与 `docs/执行状态与续作指引.md`
     #   等**历史文档**仍按当时路径引用它 —— 按先例：不改历史文档、只登记。
     "tests/test_api_degraded.py",
+    # · `frontend/src/routes/Research.tsx` / `frontend/src/routes/Settings.tsx` ——
+    #   2026-10-16 **T3（前端重做）删除**（三页重做：Research 整删、Settings 内容
+    #   并入 Ledger / Data）。计划书 §4.2 的**删除清单**按"要删的对象"引用它们
+    #   （任务描述性质）—— 按先例：不改计划书、只登记。
+    "frontend/src/routes/Research.tsx",
+    "frontend/src/routes/Settings.tsx",
+    # · `frontend/src/routes/Position.tsx` —— 2026-10-16 **T3 删除**（内容并入 Ledger）。
+    #   `docs/前端重构计划书.md`（未归并的历史文档，记录 B 系列重构的当时状态）
+    #   按当时路径引用它 —— 按先例：不改历史文档、只登记。
+    "frontend/src/routes/Position.tsx",
     # T0.3 顺带发现（2026-10-15）：`docs/05-重构/01_决策支持系统_执行计划书.md`（bb72922）
     # 引用了它自己 T2.0 / T2.1 的**未来产出物**——提交计划书时漏跑本守卫 → 2 处断链。
     # 属"**待创建**"（不是"有意不存在"）→ 登记放行。
@@ -168,8 +178,12 @@ def _scan_files():
     out_paths = []
     for f in rel:
         p = os.path.join(ROOT, f)
-        # 历史文档允许指向"已删对象"，不参与
-        if os.sep + '_archive' + os.sep in p:
+        # 历史文档允许指向"已删对象"，不参与。
+        # ⚠️ 2026-10-16 修 bug：原为 `os.sep + '_archive' + os.sep in p` —— `p` 是
+        # ROOT（反斜杠）+ f（git 风格正斜杠）的**混合路径**，Windows 上 `\_archive\`
+        # 永远匹配不上 → `_archive/` 的历史引用**实际从未被跳过**（STATUS 已知坑登记的
+        # 那一条；T3 删除旧页面后当场暴出 6 处历史断链）。统一按正斜杠判断，跨平台一致。
+        if '/_archive/' in p.replace(os.sep, '/'):
             continue
         if os.path.exists(p):
             out_paths.append(p)

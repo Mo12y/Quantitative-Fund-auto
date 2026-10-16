@@ -1,20 +1,27 @@
 import { endpoints } from '../api/endpoints'
 import type { DcaPlan, InvestmentPlan } from '../api/types'
 import { Card } from '../components/Card'
+import { CurveChart } from '../components/CurveChart'
 import { HoldingsTable } from '../components/HoldingsTable'
 import { LedgerActions } from '../components/LedgerActions'
+import { OpsActions } from '../components/OpsActions'
 import { PageHead } from '../components/PageHead'
 import { Skeleton } from '../components/Skeleton'
 import { SourceTag } from '../components/SourceTag'
-import { VerdictCard } from '../components/VerdictCard'
 import { Warming } from '../components/Warming'
-import { fmtMoney, plainText } from '../lib/format'
+import { dirClass, dirOf, dirSymbol, fmtMoney, fmtSignedMoney, fmtSignedPct, plainText } from '../lib/format'
 import { useApi } from '../lib/useApi'
 
 /**
- * 建仓计划进度 —— 每只计划基金的已投 / 目标 / 下一步。
- * 只陈列数字与进度条；**不在这里给"该不该继续投"的建议**（那是调仓卡的职责）。
+ * 账本入口 —— 我持有什么 · 值多少 · 怎么改（DESIGN §5.4 页面职责）。
+ *
+ * 收敛旧前端的 position + settings 两个视图（计划书 §4.1）：
+ *   组合总览（大数字 + 曲线）→ 持仓明细 + 建仓计划 → 记一笔 → 定投 → 运维写操作。
+ * ⚠️ 调仓结论卡已删除 —— 它依赖的旧调仓端点随旧命题一并移除；
+ *    新命题下"要不要动手"的证据在决策台（行为镜/反事实/门槛），账本页只回答"我有什么、怎么改"。
  */
+
+/** 建仓计划进度 —— 每只计划基金的已投 / 目标 / 下一步。 */
 function PlanProgress({ plan }: { plan: InvestmentPlan | null }) {
   if (!plan) {
     return (
@@ -25,15 +32,9 @@ function PlanProgress({ plan }: { plan: InvestmentPlan | null }) {
   }
   return (
     <Card title="建仓计划" note={`· ${plainText(plan.name)}`}>
-      {/* ⚠️ 2026-10-06（瘦身·持仓页）：原先是 6 格"计划元数据"（目标 / 期限 / 风险偏好 /
-          起始日 / 计划资金 / 已投 / 现金弹药）—— 那是**计划本身的配置**，
-          「设置 → 投资计划」卡里逐字都有，同屏再看一遍只是重复。
-          按 DESIGN §5.4 的页面职责，配置归「设置」，本页只回答"计划**走到哪了**"，
-          故只留逐只进度（下面那组），元数据请去「设置」看。 */}
       <div className="mb-3 text-caption text-fg-4">
-        计划的目标 / 期限 / 风险偏好与资金口径见「设置 → 投资计划」。
+        计划的完整配置（目标 / 期限 / 资金口径）见下方「投资计划维护」折叠区。
       </div>
-
       <div className="space-y-2.5">
         {plan.funds.map((f) => (
           <div key={f.code}>
@@ -47,26 +48,19 @@ function PlanProgress({ plan }: { plan: InvestmentPlan | null }) {
                 {fmtMoney(f.invested)} / {fmtMoney(f.target)}
               </span>
             </div>
-            {/* 进度条：百分比来自后端 progress_pct（不自己算，避免与后端口径分叉）；
-                条子用 scaleX 从左侧"长出来"（合成层动画，不触发重排） */}
+            {/* 进度条：百分比来自后端 progress_pct（不自己算，避免与后端口径分叉） */}
             <div className="mt-1 h-[5px] overflow-hidden rounded-full bg-inset">
               <i
                 className="grad-brand grow-x block h-full rounded-full"
                 style={{ width: `${Math.max(0, Math.min(100, f.progress_pct))}%` }}
               />
             </div>
-            {/* ⚠️ 2026-10-06（瘦身第 2 条）：这一行原为「已投 X% / 余 ¥Y」两个数字。
-                百分比与紧邻的进度条**重复**（条子本身就是比例，上面又已有「已投/目标」金额），
-                故去掉百分比、只留「余」。腾出的额度让「已实现盈亏」从「今天」页的
-                四格 KPI 搬进本页持仓卡的脚注，**本页密度不因此升高**。 */}
             <div className="mt-0.5 text-right text-caption text-fg-4">
               余 <span className="num">{fmtMoney(f.remaining)}</span>
             </div>
           </div>
         ))}
       </div>
-      {/* ⚠️ plan.notes 是**计划级**说明（"分 4 笔建仓…"），「设置 → 投资计划」已在渲染，
-          本页不再重复（瘦身·持仓页）。 */}
     </Card>
   )
 }
@@ -82,10 +76,10 @@ function DcaList({ plans }: { plans: DcaPlan[] }) {
         <table className="w-full border-collapse">
           <thead>
             <tr>
-              <th className="pb-2 text-left text-caption font-normal text-fg-3">基金</th>
-              <th className="pb-2 text-right text-caption font-normal text-fg-3">每期</th>
-              <th className="pb-2 text-right text-caption font-normal text-fg-3">已执行</th>
-              <th className="pb-2 text-right text-caption font-normal text-fg-3">状态</th>
+              <th className="field pb-2 text-left">基金</th>
+              <th className="field pb-2 text-right">每期</th>
+              <th className="field pb-2 text-right">已执行</th>
+              <th className="field pb-2 text-right">状态</th>
             </tr>
           </thead>
           <tbody>
@@ -95,8 +89,8 @@ function DcaList({ plans }: { plans: DcaPlan[] }) {
                   <span className="text-fg">{plainText(p.fund_name)}</span>
                   <span className="mono ml-1.5 text-caption text-fg-4">{p.fund_code}</span>
                 </td>
-                <td className="mono py-2 text-right text-body-sm text-fg-2">{fmtMoney(p.amount_per_period)}</td>
-                <td className="mono py-2 text-right text-body-sm text-fg-2">
+                <td className="num py-2 text-right text-body-sm text-fg-2">{fmtMoney(p.amount_per_period)}</td>
+                <td className="num py-2 text-right text-body-sm text-fg-2">
                   {p.executed_periods} / {p.expected_periods}
                 </td>
                 <td className="py-2 text-right text-body-sm">
@@ -108,43 +102,41 @@ function DcaList({ plans }: { plans: DcaPlan[] }) {
         </table>
       )}
       <div className="mt-2 text-caption text-fg-4">
-        频率说明：daily = 每个交易日；「已执行 / 应为」按计划起始日算。执行到期期数在旧仪表盘操作。
+        频率：daily = 每个交易日；「已执行 / 应为」按计划起始日算。
       </div>
     </Card>
   )
 }
 
-/**
- * 持仓入口（计划书 §6）—— 收敛旧前端的 position 视图。
- * 调仓结论 → 持仓明细 + 建仓计划 → 记一笔 → 定投执行，按"先看结论、再看构成、最后看执行"排。
- *
- * ⚠️ 写操作（买/卖/改/删/分红）自 B-4b 起**已接进本页**（`LedgerActions`）：
- * 每个写操作先出确认卡，成功后可用「撤销」还原（后端 `ledger_commits`）。
- * 其余写入口（计划 / 定投 / 净值 / 对账）在「设置」页。
- */
-export default function Position() {
+export default function Ledger() {
   const overview = useApi(endpoints.overview)
-  const rebalance = useApi(endpoints.rebalance)
   const plan = useApi(endpoints.plan)
   const dca = useApi(endpoints.dca)
 
   const ov = overview.data
-  const busy = overview.loading || rebalance.loading || plan.loading || dca.loading
-  const wait = Math.max(overview.warmingWait, rebalance.warmingWait, plan.warmingWait, dca.warmingWait)
+  const busy = overview.loading || plan.loading || dca.loading
+  const wait = Math.max(overview.warmingWait, plan.warmingWait, dca.warmingWait)
 
   const refreshAll = () => {
     overview.refresh({ fresh: true })
-    rebalance.refresh({ fresh: true })
     plan.refresh({ fresh: true })
     dca.refresh({ fresh: true })
   }
 
+  const st = ov?.stats ?? null
+  const dates = ov?.curve.dates ?? []
+  // 在持**基金**数：holdings 是批次行（29 行 = 7 只基金），去重后才是用户理解的"只"
+  const fundCount = ov
+    ? new Set(ov.portfolio.holdings.filter((h) => h.status === 'holding').map((h) => h.code)).size
+    : 0
+  const pnlDir = dirOf(st?.total_pnl)
+
   return (
     <>
-      <PageHead title="持仓" sub="调仓 · 明细 · 计划 · 定投">
+      <PageHead title="账本" sub="持仓 · 计划 · 定投 · 对账与净值">
         <SourceTag
           source={overview.source}
-          asof={ov ? ov.curve.dates[ov.curve.dates.length - 1] : null}
+          asof={dates.length ? dates[dates.length - 1] : null}
           onRefresh={refreshAll}
           busy={busy}
         />
@@ -153,33 +145,60 @@ export default function Position() {
       <Warming seconds={busy ? wait : 0} />
 
       {overview.error && (
-        <Card lead title="持仓" note="· 结论">
+        <Card lead title="账本">
           <div className="text-sm text-fg-2">读取失败：{overview.error}</div>
+          <button
+            type="button"
+            onClick={() => overview.refresh()}
+            className="mt-3 rounded-md border border-line-strong px-3 py-1 text-xs text-fg-2 hover:text-fg"
+          >
+            重试
+          </button>
         </Card>
       )}
 
       {!ov && !overview.error && (
-        <Card lead title="持仓" note="· 结论">
+        <Card lead title="账本">
           <Skeleton lines={3} />
         </Card>
       )}
 
-      {ov && (
+      {ov && st && (
         <>
-          <VerdictCard
-            rebalance={rebalance.data}
-            loading={rebalance.loading}
-            error={rebalance.error}
-            lead
-          />
+          {/* ── 组合总览：大数字（全页唯一的视觉主导，DESIGN §5.1.1）──────
+              ⚠️ 口径（沿自旧「今天」页，别改）：
+              · `stats.total_assets` = 持仓市值 + 现金弹药 + 在途，**不是**累计投入；
+              · 参照三件套齐（变化额 + 变化率 + 时间窗），否则孤立数字不带信息（§5.5）。 */}
+          <Card lead title="组合" note="· 资金加权">
+            <div className="flex flex-wrap items-baseline gap-x-5 gap-y-2">
+              <div className="num text-hero font-semibold leading-none tracking-[-.02em] text-fg">
+                {fmtMoney(st.total_assets)}
+              </div>
+              <div className="flex flex-wrap items-baseline gap-x-2.5 gap-y-1 text-body">
+                <span className={'num font-medium ' + dirClass(pnlDir)}>
+                  {dirSymbol(pnlDir)}
+                  {fmtSignedMoney(st.total_pnl)}
+                </span>
+                <span className={'num ' + dirClass(pnlDir)}>{fmtSignedPct(st.total_return_pct)}</span>
+                <span className="text-fg-4">
+                  累计未实现 · {dates[0]} ~ {dates[dates.length - 1]}
+                </span>
+              </div>
+            </div>
+            <div className="mt-2.5 text-caption text-fg-4">
+              在持 {fundCount} 只
+              {st.pending_amount ? ` · 在途 ${fmtMoney(st.pending_amount)}` : ''}
+            </div>
+          </Card>
+
+          <CurveChart curve={ov.curve} />
 
           <div className="grid items-start gap-4 md:grid-cols-[1.4fr_1fr]">
             <HoldingsTable holdings={ov.portfolio.holdings} stats={ov.stats} />
             <PlanProgress plan={plan.data?.plan ?? ov.plan} />
           </div>
 
-          {/* 写操作面板（B-4b）：所有写操作先出确认卡；成功后带「撤销」。
-              ⚠️ 写完必须 refresh —— 否则页面还显示旧持仓（后端已失效聚合缓存）。 */}
+          {/* 写操作面板：买卖改删 + 撤销（每个写操作先出确认卡） */}
           <LedgerActions holdings={ov.portfolio.holdings} onDone={refreshAll} />
 
           {dca.data ? (
@@ -189,6 +208,15 @@ export default function Position() {
               {dca.error ? <div className="text-sm text-fg-2">读取失败：{dca.error}</div> : <Skeleton lines={2} />}
             </Card>
           )}
+
+          {/* 运维写操作（迁移自旧「设置」页的 OpsActions）：计划 / 定投 / 净值 / 对账。
+              会自己产生真实买入的（对账 / 定投执行）在确认卡里明示笔数与金额。 */}
+          <OpsActions
+            holdings={ov.portfolio.holdings}
+            plans={dca.data ?? []}
+            plan={plan.data?.plan ?? ov.plan}
+            onDone={refreshAll}
+          />
         </>
       )}
     </>

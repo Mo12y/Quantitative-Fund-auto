@@ -1,5 +1,5 @@
 /**
- * 应用外壳 —— 四入口（今天 / 持仓 / 研究 / 设置，计划书 §6）。
+ * 应用外壳 —— 三入口（决策台 / 账本 / 数据状态，计划书 §4.1）。
  *
  * 导航**放在内容容器之外**：它是吸顶全宽的毛玻璃条；内容再收进响应式容器（见下方 `main`）。
  * 路由用 hash（见 `lib/router.ts`，零新依赖）。每个入口只在进入时挂载自己的数据请求，不预取。
@@ -13,20 +13,19 @@ import { Nav } from './components/Nav'
 import { Sidebar } from './components/Sidebar'
 import { Skeleton } from './components/Skeleton'
 import { useEntry } from './lib/router'
-import Today from './routes/Today'
+import Decision from './routes/Decision'
 
 /**
- * 「今天」**同步**引入，其余三个入口**按需**引入。
- * 理由：Today 是默认落地页，把它也懒加载会让首屏多等一跳（Suspense 闪一下）；
- * 而 Position / Research / Settings 各自带着表格与面板，多数访问根本不会打开。
+ * 「决策台」**同步**引入，其余两个入口**按需**引入。
+ * 理由：Decision 是默认落地页，把它也懒加载会让首屏多等一跳（Suspense 闪一下）；
+ * 而 Ledger / Data 各自带着表格与面板，多数访问不会在同一次会话里全打开。
  *
  * ⚠️ 本应用由 Flask 从**本机**托管、没有网络延迟，所以拆包对"首屏变快"帮助很小 ——
  * 它的实际价值是"消掉 Vite 的 500KB 警告 + 依赖 chunk 的缓存复用"
  * （详见 `vite.config.ts` 里 `manualChunks` 的注释）。
  */
-const Position = lazy(() => import('./routes/Position'))
-const Research = lazy(() => import('./routes/Research'))
-const Settings = lazy(() => import('./routes/Settings'))
+const Ledger = lazy(() => import('./routes/Ledger'))
+const Data = lazy(() => import('./routes/Data'))
 
 /** 懒加载入口的兜底：给骨架而不是空白，避免切页时"闪一下白" */
 function RouteFallback() {
@@ -48,22 +47,14 @@ export default function App() {
       <div className="min-w-0 flex-1">
         <Nav entry={entry} onGo={go} />
         {/*
-          容器宽度：**响应式**。原为固定 1080px —— 实测 1920 屏下两侧各空 420px
-          （44% 屏幕是空白），"卡片看着小"就是这个原因。现在 1280 起 1240、1536 起 1360。
-
-          ⚠️ 上限**不是**越宽越好：曾试到 1460，结果 `数据链路` 的「标签 ←→ 数值」
-          被拉到两端、眼睛跟不住（行长问题）。所以收在 1360，
-          同时给这类"读的行"单独限宽（见 `DrillDown` 的两栏布局）。
-
-          块间距：**由父级统一给**（`flex flex-col gap-4`），卡片自己不带 margin ——
-          否则"卡片之间的关系"会散落在各处、改不齐。
+          容器宽度：**响应式**（原固定 1080px 在 1920 屏下两侧各空 420px）。
+          块间距：**由父级统一给**（`flex flex-col gap-4`），卡片自己不带 margin。
         */}
         <main className="mx-auto flex w-full max-w-[1240px] flex-col gap-4 px-5 pb-16 pt-6 2xl:max-w-[1360px] lg:pt-9">
           <Suspense fallback={<RouteFallback />}>
-            {entry === 'today' && <Today />}
-            {entry === 'position' && <Position />}
-            {entry === 'research' && <Research />}
-            {entry === 'settings' && <Settings />}
+            {entry === 'decision' && <Decision />}
+            {entry === 'ledger' && <Ledger />}
+            {entry === 'data' && <Data />}
           </Suspense>
         </main>
       </div>

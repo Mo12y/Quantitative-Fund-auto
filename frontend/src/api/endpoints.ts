@@ -1,59 +1,64 @@
 /** 端点薄封装：路径 + 返回类型**只在此处出现**，页面不再直接写 URL 字符串。 */
-import { apiEnvelope, apiGet, apiPost, type EnvelopeOptions, type GetOptions } from './client'
+import { apiGet, apiPost, type EnvelopeOptions, type GetOptions } from './client'
 import type {
-  AllDashboard,
-  BoardPool,
+  Behavior,
+  Breakeven,
+  CalendarPayload,
+  Counterfactual,
   DcaAction,
   DcaPlan,
+  ExclusionPayload,
   Explain,
-  FundsPayload,
   HoldingsAction,
   HoldingsRefresh,
   InvestmentPlan,
   MarketLive,
   Overview,
+  PeerPayload,
   PlanAction,
   PortfolioCurve,
-  QuantModels,
-  Rebalance,
-  RecommendPayload,
   ReconcileResult,
-  SectorsPayload,
-  SentimentData,
-  SentimentState,
+  Research,
+  RiskPayload,
 } from './types'
 
 export const endpoints = {
+  /* ── 通用 ──────────────────────────────────────────────────── */
   overview: (o?: GetOptions) => apiGet<Overview>('/api/overview', o),
-  rebalance: (o?: GetOptions) => apiGet<Rebalance>('/api/rebalance', o),
   /** 数据链路下钻（采集→清洗→特征→建模→评估，每格指回真实产物） */
   explain: (o?: GetOptions) => apiGet<Explain>('/api/explain', o),
 
-  /* ── 研究 ──────────────────────────────────────────────────── */
-  /** 筛选池（全市场质量筛；冷算慢，返回 warming 时客户端自动轮询） */
-  funds: (o?: GetOptions) => apiGet<FundsPayload>('/api/funds', o),
-  /** 筛选池总榜：**按板块分组**（「研究」里把池子与板块合到一页就靠它） */
-  fundsBoard: (size = 5, limit = 300, o?: GetOptions) =>
-    apiGet<BoardPool>(`/api/funds/board?size=${size}&limit=${limit}`, o),
-  /** 申万一级行业排名（动量 + 趋势 + 风险） */
-  sectors: (o?: GetOptions) => apiGet<SectorsPayload>('/api/sectors', o),
-  /** 量化模型（vol 预测 / 回撤预警 / 组合模拟） */
-  quantModels: (o?: GetOptions) => apiGet<QuantModels>('/api/quant_models', o),
+  /* ══ 决策台（T2.1 新端点；契约 = 执行计划书 §3，2026-10 起） ══ */
 
-  /* ── 持仓 ──────────────────────────────────────────────────── */
+  /** 行为镜：追高 / 割肉 / 卖飞 / 频率。
+   *  ⚠️ 响应自带**样本充分性声明**（`sample.sufficient/warning`）—— 不足时必须原样展示。 */
+  behavior: (o?: GetOptions) => apiGet<Behavior>('/api/behavior', o),
+  /** 反事实归因：实际 vs 完全不动 / 只定投 / 照温度动 + 同标的换时机 + 卖出规则对比 */
+  counterfactual: (o?: GetOptions) => apiGet<Counterfactual>('/api/counterfactual', o),
+  /** 回本门槛 / 费率漏损：每笔持仓"要涨多少才不亏"（含 <7 天惩罚期） */
+  breakeven: (o?: GetOptions) => apiGet<Breakeven>('/api/breakeven', o),
+  /** 持仓风险刻画：波动 / 回撤 / 夏普 / 索提诺…（点数不足的基金显式声明） */
+  risk: (o?: GetOptions) => apiGet<RiskPayload>('/api/risk', o),
+  /** 同类分位：sharpe / 近1年回撤 / TER 三分位。
+   *  ⚠️ 是**原始分位**（越大 = 该值越大；TER 越大 = 越贵），不是"好=高分"。 */
+  peer: (o?: GetOptions) => apiGet<PeerPayload>('/api/peer', o),
+  /** 排雷：两个可辩护判据 —— 同类夏普垫底（≤P10）/ TER 偏高（≥P90）。
+   *  ⚠️ 判据不可用的进 `unrated`（不判、不保清白）—— 界面必须原样呈现三类。 */
+  exclusion: (o?: GetOptions) => apiGet<ExclusionPayload>('/api/exclusion', o),
+  /** 研究快照：离线模型结果（vol 预测 / 回撤预警 / 组合模拟），**非实时**。
+   *  2026-10-16 T2.1 更名（由旧研究端点改名而来，见 git 历史）。 */
+  research: (o?: GetOptions) => apiGet<Research>('/api/research', o),
+
+  /* ── 账本 ──────────────────────────────────────────────────── */
   /** 定投计划（执行期数 / 是否到期未执行） */
   dca: (o?: GetOptions) => apiGet<DcaPlan[]>('/api/dca', o),
-
-  /* ── 设置 ──────────────────────────────────────────────────── */
-  /** 投资计划（单计划；只读首版用它，写操作未接） */
+  /** 投资计划（单计划；含逐只进度） */
   plan: (o?: GetOptions) => apiGet<{ plan: InvestmentPlan | null; error?: string }>('/api/plan', o),
-
-  /* ══ B-1：补齐双向差集里的纯读端点 ═══════════════════════════ */
-
   /** 组合累计收益 / 资产净值曲线（独立端点）。
    *  与 `/api/overview` 里的 `curve` 同源（后端都走 `_portfolio_curve()`）。 */
   portfolioCurve: (o?: GetOptions) => apiGet<PortfolioCurve>('/api/portfolio/curve', o),
 
+  /* ── 数据状态 ──────────────────────────────────────────────── */
   /**
    * 指数盘中快照 + 本地净值时滞。
    *
@@ -61,48 +66,10 @@ export const endpoints = {
    *    界面要如实说"盘中行情不可用"，既不能报错，也不能拿旧值冒充实时。
    */
   marketLive: (o?: GetOptions) => apiGet<MarketLive>('/api/market/live', o),
+  /** 交易日历（数据状态页的「日历覆盖」与刷新命令） */
+  calendar: (o?: GetOptions) => apiGet<CalendarPayload>('/api/calendar', o),
 
-  /**
-   * 消息面 —— **三态**端点，**不能走 `apiGet`**：
-   *  · `ok`       命中成功缓存，`data` 有值
-   *  · `scanning` 后台正在**联网**扫描；`data` 可能是上一次的旧值，也可能为 `null`
-   *  · `ok:false` 3 分钟内扫描失败过（后端主动拒绝重扫，避免反复出网）
-   *
-   * ⚠️ 别把它接进 `warming` 分支：`warming` 是"本地重算中"、`scanning` 是"联网抓取中"，
-   *    且 `scanning` 允许 `data=null` —— 用 `apiGet` 会当场抛"后端返回了空数据"。
-   */
-  sentiment: async (o?: EnvelopeOptions): Promise<SentimentState> => {
-    const env = await apiEnvelope<SentimentData>('/api/sentiment', o)
-    if (!env.ok) {
-      return { phase: 'error', message: env.error || '消息面扫描失败，请稍后重试' }
-    }
-    if (env.status === 'scanning') {
-      return { phase: 'scanning', data: env.data, retryInSec: env.retry_in ?? 15 }
-    }
-    if (env.data == null) {
-      // 既不是 scanning、又没有数据 —— 后端契约破了，如实报出来而不是显示空白卡
-      return { phase: 'error', message: '消息面返回空数据（非扫描中）' }
-    }
-    return { phase: 'ok', data: env.data, cached: !!env.cached }
-  },
-
-  /**
-   * **历史回测验证**（⚠️ 不是"推荐"，文案不得混称；加载 15~20 秒，界面必须给加载态）。
-   *
-   * "这不是推荐"的说明在**信封层**（`envelope.purpose` / `envelope.methodology_note`），
-   * 不在 `data` 里 —— 渲染必须用它，别自己编。
-   */
-  recommend: (o?: GetOptions) => apiGet<RecommendPayload>('/api/recommend', o),
-
-  /**
-   * 旧前端的"一次拉全量"聚合端点。新前端按页拆分请求，**原则上不用它** ——
-   * 封装是为了补齐 §10.3 的双向差集（B-1 的验收项之一）。
-   */
-  all: (o?: GetOptions) => apiGet<AllDashboard>('/api/all', o),
-
-  /* ══ B-4：写端点（界面接入在 B-4b —— 通道先铺好）═════════════
-     ⚠️ 这些端点**真的会改 `data/fund_quant.db`**。它们返回**整个信封**
-     （后端成功时可能只给 `message`、不给 `data`），调用方自己取。 */
+  /* ══ 写端点（**真的会改 data/fund_quant.db**；返回整个信封，调用方自取） ══ */
 
   /** 持仓写操作：buy / sell / update / delete / dividend_policy。
    *  后端成功时返回 `{ok:true, message:"已记录买入…"}`（**没有 data**）。 */
@@ -134,7 +101,7 @@ export const endpoints = {
   /**
    * 定投维护：action = sync / backfill / add / run / pause / resume / delete。
    * ⚠️ `sync` / `backfill` / `run` 会**自己产生真实买入**（`auto_executed`）——
-   *   界面必须二次确认（B-4b），否则点一下就落若干笔真账。
+   *   界面必须二次确认，否则点一下就落若干笔真账。
    */
   dcaAction: (body: DcaAction, o?: EnvelopeOptions) => apiPost('/api/dca', body, o),
 }

@@ -17,9 +17,8 @@ export interface ApiEnvelope<T> {
   ok: boolean
   data: T | null
   source?: ApiSource
-  /** ⚠️ **不止 `warming`**：`/api/sentiment` 还会回 `ok` / `scanning`（联网扫描中）。
-   *  别把非 `warming` 的状态当成"没有状态"。 */
-  status?: 'warming' | 'scanning' | 'ok' | (string & {})
+  /** 冷启动预热态：`warming`（其余取值按 (string & {}) 兜底，别把未知状态当"没有状态"）。 */
+  status?: 'warming' | (string & {})
   retry_in?: number
   error?: string
   /** ⚠️ **写端点成功时常常只有 `message`、没有 `data`**（如 `/api/holdings` 返回
@@ -28,13 +27,6 @@ export interface ApiEnvelope<T> {
   /** 写端点返回：本次操作的提交 id（用于「撤销」，见 `endpoints.rollback`）。
    *  `/api/holdings` 的各 action 都会带；失败或未产生提交时为 `null`。 */
   commit_id?: number | null
-  /** `/api/sentiment` 命中成功缓存时为 true */
-  cached?: boolean
-  /** ⚠️ `/api/recommend` 把**免责说明放在信封层**（与 `ok`/`data` 平级，不在 `data` 里）：
-   *  `purpose` / `methodology_note` 是"这不是推荐、是历史回测"的文案来源，
-   *  界面必须能拿到 —— 否则只能自己编，容易把回测验证说成"推荐"。 */
-  purpose?: string
-  methodology_note?: string
 }
 
 export class ApiError extends Error {
@@ -48,8 +40,7 @@ export interface ApiResult<T> {
   data: T
   /** 数据来源（用于界面标注"缓存/快照/刚算"） */
   source: ApiSource
-  /** 原始信封。少数端点把文案放在信封层（如 `/api/recommend` 的 `purpose`），
-   *  调用方需要时从这里取；不需要就忽略。 */
+  /** 原始信封 —— 调用方需要时从这里取信封层信息；不需要就忽略。 */
   envelope?: ApiEnvelope<T>
 }
 
@@ -106,30 +97,8 @@ export async function apiGet<T>(path: string, opts: GetOptions = {}): Promise<Ap
   }
 }
 
-/**
- * 取**原始信封**，不做任何解释 —— 供**多态端点**使用。
- *
- * 为什么需要它：`/api/sentiment` 有**三态**（`ok` / `scanning` / `ok:false`），
- * 其中 `scanning` 允许 `data` 为 `null`。走 `apiGet` 会被判成"后端返回了空数据"而抛错，
- * 于是"正在联网扫描"被误报成"出错了"。这里只负责网络层与 HTTP 层，**语义交给调用方**。
- *
- * ⚠️ `scanning` **不是** `warming`：前者是"后台在联网抓取"，后者是"服务端在本地重算"，
- *    等待时长与界面提示都不同 —— **不要复用同一套分支**（计划书 §12 B-1 已知坑）。
- *
- * 不抛 `ok:false`（调用方必须自己判断 `env.ok`）；网络 / HTTP 错误照抛。
- */
-export async function apiEnvelope<T>(
-  path: string,
-  opts: EnvelopeOptions = {},
-): Promise<ApiEnvelope<T>> {
-  const url = new URL(path, window.location.origin)
-  if (opts.fresh) url.searchParams.set('fresh', '1')
-  const res = await fetch(url.toString(), { signal: opts.signal })
-  if (!res.ok) {
-    throw new ApiError(`HTTP ${res.status}`, res.status)
-  }
-  return (await res.json()) as ApiEnvelope<T>
-}
+/* 2026-10-16 T3：`apiEnvelope`（多态端点的原始信封读取）已随旧消息面端点一并删除 ——
+   现有端点的语义都能被 `apiGet` / `apiPost` 覆盖；需要时按 git 历史恢复。 */
 
 /**
  * POST 一个**写**端点（对齐后端 `{ok, data, source}` 信封）。

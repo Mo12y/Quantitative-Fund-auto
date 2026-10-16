@@ -1,28 +1,17 @@
 /**
- * 后端载荷类型（字段名**逐一对齐**真实响应，见 2026-09-30 dump 的结构快照）。
+ * 后端载荷类型（字段名**逐一对齐**真实响应 —— 2026-10-16 用 `/api` 实测 dump 核对）。
  * 只声明前端**真的会用**的字段；其余用可选字段或索引签名，避免过度约束后端演进。
  */
 
 /* ── 通用 ─────────────────────────────────────────────────────── */
 
-export interface PeerPercentile {
-  group?: string
-  group_n?: number
-  percentiles?: Record<string, number | null>
-  percentiles_scale?: string
-  note?: string
-}
-
-/** 调仓指令（RebalanceAdvisor 的序列化结果） */
-export interface Instruction {
-  action: '卖出' | '买入' | '持有' | string
-  amount: number
-  fund_code: string
-  fund_name: string
-  reason: string
-  priority: number
-  current_pct: number
-  target_pct: number
+/** 样本充分性声明（behavior / counterfactual 共用）。
+ *  ⚠️ `sufficient=false` 时界面**必须原样展示 `warning`**，不得自行给出结论。 */
+export interface SampleAdequacy {
+  years: number
+  days: number
+  sufficient: boolean
+  warning: string
 }
 
 export interface ConstraintApplied {
@@ -44,51 +33,6 @@ export interface ConstraintReview {
   dropped: { code: string; name: string; reasons: string[] }[]
   skipped: { code: string; name: string; reasons: string[] }[]
   error?: string
-}
-
-export interface Rebalance {
-  need_rebalance: boolean
-  current_equity_pct: number
-  target_equity_pct: number | null
-  /** 目标是谁定的：'temperature' = 温度模型 / 'user_profile' = 用户在本地画像里覆盖。
-   *  界面必须说出来 —— 否则用户看到一个与温度不符的目标会以为模型算错。 */
-  target_source?: 'temperature' | 'user_profile' | null
-  gap_pct: number | null
-  /** 与 gap_pct **同基数**的差额金额（元）；正 = 权益不足需补，负 = 权益过多需减。
-   *  ⚠️ 不要用别的口径自己乘出这个数 —— 旧前端就是拿 portfolio.total_invested 乘的，
-   *  基数与百分比差 33%（¥314.72 vs 应为 ¥418.63）。 */
-  gap_amount?: number | null
-  /** 调仓容忍带（±百分点）。用它把差额说成"在容忍范围内"，而不是一个待办。 */
-  rebalance_pp?: number
-  /** 百分比的基数 = 持仓市值 + 现金弹药。金额必须按它算才与百分比自洽。 */
-  total_capital?: number
-  portfolio_value?: number
-  summary: { verdict: string; detail: string }
-  instructions: Instruction[]
-  degraded?: string[]
-  cash_reserve?: number
-  /** 温度不覆盖的部分（QDII-海外/黄金等）——界面必须如实标注，否则用户以为漏算 */
-  non_applicable_pct?: number
-  scope_note?: string
-  constraint_review?: ConstraintReview | null
-  constraint_blocked_buy?: boolean
-  error?: string
-}
-
-/* ── 温度 ─────────────────────────────────────────────────────── */
-
-export interface Temperature {
-  temperature: number
-  level: string
-  level_desc: string
-  target_equity_pct: number | null
-  action: string
-  insufficient_data: boolean
-  degraded_dimensions: string[]
-  components: Record<string, number | null>
-  market_style?: { dominant: string; detail: string }
-  divergence?: { level: string; max_diff: number; message: string }
-  scope?: { applies_to: string[]; not_applicable_to: string[]; note: string }
 }
 
 /* ── 持仓 / 账户 ──────────────────────────────────────────────── */
@@ -194,12 +138,11 @@ export interface InvestmentPlan {
   notes?: string
 }
 
-/* ── 总览（/api/overview） ────────────────────────────────────── */
+/* ── 总览（/api/overview）—— T2.2 起不再含 temp（温度模块已归档） ── */
 
 export interface Overview {
   portfolio: Portfolio
   stats: Stats
-  temp: Temperature
   curve: PortfolioCurve
   plan: InvestmentPlan | null
 }
@@ -233,101 +176,7 @@ export interface Explain {
   error?: string
 }
 
-/* ── 筛选池（/api/funds、/api/funds/board） ───────────────────── */
-
-/** B 层约束在池子里的标注结果（§4.4）：kept 通过 / dropped 落选 / skipped 未评估 */
-export type ConstraintStatus = 'kept' | 'dropped' | 'skipped' | string
-
-export interface PoolFund {
-  code: string
-  name: string
-  type: string
-  /** 风险标签，形如「🟢 稳健」（emoji 由 `plainText` 统一剥） */
-  risk: string
-  /** 运作费率（%）。⚠️ 缺失为 `null` —— **不是 0**，界面不得当 0 显示 */
-  fee: number | null
-  score: number | null
-  /** 申购状态文案（如「开放申购」/「限大额」） */
-  purchase_status: string
-  purchasable: string
-  momentum_3m: number | null
-  max_dd_1y: number | null
-  sharpe: number | null
-  ann_vol: number | null
-  /** 同类分组名与组内样本数（分位必须带组，否则会被读成全市场排名） */
-  group: string
-  group_n: number
-  percentiles: Record<string, number | null> | null
-  percentiles_scale?: string | null
-  nav_asof: string | null
-  insufficient_data: boolean
-  reason?: string | null
-  metrics?: Record<string, number | null>
-  /** ⚠️ 池子是**只标注不剔除**（浏览面保持完整）；这里只记状态，不代表被过滤掉 */
-  constraint_status?: ConstraintStatus
-  constraint_reasons?: string[]
-  reasons?: string[]
-}
-
-export interface PoolSummary {
-  total: number
-  avg_fee: number
-  fee_n: number
-  limited_n: number
-  status_unknown_n: number
-  by_risk: Record<string, number>
-}
-
-export interface FundsPayload {
-  funds: PoolFund[]
-  summary: PoolSummary
-  constraint_review?: ConstraintReview | null
-}
-
-/** 筛选池总榜的一块（按板块分组，每块取前 size 只） */
-export interface BoardGroup {
-  board: string
-  total: number
-  funds: PoolFund[]
-}
-
-export interface BoardPool {
-  boards: BoardGroup[]
-  total_funds: number
-  size: number
-  constraint_review?: ConstraintReview | null
-  error?: string
-}
-
-/* ── 行业板块（/api/sectors） ─────────────────────────────────── */
-
-export interface Sector {
-  name: string
-  rank: number
-  ret_1m: number
-  ret_3m: number
-  ret_6m: number
-  score: number
-  ma_ratio: number
-  volatility: number
-  max_dd_6m: number
-}
-
-export interface SectorLite {
-  name: string
-  ret_1m: number
-  ret_3m: number
-}
-
-export interface SectorsPayload {
-  cached_at?: string
-  sectors: Sector[]
-  momentum_leaders: SectorLite[]
-  value_candidates: SectorLite[]
-  error?: string
-}
-
-/* ── 量化模型（/api/quant_models） ────────────────────────────── */
+/* ── 研究快照（/api/research；2026-10 T2.1 由旧研究端点改名） ──── */
 
 export interface QuantVolRow {
   model: string
@@ -373,7 +222,10 @@ export interface QuantSignal {
   combined_pos: number
 }
 
-export interface QuantModels {
+/** 研究快照（`/api/research`）：↔ `QuantModels` 结构 + `snapshot`/`note` 说明字段 */
+export interface Research {
+  snapshot: boolean
+  note: string
   vol: QuantVolRow[]
   drawdown: QuantDrawdownRow[]
   portfolio: QuantPortfolioRow[]
@@ -402,6 +254,16 @@ export interface DcaPlan {
 export interface PlanPayload {
   plan: InvestmentPlan | null
   error?: string
+}
+
+/* ── 交易日历（/api/calendar） ────────────────────────────────── */
+
+export interface CalendarPayload {
+  count: number
+  dates: string[]
+  start: string | null
+  end: string | null
+  refresh_cmd: string
 }
 
 /* ── 盘中行情（/api/market/live） ─────────────────────────────── */
@@ -433,101 +295,314 @@ export interface MarketLive {
   lag_note?: string
 }
 
-/* ── 消息面（/api/sentiment） ─────────────────────────────────── */
+/* ═══════════════════════════════════════════════════════════════
+ * 决策台（T2.1 新端点；契约 = 执行计划书 §3，字段按真实响应核对）
+ * ═══════════════════════════════════════════════════════════════ */
 
-export interface SentimentAlert {
-  level: string
-  category: string
-  title: string
-  detail: string
-  timestamp: string
+/* ── /api/behavior 行为镜（契约 §3.2） ────────────────────────── */
+
+/** 单只基金的追高对照明细（key = 基金代码） */
+export interface BehaviorPerFund {
+  n_buys: number
+  median_trail20: number | null
+  fund_median_trail20: number | null
+  spread_trail20?: number
+  median_pct: number | null
+  fund_median_pct: number | null
+  spread_pct?: number
 }
 
-export interface SentimentData {
-  all_clear: boolean
-  signal_summary: string
-  alerts: SentimentAlert[]
+export interface BehaviorBuy {
+  n_buys: number
+  n_distinct_buy_dates: number
+  span_used: [string, string | null]
+  n_with_trail: number
+  median_trail20: number | null
+  median_trail20_baseline: number | null
+  frac_bought_after_rise: number | null
+  trail_range: [number, number] | null
+  n_with_pct: number
+  median_pct: number | null
+  median_pct_baseline: number | null
+  n_high: number
+  n_low: number
+  frac_high: number | null
+  /** ⭐ 追高对照差值（pp）：买入中位 − 同基金平常中位。**正 = 买得比平常更"涨过"** */
+  chase_spread: number | null
+  pct_spread: number | null
+  n_funds_with_baseline: number
+  per_fund: Record<string, BehaviorPerFund>
 }
 
-/** 消息面**三态**结果。
- *
- *  ⚠️ 与 `warming` 是**两件事**（见 `client.ts` 的 `apiEnvelope` 注释）：
- *   - `ok`       命中成功缓存，`data` 有值
- *   - `scanning` 后台**正在联网扫描**；`data` 可能是**上一次的旧值**，也可能为 `null`
- *   - `error`    扫描失败（后端 3 分钟内不再重扫，避免反复出网）
- */
-export type SentimentState =
-  | { phase: 'ok'; data: SentimentData; cached: boolean }
-  | { phase: 'scanning'; data: SentimentData | null; retryInSec: number }
-  | { phase: 'error'; message: string }
-
-/* ── 历史回测验证（/api/recommend） ───────────────────────────── */
-
-/** ⚠️ 命名纪律（后端 `api_recommend` docstring 原文）：本端点**不是"推荐"**，
- *  而是**历史回测验证** —— 回答"过去哪些基金被反复选中且真的赚了钱"。
- *  主推荐是温度驱动的实时筛选（`/api/strategy`）。**界面文案不得混称"推荐"。** */
-export interface RecommendStats {
-  total_months: number
-  total_candidates: number
-  candidates_equity: number
-  candidates_bond: number
-  funds_ever_picked: number
-  funds_with_proven_record: number
-  proven_good: number
-  proven_bad: number
-  top10_avg_3m_return: number
-  date_range: string
-  proven_type_dist: { equity: number; bond: number }
-  current_type_dist: { equity: number; bond: number }
-  [k: string]: unknown
+export interface BehaviorSell {
+  n_lots: number
+  n_distinct_sell_dates: number
+  by_sell_date: { date: string; n_lots: number; median_ret_pct: number | null; after20_pct: number | null }[]
+  median_ret_pct: number | null
+  worst_pct: number | null
+  worst_code: string
+  worst_buy_date: string
+  worst_sell_date: string
+  best_pct: number | null
+  best_code: string
+  range: [number, number] | null
+  n_loss: number
+  frac_loss: number
+  n_with_followup: number
+  n_sold_too_early: number
+  frac_sold_too_early: number
+  median_after20_pct: number | null
+  median_after20_pct_by_date: number | null
+  lots: {
+    code: string; buy_date: string; sell_date: string; held_days: number
+    amount: number; ret_pct: number | null; after20: number | null
+  }[]
 }
 
-/** 「反复入选且后续赚钱」的基金 —— **样本内**统计（存在同义反复，见 `purpose`） */
-export interface RecommendWinner {
+export interface BehaviorFrequency {
+  n_buys: number
+  n_sells: number
+  first_buy: string
+  last_buy: string
+  months: number
+  buys_per_month: number
+  sells_per_month: number
+  monthly: Record<string, { buy: number; sell: number }>
+  hold_buckets: { label: string; n: number; invested: number; median_ret_pct: number | null }[]
+  median_held_days: number | null
+  n_under_7d: number
+}
+
+export interface Behavior {
+  span: string
+  sample: SampleAdequacy
+  benchmark_pct: number | null
+  benchmark_name: string
+  buy: BehaviorBuy
+  sell: BehaviorSell
+  frequency: BehaviorFrequency
+  verdict: string
+  notes: string[]
+  error?: string
+}
+
+/* ── /api/counterfactual 反事实归因（契约 §3.3） ──────────────── */
+
+export interface CfCase {
+  label: string
+  n_buys: number
+  invested: number
+  end_value: number
+  pnl: number
+  /** 定投/温度两个 case 才有；actual 无此字段 */
+  pnl_pct?: number
+  xirr_pct: number
+  first_date?: string
+  last_date?: string
+  missing_nav?: number
+}
+
+export interface CounterfactualCompare {
+  end_date: string
+  span: string
+  n_buys_total: number
+  n_buys_dca: number
+  dca_rule: string
+  sample: SampleAdequacy
+  benchmark_pct: number | null
+  benchmark_name: string
+  cases: { actual: CfCase; hold_all: CfCase; dca_only: CfCase; temp_tilt: CfCase }
+  notes: string[]
+}
+
+export interface SameFundRow {
   code: string
   name: string
-  type: string
-  bucket: string
-  composite_score: number
-  times_picked: number
-  pick_rate: number
-  avg_score: number
-  avg_return_1m: number
-  avg_return_3m: number
-  avg_return_6m: number
-  win_rate_1m: number
-  win_rate_3m: number
-  first_pick: string
-  last_pick: string
+  n_buys: number
+  invested: number
+  span: string
+  actual: CfCase
+  lump: CfCase
+  even_dca: CfCase
+  /** 实际 − 一次性（pp）：正 = 分期比一次好 */
+  vs_lump: number | null
+  /** 实际 − 等额定投（pp）：正 = 随意择时比机械定投好 */
+  vs_even_dca: number | null
 }
 
-/** 最新一期的入选基金（`app.py` 会补同侪块 —— 与筛选池同一套口径） */
-export interface RecommendPick {
-  code: string
-  name: string
-  type: string
-  bucket: string
-  score: number
-  times_picked: number
-  hist_avg_3m: number | null
-  hist_win_3m: number | null
-  group?: string
-  group_n?: number
-  percentiles?: Record<string, number | null>
-  nav_asof?: string | null
+export interface SameFundSummary {
+  n: number
+  median: number | null
+  mean: number | null
+  better: number
+  worse: number
+}
+
+export interface CounterfactualSameFund {
+  end_date: string
+  funds: SameFundRow[]
+  summary: {
+    n_funds: number
+    n_funds_total_bought: number
+    skipped_few_buys: number
+    skipped_small_amount: number
+    invested_total: number
+    vs_lump: SameFundSummary
+    vs_even_dca: SameFundSummary
+  }
+  notes: string[]
+}
+
+export interface SellRuleRow {
+  key: string
+  label: string
+  n_buys: number
+  n_sold: number
+  first_sell_date: string | null
+  invested: number
+  end_value: number
+  proceeds: number
+  total_value: number
+  pnl: number
+  pnl_pct: number
+  xirr_pct: number
+}
+
+export interface CounterfactualSellRules {
+  end_date: string
+  n_buys: number
+  span: string
+  results: SellRuleRow[]
+  notes: string[]
+}
+
+export interface Counterfactual {
+  compare: CounterfactualCompare | { error: string }
+  same_fund: CounterfactualSameFund | { error: string }
+  sell_rules: CounterfactualSellRules | { error: string }
+}
+
+/* ── /api/breakeven 回本门槛（契约 §3.4） ─────────────────────── */
+
+export interface BreakevenLot {
+  fund_code: string
+  fund_name: string
+  held_days: number
+  in_penalty: boolean
+  days_to_free: number
+  free_date: string
+  buy_fee_pct: number
+  redeem_fee_pct: number
+  /** 门槛 %：要涨多少才不亏（= 申购费 + 现在赎回的费率） */
+  threshold_pct: number
+  market_value: number
+  net_if_sell: number | null
+  net_if_sell_pct: number | null
+  redeem_cost: number
+}
+
+export interface Breakeven {
+  today: string
+  n_lots: number
+  lots: BreakevenLot[]
+  n_in_penalty: number
+  penalty_value: number
+  penalty_cost: number
+  next_free: { fund_code: string; fund_name: string; free_date: string; days_to_free: number }[] | null
+  total_market_value: number
+  total_redeem_cost: number
+  notes: string[]
+  error?: string
+}
+
+/* ── /api/risk 风险刻画（契约 §3.5） ──────────────────────────── */
+
+export interface RiskMetrics {
+  annual_return: number
+  ann_vol: number
+  max_drawdown_1y: number
+  max_drawdown_win: number
+  max_drawdown_all: number
+  momentum_3m: number
+  sharpe: number
+  sortino: number
+  calmar: number
+  downside_dev: number
+  window_points: number
+  window_years: number
+}
+
+export interface RiskFund {
+  fund_code: string
+  fund_name: string
+  metrics: RiskMetrics | null
+  insufficient: boolean
+  reason: string | null
+}
+
+export interface RiskPayload {
+  funds: RiskFund[]
+  error?: string
+}
+
+/* ── /api/peer 同类分位（契约 §3.6） ──────────────────────────── */
+
+/** ⚠️ `percentile` 是**原始分位**（越大 = 该值越大；TER 越大 = 越贵） */
+export interface PeerNode {
+  group: string
+  group_n: number
+  percentile: number | null
+  insufficient_data: boolean
+  reason: string | null
+  nav_asof: string | null
+  reliability: number | null
+  reliability_note: string | null
+}
+
+export interface PeerFund {
+  fund_code: string
+  fund_name: string
+  group: string | null
+  sharpe: PeerNode | null
+  max_drawdown_1y: PeerNode | null
+  ter: PeerNode | null
   insufficient_data?: boolean
-  reason?: string | null
-  metrics?: Record<string, number | null>
+  reason?: string
 }
 
-export interface RecommendPayload {
-  stats: RecommendStats
-  proven_winners: RecommendWinner[]
-  current_picks: RecommendPick[]
-  constraint_review?: ConstraintReview | null
+export interface PeerPayload {
+  asof: string | null
+  funds: PeerFund[]
+  error?: string
 }
 
-/* ── 写端点参数（B-4） ─────────────────────────────────────────
+/* ── /api/exclusion 排雷（契约 §3.7） ─────────────────────────── */
+
+export interface ExclusionHit {
+  fund_code: string
+  fund_name: string
+  reasons: string[]
+  sharpe_percentile: number | null
+  ter_percentile: number | null
+  ter?: number | null
+}
+
+export interface ExclusionClean {
+  fund_code: string
+  fund_name: string
+  sharpe_percentile: number | null
+  ter_percentile: number | null
+}
+
+export interface ExclusionPayload {
+  asof: string | null
+  excluded: ExclusionHit[]
+  clean: ExclusionClean[]
+  unrated: { fund_code: string; reason: string }[]
+  error?: string
+}
+
+/* ── 写端点参数 ─────────────────────────────────────────────────
    ⚠️ 后端写端点的返回形状**不统一**：`/api/holdings` 只给 `message`、
    `/api/reconcile` 给 `data`。所以 `apiPost` 返回整个信封，调用方各取所需。 */
 
@@ -581,20 +656,4 @@ export interface PlanAction {
 export interface DcaAction {
   action: 'sync' | 'backfill' | 'add' | 'run' | 'pause' | 'resume' | 'delete'
   [k: string]: unknown
-}
-
-/* ── 聚合端点（/api/all） ─────────────────────────────────────── */
-
-/** 旧前端的"一次拉全量"端点。新前端按页拆分请求，**原则上不用它** ——
- *  封装它是为了补齐 §10.3 的双向差集（B-1 的验收项之一）。
- *  字段与 `/api/overview` + `/api/funds` + `/api/rebalance` 的组合一致。 */
-export interface AllDashboard {
-  plan: InvestmentPlan | null
-  temp: Temperature
-  funds: FundsPayload
-  portfolio: Portfolio
-  rebalance: Rebalance
-  stats: Stats
-  curve: PortfolioCurve
-  error?: string
 }

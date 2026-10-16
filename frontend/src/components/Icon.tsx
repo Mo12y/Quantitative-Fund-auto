@@ -4,45 +4,32 @@ import type { ReactNode } from 'react'
  * 内联 SVG 图标（Lucide 风格路径，MIT）。
  *
  * 为什么手写而不是引图标库：本项目铁律「不新增运行时依赖」，
- * 而现状只需要 4~6 个图标 —— 引一个 `lucide-react` 是拿 ~40KB 依赖换 20 行代码。
+ * 而现状只需要 3~6 个图标 —— 引一个 `lucide-react` 是拿 ~40KB 依赖换几十行代码。
  * 统一用 `stroke: currentColor`，颜色跟随文字，不在图标里写死色值。
+ *
+ * ⚠️ 2026-10-16 T3：`today/position/research/settings/temp` 五个键已随旧四页删除；
+ * 现只保留三个入口图标（decision / ledger / data）。
  */
 const PATHS: Record<string, ReactNode> = {
-  /** 今天：日历 + 打勾 */
-  today: (
+  /** 决策台：指南针（方向由你定，系统只给方位） */
+  decision: (
     <>
-      <rect x="3" y="4.5" width="18" height="16.5" rx="2.5" />
-      <path d="M8 2.5v3.5M16 2.5v3.5M3 9.5h18" />
-      <path d="m9.5 15.2 1.8 1.8 3.5-3.7" />
+      <circle cx="12" cy="12" r="10" />
+      <path d="m16.2 7.8-2.1 6.3-6.3 2.1 2.1-6.3z" />
     </>
   ),
-  /** 持仓：饼图 */
-  position: (
+  /** 账本：账册 */
+  ledger: (
     <>
-      <path d="M21.2 15.9A10 10 0 1 1 8 2.83" />
-      <path d="M22 12A10 10 0 0 0 12 2v10z" />
+      <path d="M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H20v20H6.5a2.5 2.5 0 0 1 0-5H20" />
     </>
   ),
-  /** 研究：放大镜 */
-  research: (
+  /** 数据状态：数据库 */
+  data: (
     <>
-      <circle cx="11" cy="11" r="7" />
-      <path d="m20.6 20.6-4.3-4.3" />
-    </>
-  ),
-  /** 设置：滑块 */
-  settings: (
-    <>
-      <path d="M20 7h-9M14 17H5" />
-      <circle cx="17" cy="17" r="3" />
-      <circle cx="7" cy="7" r="3" />
-    </>
-  ),
-  /** 温度：温度计 */
-  temp: (
-    <>
-      <path d="M14 14.8V5a2 2 0 1 0-4 0v9.8a4 4 0 1 0 4 0Z" />
-      <path d="M12 9v7" />
+      <ellipse cx="12" cy="5" rx="9" ry="3" />
+      <path d="M3 5v14a9 3 0 0 0 18 0V5" />
+      <path d="M3 12a9 3 0 0 0 18 0" />
     </>
   ),
 }
@@ -65,12 +52,11 @@ export function Icon({
       viewBox="0 0 24 24"
       fill="none"
       stroke="currentColor"
-      strokeWidth="1.7"
+      strokeWidth="1.8"
       strokeLinecap="round"
       strokeLinejoin="round"
       className={className}
       aria-hidden="true"
-      focusable="false"
     >
       {d}
     </svg>

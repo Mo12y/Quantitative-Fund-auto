@@ -18,8 +18,8 @@ export interface ApiState<T> {
   warming: boolean
   warmingWait: number
   error: string | null
-  /** 原始信封。少数端点把**免责/口径文案放在信封层**（`/api/recommend` 的
-   *  `purpose` / `methodology_note`），界面要用它而不是自己编 —— 否则两边说法会漂移。 */
+  /** 原始信封（少数端点把免责/口径文案放在信封层时从这里取，
+   *  界面要用它而不是自己编 —— 否则两边说法会漂移）。 */
   envelope: ApiEnvelope<T> | null
   refresh: (opts?: GetOptions) => void
 }

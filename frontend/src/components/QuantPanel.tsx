@@ -1,4 +1,4 @@
-import type { QuantModels } from '../api/types'
+import type { Research } from '../api/types'
 import { Card } from './Card'
 
 const TH = 'field pb-1.5'
@@ -19,16 +19,16 @@ function Sub({ title, hint }: { title: string; hint?: string }) {
 }
 
 /**
- * 量化模型对照（vol 预测 / 回撤预警 / 组合模拟）。
+ * 研究快照卡（原「量化模型」；2026-10-16 T3：数据源改指 `/api/research`，离线非实时）。
  *
  * ⚠️ 纪律：**只陈列后端给出的原值，不做任何"谁更好"的结论**。
  * 本项目三次实证（见 `docs/基金推荐系统_ML可行性研究.md`）都是负结果，
  * 界面上不能靠高亮某个模型制造"这就是最优解"的印象。
  * 表头用各自的指标名（IC / ICIR / QLIKE / AUC / Brier / F1），不翻译成口语。
  */
-export function QuantPanel({ data, className = '' }: { data: QuantModels; className?: string }) {
+export function QuantPanel({ data, className = '' }: { data: Research; className?: string }) {
   return (
-    <Card className={className} title="量化模型" note="· vol 预测 / 回撤预警 / 组合模拟（样本外）">
+    <Card className={className} title="研究快照" note="· vol 预测 / 回撤预警 / 组合模拟（离线 · 非实时）">
       <div className="text-caption leading-relaxed text-fg-4">
         只陈列模型对照原始值，<b className="font-semibold text-fg-3">不给出"哪个更好"的结论</b> —— 本项目样本外验证（51 窗口）
         的结论是「看不出优于等权持有的选基能力」，界面上不制造最优解印象。
