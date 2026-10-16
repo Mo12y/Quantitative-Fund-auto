@@ -1734,7 +1734,7 @@ def main():
     if port != 5020:
         print("（端口来自 QFA_PORT / 命令行参数，已非默认 5020）")
     print("=" * 50)
-    print("🚀 量化基金仪表盘")
+    print("🚀 基金决策台")
     print("   http://localhost:%d" % port)
     print("=" * 50)
 
