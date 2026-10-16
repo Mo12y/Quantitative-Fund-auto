@@ -40,7 +40,7 @@
 - `pytest tests/test_boot_budget.py -q` → **3 passed**。
 - `import src.web.app` → **OK**；CLI 命令表 **25 个**（实测）。
 - `scripts/check_ledger_invariants.py` → **24 项 0 失败**（第 19 条 = 净值新鲜度覆盖率，实测 94.7%）。
-- `data/` 占用 **7.3 GB**。
+- `data/` 顶层 3 db **7.3 GB**（全目录 **10.5 GB**，另含 `backups/` ≈3.2 GB）。
 
 ## 未收口
 - **决策支持系统重构（2026-10-15 起）**：T1.1~T5.2 未做 → 按计划书推进。
