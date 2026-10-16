@@ -73,6 +73,7 @@ class HistoricalRecommender:     # noqa: D101
 from src.analysis.investment_plan import get_plan, get_progress, ensure_seed
 from src.analysis import fund_boards
 from src.analysis import peer_percentile
+from src.analysis import behavior_profile, breakeven, counterfactual, fund_fee  # 决策台（T2.1）
 from src.analysis import user_constraint, user_profile
 from src.analysis import nav_series, nav_metrics
 from src.analysis import portfolio_overlap
@@ -1212,6 +1213,197 @@ def api_portfolio_curve():
     return jsonify({"ok": True, "data": _portfolio_curve()})
 
 
+# =================================================================
+# 决策台 API（T2.1，2026-10-16）
+# 契约：`docs/05-重构/01_决策支持系统_执行计划书.md` §3（GET、只读、模块返回**原样透传**）
+# 只调既有分析模块，不重写任何计算；"样本不足 / 数据缺失"由模块自己声明，一律如实透传。
+# =================================================================
+
+def _decision_fund_rows(db):
+    """决策台共用：当前持仓（status != 'sold'）去重基金 + fund_info 字段。"""
+    return db.conn.execute(
+        "SELECT DISTINCT h.fund_code, f.fund_name, f.fund_type,"
+        " f.mgt_fee, f.custodian_fee, f.sales_service_fee"
+        " FROM holdings h LEFT JOIN fund_info f ON f.fund_code = h.fund_code"
+        " WHERE COALESCE(h.status, '') != 'sold' ORDER BY h.fund_code").fetchall()
+
+
+def _fund_nav_metrics(conn, code):
+    """单只基金的风险指标：净值序列 → `nav_metrics.compute`（点数不足返回 None）。"""
+    series = behavior_profile.nav_series(conn, code)
+    return nav_metrics.compute([v for _, v in series], [d for d, _ in series])
+
+
+def _fund_ter(row) -> "tuple":
+    """单只基金的 TER（fund_fee.compute_ter 的单一实现，不重算）。"""
+    return fund_fee.compute_ter({"mgt_fee": row["mgt_fee"],
+                                 "custodian_fee": row["custodian_fee"],
+                                 "sales_service_fee": row["sales_service_fee"]})
+
+
+@app.route("/api/behavior")
+def api_behavior():
+    """行为镜（契约 §3.2）：追高 / 割肉 / 卖飞 / 频率。只读。"""
+    db = get_db()
+    try:
+        data = behavior_profile.analyze(db)
+    except Exception as e:
+        data = {"error": str(e)}
+    finally:
+        db.close()
+    return jsonify({"ok": True, "data": data})
+
+
+@app.route("/api/counterfactual")
+def api_counterfactual():
+    """反事实归因（契约 §3.3）：compare + same_fund + sell_rules 三合一。只读。"""
+    db = get_db()
+    try:
+        data = {
+            "compare": counterfactual.compare(db),
+            "same_fund": counterfactual.same_fund_counterfactual(db),
+            "sell_rules": counterfactual.simulate_sell_rules(db),
+        }
+    except Exception as e:
+        data = {"error": str(e)}
+    finally:
+        db.close()
+    return jsonify({"ok": True, "data": data})
+
+
+@app.route("/api/breakeven")
+def api_breakeven():
+    """回本门槛 / 费率漏损（契约 §3.4）：每笔持仓"要涨多少才不亏"。只读。"""
+    db = get_db()
+    try:
+        data = breakeven.analyze(db)
+    except Exception as e:
+        data = {"error": str(e)}
+    finally:
+        db.close()
+    return jsonify({"ok": True, "data": data})
+
+
+@app.route("/api/risk")
+def api_risk():
+    """持仓风险刻画（契约 §3.5）：波动 / 回撤 / 夏普等，**按需现算**（持仓个位数基金，毫秒级）。"""
+    db = get_db()
+    try:
+        funds = []
+        for r in _decision_fund_rows(db):
+            m = _fund_nav_metrics(db.conn, r["fund_code"])
+            if m is None:
+                funds.append({"fund_code": r["fund_code"], "fund_name": r["fund_name"],
+                              "metrics": None, "insufficient": True,
+                              "reason": "净值点不足 %d" % nav_metrics.MIN_POINTS})
+            else:
+                funds.append({"fund_code": r["fund_code"], "fund_name": r["fund_name"],
+                              "metrics": m, "insufficient": False, "reason": None})
+        data = {"funds": funds}
+    except Exception as e:
+        data = {"error": str(e)}
+    finally:
+        db.close()
+    return jsonify({"ok": True, "data": data})
+
+
+def _peer_unavailable() -> dict:
+    """参照系未构建时的统一声明（**不猜**，与 peer_percentile 的 load_cache 契约一致）。"""
+    return {"error": "同类参照系未构建，请先跑 build_distributions"}
+
+
+@app.route("/api/peer")
+def api_peer():
+    """同类分位（契约 §3.6）：sharpe / max_drawdown_1y / ter 三个分位（原始分位，越大=值越大）。"""
+    db = get_db()
+    try:
+        cache = peer_percentile.load_cache()
+        if cache is None:
+            return jsonify({"ok": True, "data": _peer_unavailable()})
+        nav_asof = db.get_latest_nav_date()
+        funds = []
+        for r in _decision_fund_rows(db):
+            code, name = r["fund_code"], r["fund_name"]
+            group = peer_percentile.group_of(r["fund_type"])
+            if not group:
+                funds.append({"fund_code": code, "fund_name": name, "group": None,
+                              "sharpe": None, "max_drawdown_1y": None, "ter": None,
+                              "insufficient_data": True, "reason": "类型未映射到参照系组"})
+                continue
+            m = _fund_nav_metrics(db.conn, code) or {}
+            ter, _missing = _fund_ter(r)
+            funds.append({
+                "fund_code": code, "fund_name": name, "group": group,
+                "sharpe": peer_percentile.describe(cache, group, "sharpe",
+                                                   m.get("sharpe"), nav_asof),
+                "max_drawdown_1y": peer_percentile.describe(cache, group, "max_drawdown_1y",
+                                                            m.get("max_drawdown_1y"), nav_asof),
+                "ter": peer_percentile.describe(cache, group, "ter", ter, nav_asof),
+            })
+        data = {"asof": nav_asof, "funds": funds}
+    except Exception as e:
+        data = {"error": str(e)}
+    finally:
+        db.close()
+    return jsonify({"ok": True, "data": data})
+
+
+@app.route("/api/exclusion")
+def api_exclusion():
+    """排雷（契约 §3.7）：两个可辩护判据 —— 同类夏普垫底（≤P10）/ TER 偏高（≥P90）。
+
+    ⚠️ 判据所需的任一指标不可用 → 该基金进 `unrated`（**不判、不保清白**），
+    绝不放行成 clean（判据看不见数据必须显式声明）。
+    """
+    db = get_db()
+    try:
+        cache = peer_percentile.load_cache()
+        if cache is None:
+            return jsonify({"ok": True, "data": _peer_unavailable()})
+        nav_asof = db.get_latest_nav_date()
+        excluded, clean, unrated = [], [], []
+        for r in _decision_fund_rows(db):
+            code, name = r["fund_code"], r["fund_name"]
+            group = peer_percentile.group_of(r["fund_type"])
+            if not group:
+                unrated.append({"fund_code": code, "reason": "类型未映射到参照系组"})
+                continue
+            entry = peer_percentile.group_entry(cache, group)
+            if not entry or entry.get("quality_level") == "insufficient":
+                unrated.append({"fund_code": code, "reason": "组内样本不足"})
+                continue
+            m = _fund_nav_metrics(db.conn, code) or {}
+            ter, _missing = _fund_ter(r)
+            sh = peer_percentile.describe(cache, group, "sharpe", m.get("sharpe"), nav_asof)
+            te = peer_percentile.describe(cache, group, "ter", ter, nav_asof)
+            if sh.get("insufficient_data"):
+                unrated.append({"fund_code": code,
+                                "reason": "夏普分位不可用（%s）" % sh.get("reason")})
+                continue
+            if te.get("insufficient_data"):
+                unrated.append({"fund_code": code,
+                                "reason": "TER 分位不可用（%s）" % te.get("reason")})
+                continue
+            sp, tp = sh.get("percentile"), te.get("percentile")
+            reasons = []
+            if sp is not None and sp <= 10:
+                reasons.append("同类夏普分位 ≤10（垫底）")
+            if tp is not None and tp >= 90:
+                reasons.append("同类 TER 分位 ≥90（费率偏高）")
+            if reasons:
+                excluded.append({"fund_code": code, "fund_name": name, "reasons": reasons,
+                                 "sharpe_percentile": sp, "ter_percentile": tp, "ter": ter})
+            else:
+                clean.append({"fund_code": code, "fund_name": name,
+                              "sharpe_percentile": sp, "ter_percentile": tp})
+        data = {"asof": nav_asof, "excluded": excluded, "clean": clean, "unrated": unrated}
+    except Exception as e:
+        data = {"error": str(e)}
+    finally:
+        db.close()
+    return jsonify({"ok": True, "data": data})
+
+
 @app.route("/api/calendar")
 def api_calendar():
     """交易日历查询（《前端优化设计方案》§246 原标注"未实现"）。
@@ -1608,12 +1800,15 @@ def _clean_recs(df, keep=None, scale_pct=()):
     return sub.to_dict("records")
 
 
-@app.route("/api/quant_models")
-def api_quant_models():
-    """量化模型结果 — vol 预测 / 回撤预警 / 组合模拟（读取离线分析 CSV，秒级响应）"""
+@app.route("/api/research")
+def api_research():
+    """研究快照（2026-10-16 T2.1：由 `/api/quant_models` 改名）——
+    静态读取离线分析 CSV（vol 预测 / 回撤预警 / 组合模拟）的**离线快照**，非实时（契约 §3.8）。"""
     import pandas as pd
     BASE = os.path.join(BASE_DIR, "data")
-    out = {"vol": [], "drawdown": [], "portfolio": [], "signals": [], "reports": {}}
+    out = {"snapshot": True,
+           "note": "离线快照（2026-09-11 生成），非实时；展示波动 / 回撤 / 组合模型的研究结果",
+           "vol": [], "drawdown": [], "portfolio": [], "signals": [], "reports": {}}
 
     # vol 多模型对比（保留原始量纲）
     try:

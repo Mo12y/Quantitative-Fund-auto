@@ -159,6 +159,15 @@ def build_distributions(min_days: int = DEFAULT_MIN_DAYS, db_path: str = None) -
             if arr.size == 0:
                 continue
             grid[k] = {("p%d" % q): float(np.percentile(arr, q)) for q in GRID}
+        # 2026-10-16（T2.1 补全）：`ter` 此前只进 `rows`（供 fund_percentile 脚本展示）而**漏进网格**
+        # → 决策台 API 的 TER 分位（契约 §3.6）/ 排雷判据「TER ≥P90」（§3.7）拿不到值。
+        # 这里补进网格：分位算法与其余指标**完全一致**；**缺 TER 的基金跳过**（不准拿 0 顶替）。
+        tvals = [r["ter"] for r in rows if r.get("ter") is not None]
+        if tvals:
+            tarr = np.array(tvals, dtype=float)
+            tarr = tarr[np.isfinite(tarr)]
+            if tarr.size:
+                grid["ter"] = {("p%d" % q): float(np.percentile(tarr, q)) for q in GRID}
         # M1 信度诊断（2026-10-03）：夏普的横截面差异里，有多少是真信号。
         # 只对 `sharpe` 做 —— Lo (2002) 的解析 SE 只适用于**比率型**统计量；
         # 收益/波动是"均值/标准差"型，SE 公式不同，套用会给出错误的信度。

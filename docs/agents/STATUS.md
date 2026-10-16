@@ -4,7 +4,7 @@
 
 ---
 
-**最后更新：2026-10-16（T0.3 / T1.1 / T1.2 / T2.0 完成）｜更新人：DSH**
+**最后更新：2026-10-16（T0.3 / T1.1 / T1.2 / T2.0 / T2.1 完成）｜更新人：DSH**
 
 ## 现在是什么项目
 **《基于多源金融数据的个人投资者交易行为分析与建模》**（原「量化基金系统」）。
@@ -35,10 +35,14 @@
 - **T1.1 已完成**：题目与入口对齐（README 全文重写 +「系统 vs 实例」诚实声明；DESIGN / AGENTS §一 / docs/README）。
 - **T1.2 已完成**：权威口径重写（行为镜实测 + 反事实占位 + 体积三档；引用点同步，含 AGENTS 基线 538→541）。
 - **T2.0 已完成**：行为口径对照表（8 口径全判【项目自定】）+ spot-check 9 项（2 项差异已记录）。
-- **下一步**：T2.1（决策台 7 API）→ T2.2 → T2.3 → 阶段 3~5（见计划书 §6/§7）。
+- **T2.1 已完成**：决策台 7 个 API（behavior / counterfactual / breakeven / risk / peer / exclusion /
+  research〔`/api/quant_models` 改名〕）；参照系缓存补 **ter 网格**并重建（旧 5 指标零漂移）；
+  新增 `tests/test_web_behavior_api.py` 8 例（真实数据锚点 + 与 CLI 同源一致）。
+- **下一步**：T2.2（删壳 + `precompute` 同步）→ T2.3 → 阶段 3~5（见计划书 §6/§7）。
 
 ## 门禁（实测）
-- `pytest -q` → **541 passed**（S1' 后 538；T0.3 净 +3：删 1 旧用例 + 增 4 负对照）。
+- `pytest -q` → **549 passed**（S1' 后 538；T0.3 净 +3、T2.1 净 +8）。
+- `pytest tests/test_web_behavior_api.py -q` → **8 passed**（决策台 7 路由：真实锚点 + 同源一致）。
 - `pytest tests/test_data_contract.py -q` → **15 passed**（T0.3 负对照含"红→恢复→绿"完整演绎）。
 - `pytest tests/test_boot_budget.py -q` → **3 passed**。
 - `import src.web.app` → **OK**；CLI 命令表 **25 个**（实测）。
@@ -60,7 +64,7 @@
 - ⚠️ **冻结前先按「谁 import 了它」分类**（已四次踩）；有引用方必须连带改。
 - ⚠️ **口径先拆再冻**（S1'-b 已验证）：load-bearing 口径（`type_bucket` 等）必须剥到保留模块。
 - ⚠️ **web 侧用「占位降级」**，别删 import；路由保留但返回空。
-- ⚠️ 冻结后 `test_doc_refs` 必报断链 → 历史文档登记 `EXCEPTIONS`（现 **43** 条），当前文档改路径。
+- ⚠️ 冻结后 `test_doc_refs` 必报断链 → 历史文档登记 `EXCEPTIONS`（现 **42** 条），当前文档改路径。
 - ⚠️ 有的**测试直接读源文件**（如 `test_fee_semantics.py` 读 `fund_scorer.py`）→ 归档模块时必连带归档。
 - 数据新鲜度守卫（第 19 条）**已修（T0.3）**：原「全局 `max(nav_date)` 顶绿」已改**覆盖率判据**
   —— 见上「决策支持系统重构」节。

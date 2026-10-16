@@ -193,7 +193,7 @@ Quantitative-Fund-auto/
 │   ├── web/                     # Flask 后端 API（React 前端的宿主）
 │   ├── config.py                # 配置中心（settings.yaml 类型化访问）
 │   └── main.py                  # 🚀 主入口（CLI 分发）
-├── tests/                       # ✅ 单元测试（pytest，541 用例）
+├── tests/                       # ✅ 单元测试（pytest，549 用例）
 └── requirements.txt
 ```
 
@@ -236,7 +236,7 @@ flowchart LR
 CODEBUDDY_SAFE_DELETE_BULK_THRESHOLD=100000 python -m pytest tests/ -q
 ```
 
-当前基线 **541 passed**（重构中会随命题层模块归档而变化，历史轨迹记录在
+当前基线 **549 passed**（重构中会随命题层模块归档而变化，历史轨迹记录在
 `docs/00-规范/结论权威口径.md` §三）。覆盖：数据契约守卫自身（逐条注入违规必须点名报红）、
 行为画像与反事实口径、T+1/T+2 交易规则与持仓落账、定投期次、组合曲线、账本写入门面的
 原子性（`immediate()` 负对照）、同类分位参照系、TER 费率口径、文档引用完整性与必读链预算等。
