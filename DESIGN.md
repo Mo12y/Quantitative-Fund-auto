@@ -1,4 +1,4 @@
-# DESIGN.md — 量化基金仪表盘设计规范
+# DESIGN.md — 前端设计规范
 
 > 本文件是前端视觉的**单一事实来源**。任何 UI 改动都从这里取 token，不要临时造颜色/字号/圆角。
 > 设计语言来源：Linear 设计系统（`awesome-design-md/design-md/linear.app`）为基座，
