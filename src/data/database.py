@@ -11,6 +11,9 @@ import os
 import time
 from typing import Optional
 
+#: 项目根（src/data/database.py 上溯三级）—— 相对路径的解析基准（见 `__init__` 的 T4.2 注释）。
+_PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 
 class Database:
     """SQLite 数据库管理类"""
@@ -34,20 +37,29 @@ class Database:
         旧行为是"路径不存在就静默 `makedirs` + 建空库"，于是**路径写错不报错**，
         只会得到一个空库、返回"持仓=0 / 历史不足"的假结果（极易误判成数据丢失）。
         现在默认**拒绝**，把"路径写错"和"首次建库"分开：前者报错、后者显式 `allow_create=True`。
+
+        ⚠️ 2026-10-16 **T4.2：相对路径按「项目根」解析（不是 cwd）** ——
+        旧行为下，从项目根外（如 `cd /tmp`）跑 `Database("data/fund_quant.db")`，
+        会去 **cwd** 下找/建（`allow_create=True` 时还会建一个**空库**），
+        表现为"持仓=0 / 最新净值=None"的假故障。现在：相对路径一律拼到项目根之下，
+        绝对路径原样（仅规范化）—— 调用点**不用**再各自写 `os.path.join(项目根, ...)`。
         """
-        self.db_path = db_path
+        # T4.2：相对路径 → 项目根基准；随后统一 abspath 规范化（去 `..` / `.`）
+        if not os.path.isabs(db_path):
+            db_path = os.path.join(_PROJECT_ROOT, db_path)
+        self.db_path = os.path.abspath(db_path)
 
         if allow_create is None:
             allow_create = os.environ.get("QFA_DB_ALLOW_CREATE") == "1"
-        if not allow_create and not os.path.exists(db_path):
+        if not allow_create and not os.path.exists(self.db_path):
             raise FileNotFoundError(
-                f"数据库文件不存在：{db_path}\n"
+                f"数据库文件不存在：{self.db_path}\n"
                 f"  · 若路径写错，请核对（Database 不会在错误路径上静默建空库）。\n"
                 f"  · 若为首次建库，请显式传 allow_create=True，"
                 f"或先运行 `python src/main.py init` / `collect`。")
 
         # 确保数据目录存在
-        db_dir = os.path.dirname(db_path)
+        db_dir = os.path.dirname(self.db_path)
         if db_dir and not os.path.exists(db_dir):
             os.makedirs(db_dir, exist_ok=True)
 
