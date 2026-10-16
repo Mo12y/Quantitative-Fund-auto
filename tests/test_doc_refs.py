@@ -111,6 +111,11 @@ EXCEPTIONS: set[str] = {
     "tests/test_explain_api.py",
     "tests/test_fee_semantics.py",
     "tests/test_constraint_api.py",
+    # · `tests/test_api_degraded.py` —— 2026-10-16 **T2.2（删壳）删除**：它测的
+    #   `_all_rebalance` 与 `_FakeAdvisor` 桩（"测试盖真 bug"的那处）随旧命题路由
+    #   一并移除。计划书（现状表 / T2.2 任务描述）与 `docs/执行状态与续作指引.md`
+    #   等**历史文档**仍按当时路径引用它 —— 按先例：不改历史文档、只登记。
+    "tests/test_api_degraded.py",
     # T0.3 顺带发现（2026-10-15）：`docs/05-重构/01_决策支持系统_执行计划书.md`（bb72922）
     # 引用了它自己 T2.0 / T2.1 的**未来产出物**——提交计划书时漏跑本守卫 → 2 处断链。
     # 属"**待创建**"（不是"有意不存在"）→ 登记放行。

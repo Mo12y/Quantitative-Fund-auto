@@ -4,7 +4,7 @@
 
 ---
 
-**最后更新：2026-10-16（T0.3 / T1.1 / T1.2 / T2.0 / T2.1 完成）｜更新人：DSH**
+**最后更新：2026-10-16（T0.3 ~ T2.2 完成）｜更新人：DSH**
 
 ## 现在是什么项目
 **《基于多源金融数据的个人投资者交易行为分析与建模》**（原「量化基金系统」）。
@@ -38,10 +38,14 @@
 - **T2.1 已完成**：决策台 7 个 API（behavior / counterfactual / breakeven / risk / peer / exclusion /
   research〔`/api/quant_models` 改名〕）；参照系缓存补 **ter 网格**并重建（旧 5 指标零漂移）；
   新增 `tests/test_web_behavior_api.py` 8 例（真实数据锚点 + 与 CLI 同源一致）。
-- **下一步**：T2.2（删壳 + `precompute` 同步）→ T2.3 → 阶段 3~5（见计划书 §6/§7）。
+- **T2.2 已完成**：删壳 —— 6 个占位类 + 6 个死路由（funds / rebalance / sectors / sentiment /
+  recommend / funds·board）+ 全部连带辅助/常量/后台预热；`precompute` 只剩 overview（**0.2s**）；
+  删 `test_api_degraded.py` 等 **15** 个死路由测试（EXCEPTIONS 登记）；死缓存快照已清。
+- **下一步**：T2.3（`main.py` 无参数修复）→ 阶段 3（前端决策台三页，§3 契约为交接依据）→ 阶段 4/5。
 
 ## 门禁（实测）
-- `pytest -q` → **549 passed**（S1' 后 538；T0.3 净 +3、T2.1 净 +8）。
+- `pytest -q` → **534 passed**（S1' 后 538；T0.3 +3、T2.1 +8、T2.2 −15〔死路由测试随删壳移除〕）。
+- `python src/main.py precompute` → 只剩 overview，**0.2s**（原含筛选池 ~110s）。
 - `pytest tests/test_web_behavior_api.py -q` → **8 passed**（决策台 7 路由：真实锚点 + 同源一致）。
 - `pytest tests/test_data_contract.py -q` → **15 passed**（T0.3 负对照含"红→恢复→绿"完整演绎）。
 - `pytest tests/test_boot_budget.py -q` → **3 passed**。
@@ -63,8 +67,9 @@
 ## 已知坑（不许再踩）
 - ⚠️ **冻结前先按「谁 import 了它」分类**（已四次踩）；有引用方必须连带改。
 - ⚠️ **口径先拆再冻**（S1'-b 已验证）：load-bearing 口径（`type_bucket` 等）必须剥到保留模块。
-- ⚠️ **web 侧用「占位降级」**，别删 import；路由保留但返回空。
-- ⚠️ 冻结后 `test_doc_refs` 必报断链 → 历史文档登记 `EXCEPTIONS`（现 **42** 条），当前文档改路径。
+- ⚠️ **web 侧「占位降级」模式已废止**（T2.2 完成删壳）：冻结模块的残留应**整链删除**
+  （占位类 + 死路由 + 辅助 + 测试 + CLI job + 缓存键），而不是降级保留 —— 降级只是 S1' 的过渡态。
+- ⚠️ 冻结后 `test_doc_refs` 必报断链 → 历史文档登记 `EXCEPTIONS`（现 **43** 条），当前文档改路径。
 - ⚠️ 有的**测试直接读源文件**（如 `test_fee_semantics.py` 读 `fund_scorer.py`）→ 归档模块时必连带归档。
 - 数据新鲜度守卫（第 19 条）**已修（T0.3）**：原「全局 `max(nav_date)` 顶绿」已改**覆盖率判据**
   —— 见上「决策支持系统重构」节。

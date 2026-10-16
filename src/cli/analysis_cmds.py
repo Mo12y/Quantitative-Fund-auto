@@ -490,21 +490,17 @@ def _print_drift(r):
 
 
 def cmd_precompute():
-    """预计算并落 SQLite 快照（温度/筛选池/调仓/聚合总览/板块总榜）。
+    """预计算并落 SQLite 快照（T2.2 后只剩「聚合总览」= 投资计划 + 持仓）。
 
     作用：Web 端点是「内存缓存 → SQLite 快照 → 现算」。跑一次本命令把快照填好，
-    之后即使重启服务，首屏与筛选池也是纯 SELECT（毫秒级），不必再等 3~8 秒冷算。
+    之后即使重启服务，首屏也是纯 SELECT（毫秒级），不必等冷算。
+    历史：原含 温度 / 筛选池 / 调仓 / 板块总榜 —— 均已随旧命题删除（T2.2）。
     """
     import time
     from src.web import app as webapp
 
     jobs = [
-        ("温度+持仓 总览", "overview", webapp._overview_compute),
-        ("基金质量筛选池", "funds", webapp._all_funds),
-        ("调仓建议", "rebalance", webapp._all_rebalance),
-        ("聚合总览", "__dash__", webapp._compute_dashboard),
-        ("板块总榜(默认)", "funds_board_20_300",
-         lambda: webapp._compute_board_pool(20, 300)),
+        ("聚合总览（计划 + 持仓）", "overview", webapp._overview_compute),
     ]
     print("=" * 60)
     print("预计算快照（写入 data/fund_quant.db 的 analysis_snapshot 表）")
@@ -524,8 +520,7 @@ def cmd_precompute():
         if bad:
             print(f"  ⚠️ {label}: 计算返回空/错误，未落快照 ({dt:.1f}s)")
         else:
-            n = len(data.get("funds", [])) if key == "funds" else ""
-            print(f"  ✅ {label}: {dt:.1f}s {'('+str(n)+' 只)' if n != '' else ''}")
+            print(f"  ✅ {label}: {dt:.1f}s")
     print("-" * 60)
     print(f"合计 {total:.1f}s。快照有效期 6 小时，或在任何写操作（记买入/更新净值…）时自动失效。")
     print("=" * 60)

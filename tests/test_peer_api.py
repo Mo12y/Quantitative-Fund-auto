@@ -1,8 +1,11 @@
-"""批次 B 测试：同侪参照系接入 API（B2 样本不足显式声明 / B4 接口字段）。
+"""`_peer_block` 单元测试（B2 纪律：**样本不足必须显式声明**）。
 
-B2 的核心纪律：**样本不足必须显式声明**，`percentiles` 为 null 且带 reason，
-绝不返回一个来路不明的具体数字（本项目反面教材："五个维度全缺仍显示市场温度 50.0°"）。
-B4 的兼容纪律：**只增不改** —— 既有字段一个都不能少。
+`percentiles` 为 null 且带 reason，绝不返回一个来路不明的具体数字
+（本项目反面教材："五个维度全缺仍显示市场温度 50.0°"）。
+
+⚠️ 2026-10-16 T2.2（删壳）：原文件还含 `/api/funds`、`/api/funds/board` 的
+B4 字段契约测试与冷启动 warming 测试 —— 两条路由已随旧命题删除，相应测试一并删除。
+`_peer_block` 本身**保留**（仍服务 `/api/explain`）。
 """
 import os
 import sys
@@ -13,11 +16,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 os.environ.setdefault("QFA_MARKET_LIVE", "0")
 
 from src.analysis import peer_percentile as pp
-from src.data.database import Database
 from src.web import app as webapp
-
-PEER_KEYS = ("group", "group_n", "percentiles", "nav_asof",
-             "insufficient_data", "reason")
 
 
 def _cache():
@@ -81,129 +80,6 @@ class TestPeerBlock:
             assert b["reason"], "样本不足时必须给出 reason"
 
 
-def _seed(db_path, code="000011", n=320):
-    """造一只有 ~1.3 年历史的基金（点数够评估，但跨度 <3 年 → 触发 B2 声明）。"""
-    db = Database(db_path)
-    db.upsert_fund_info({"fund_code": code, "fund_name": "测试混合C",
-                         "fund_type": "混合型-偏股", "fund_size": 10.0,
-                         "mgt_fee": 1.0, "establish_date": "2025-01-01"})
-    import pandas as pd
-    rows = []
-    start = pd.Timestamp("2025-01-01")
-    for i in range(n):
-        d = (start + pd.Timedelta(days=i)).strftime("%Y-%m-%d")
-        rows.append((code, d, 1.0 + i * 0.0005, 1.0 + i * 0.0005, 0.0))
-    db.insert_nav_batch(rows)
-    db.close()
-
-
-@pytest.fixture()
-def client(tmp_path, monkeypatch):
-    dbp = str(tmp_path / "peer.db")
-    _seed(dbp)
-    monkeypatch.setattr(webapp, "DB_PATH", dbp)
-    with webapp._slot_lock:
-        webapp._slot_store.clear()
-    webapp._dash_cache = None
-    with webapp.app.test_client() as c:
-        yield c, dbp
-
-
-class TestBoardApiBackwardCompat:
-    def test_board_keeps_old_fields_and_adds_new(self, client, monkeypatch):
-        c, dbp = client
-        monkeypatch.setattr(pp, "load_cache", lambda path=None: _cache())
-        r = c.get("/api/funds/board?size=5&limit=50&fresh=1")
-        assert r.status_code == 200
-        body = r.get_json()
-        assert body["ok"] is True
-        assert set(("boards", "total_funds", "size")).issubset(body["data"].keys()), \
-            "既有字段被删了（B4 要求只增不改）"
-        for b in body["data"]["boards"]:
-            for f in b.get("funds", []):
-                assert set(("code", "name", "risk", "fee", "momentum_3m")).issubset(f.keys())
-                for k in PEER_KEYS:
-                    assert k in f, "缺少新字段 %s" % k
-
-    def test_funds_api_keeps_old_fields_and_adds_new(self, client, monkeypatch):
-        c, dbp = client
-        monkeypatch.setattr(pp, "load_cache", lambda path=None: _cache())
-        r = c.get("/api/funds?fresh=1")
-        assert r.status_code == 200
-        d = r.get_json()["data"]
-        assert set(("funds", "summary")).issubset(d.keys())
-        for f in d["funds"]:
-            for k in PEER_KEYS:
-                assert k in f
-
-
-class TestColdStartWarming:
-    """冷启动**不得阻塞**（2026-09-22：全市场快照后筛选池冷算 ~110s）。
-
-    旧行为会让 /api/all、/api/funds、/api/funds/board 同步算 110 秒 → 前端 180s 超时。
-    新契约：无可用缓存时立刻返回 status=warming + retry_in，由后台预热、前端轮询。
-    """
-
-    def test_funds_returns_warming_immediately(self, client, monkeypatch):
-        import time as _t
-        c, dbp = client
-        monkeypatch.setattr(pp, "load_cache", lambda path=None: _cache())
-        monkeypatch.setattr(webapp, "_start_funds_warm", lambda *a, **k: None)   # 隔离后台线程，专注契约
-        t0 = _t.time()
-        b = c.get("/api/funds").get_json()
-        assert _t.time() - t0 < 2.0, "冷启动必须立刻返回，不能同步算 110 秒"
-        assert b["status"] == "warming" and b["data"] is None
-        assert b["retry_in"] > 0
-
-    def test_board_returns_warming_immediately(self, client, monkeypatch):
-        import time as _t
-        c, dbp = client
-        monkeypatch.setattr(webapp, "_start_funds_warm", lambda *a, **k: None)
-        t0 = _t.time()
-        b = c.get("/api/funds/board?size=5&limit=50").get_json()
-        assert _t.time() - t0 < 2.0
-        assert b["status"] == "warming" and b["data"] is None
-
-    def test_fresh_1_bypasses_warming(self, client, monkeypatch):
-        """fresh=1 是"我要现在就算"的显式意图，不受 warming 短路影响。"""
-        c, dbp = client
-        monkeypatch.setattr(pp, "load_cache", lambda path=None: _cache())
-        monkeypatch.setattr(webapp, "_start_funds_warm", lambda *a, **k: None)
-        d = c.get("/api/funds?fresh=1").get_json()["data"]
-        assert d is not None and "funds" in d
-
-
-class TestColdStartWarming:
-    """冷启动**不得阻塞**（2026-09-22：全市场快照后筛选池冷算 ~110s）。
-
-    旧行为会让 /api/all、/api/funds、/api/funds/board 同步算 110 秒 → 前端 180s 超时。
-    新契约：无可用缓存时立刻返回 status=warming + retry_in，由后台预热、前端轮询。
-    """
-
-    def test_funds_returns_warming_immediately(self, client, monkeypatch):
-        import time as _t
-        c, dbp = client
-        monkeypatch.setattr(pp, "load_cache", lambda path=None: _cache())
-        monkeypatch.setattr(webapp, "_start_funds_warm", lambda *a, **k: None)   # 隔离后台线程，专注契约
-        t0 = _t.time()
-        b = c.get("/api/funds").get_json()
-        assert _t.time() - t0 < 2.0, "冷启动必须立刻返回，不能同步算 110 秒"
-        assert b["status"] == "warming" and b["data"] is None
-        assert b["retry_in"] > 0
-
-    def test_board_returns_warming_immediately(self, client, monkeypatch):
-        import time as _t
-        c, dbp = client
-        monkeypatch.setattr(webapp, "_start_funds_warm", lambda *a, **k: None)
-        t0 = _t.time()
-        b = c.get("/api/funds/board?size=5&limit=50").get_json()
-        assert _t.time() - t0 < 2.0
-        assert b["status"] == "warming" and b["data"] is None
-
-    def test_fresh_1_bypasses_warming(self, client, monkeypatch):
-        """fresh=1 是"我要现在就算"的显式意图，不受 warming 短路影响。"""
-        c, dbp = client
-        monkeypatch.setattr(pp, "load_cache", lambda path=None: _cache())
-        monkeypatch.setattr(webapp, "_start_funds_warm", lambda *a, **k: None)
-        d = c.get("/api/funds?fresh=1").get_json()["data"]
-        assert d is not None and "funds" in d
+# 2026-10-16 T2.2（删壳）：原 `_seed` / `client` fixture / `TestBoardApiBackwardCompat`
+# / `TestColdStartWarming`×2（后者在原文件里重复定义了两次）已删除 —— 它们测的
+# /api/funds、/api/funds/board 已随旧命题删除。`_peer_block` 的单元测试保留（见上）。

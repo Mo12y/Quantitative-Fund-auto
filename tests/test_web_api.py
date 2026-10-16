@@ -199,18 +199,19 @@ def test_concurrent_reconcile_settles_once(tmp_path):
     assert sells == 1
 
 
-def test_nav_update_writes_and_invalidates_funds_snapshot(client, monkeypatch):
-    """/api/nav/update 端到端（stub 掉抓取，不联网）：写净值 + 失效 funds 快照。
+def test_nav_update_writes_and_invalidates_overview_snapshot(client, monkeypatch):
+    """/api/nav/update 端到端（stub 掉抓取，不联网）：写净值 + 失效聚合快照。
 
     这是批次一遗留的「同一 helper 已验证、路由本身未跑通」的收口。
+    T2.2：原断言"funds 快照失效" —— /api/funds 已随旧命题删除，改验聚合快照（overview）。
     """
     import pandas as pd
 
     from src.data.collector import DataCollector
 
     c, dbp = client
-    c.get("/api/funds?fresh=1")     # fresh=1：绕过冷启动 warming，真正计算并落快照
-    assert _q(dbp, "SELECT COUNT(*) c FROM analysis_snapshot WHERE key='funds'")[0]["c"] == 1
+    c.get("/api/overview?fresh=1")  # fresh=1：强制计算并落快照
+    assert _q(dbp, "SELECT COUNT(*) c FROM analysis_snapshot WHERE key='overview'")[0]["c"] == 1
 
     def fake_collect(self, code):                          # 不联网
         return pd.DataFrame({"净值日期": ["2026-01-08", "2026-01-09"],
@@ -222,17 +223,9 @@ def test_nav_update_writes_and_invalidates_funds_snapshot(client, monkeypatch):
     assert r["ok"] is True and r["failed"] == []
     assert _q(dbp, "SELECT unit_nav FROM fund_nav WHERE fund_code=? AND nav_date='2026-01-09'",
               (CODE,))[0]["unit_nav"] == 2.8
-    # 净值变了 → 依赖 fund_nav 的 funds 快照必须同步失效，否则端点会读回旧池
-    assert _q(dbp, "SELECT COUNT(*) c FROM analysis_snapshot WHERE key='funds'")[0]["c"] == 0
+    # 净值变了 → 依赖 fund_nav 的聚合快照必须同步失效，否则端点会读回旧账
+    assert _q(dbp, "SELECT COUNT(*) c FROM analysis_snapshot WHERE key='overview'")[0]["c"] == 0
 
 
-def test_sectors_cold_path_does_not_block(client, monkeypatch, tmp_path):
-    """板块冷启动改为后台计算：立刻返回 warming，不再卡住请求线程。"""
-    c, _dbp = client
-    monkeypatch.setattr(webapp, "SECTORS_CACHE_FILE", str(tmp_path / "none.json"))
-    webapp._sectors_cache = None
-    started = []
-    monkeypatch.setattr(webapp, "_start_sectors_warm", lambda: started.append(1))
-    j = c.get("/api/sectors").get_json()
-    assert j["ok"] is True and j["status"] == "warming" and j["retry_in"] > 0
-    assert started == [1]                                  # 确实去起了后台任务
+# 2026-10-16 T2.2（删壳）：原 `test_sectors_cold_path_does_not_block` 已删除 ——
+# /api/sectors 与板块后台预热随旧命题一并移除。

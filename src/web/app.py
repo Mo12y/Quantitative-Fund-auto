@@ -1,6 +1,6 @@
 """Flask 仪表盘"""
 
-import sys, os, json, threading, time
+import sys, os, threading, time
 from concurrent.futures import ThreadPoolExecutor
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
@@ -12,64 +12,12 @@ from flask import Flask, jsonify, redirect, render_template, request, send_from_
 from flask.json.provider import DefaultJSONProvider
 from src.data.database import Database
 from src.analysis.fund_classify import type_bucket
-# 2026-10-14 S1'-c2：fund_scorer 已归档冻结（→ legacy/）。占位降级（筛选池返回空）。
-class FundScreener:              # noqa: D101
-    def __init__(self, db=None):
-        self.db = db
-
-    def screen_funds(self, **kw):
-        import pandas as pd
-        return pd.DataFrame()
-
-    def get_pool_summary(self, df=None):
-        return {"total": 0, "by_risk": {}}
-# 2026-10-14 S1'-c2：thermometer 已归档冻结（→ legacy/）。占位降级。
-TEMPERATURE_SCOPE = {}
-
-
-def is_temp_applicable(*a, **k):   # noqa: D103
-    return False
-
-
-class MarketThermometer:         # noqa: D101
-    @classmethod
-    def from_profile(cls, db=None):
-        return cls()
-
-    def get_temperature(self):
-        return {"temperature": None, "level": "unknown",
-                "level_desc": "已下线（温度模块归档 legacy/）", "action": "—",
-                "components": {}, "divergence": {}, "market_style": {}, "degraded_dimensions": []}
+# 2026-10-16 T2.2（删壳）：`FundScreener` / `MarketThermometer` / `SentimentMonitor` /
+# `RebalanceAdvisor` / `SectorAnalyzer` / `HistoricalRecommender` 6 个「占位降级类」
+# **已删除**（连同消费它们的 7 个死路由）。旧命题模块仍在 `legacy/`（`git mv` 归档，非删除）。
 from src.analysis.portfolio import PortfolioTracker
 from src.analysis import ledger_write
 from src.analysis.dca import DcaManager
-# 2026-10-14 S1'：sentiment_monitor 已归档冻结（→ legacy/）。占位类让路由降级为空，不破坏 app 启动。
-class SentimentMonitor:      # noqa: D101
-    def full_scan(self, **kw):
-        return None
-# 2026-10-14 S1'-c2：rebalance_advisor 已归档冻结（→ legacy/）。占位降级。
-class RebalanceAdvisor:          # noqa: D101
-    def __init__(self, db=None):
-        self.db = db
-
-    def analyze(self, **kw):
-        return {"temperature": {}, "summary": {"verdict": "已下线", "detail": "调仓模块归档（legacy/）"},
-                "instructions": [], "current_equity_pct": 0.0, "target_equity_pct": 0.0,
-                "total_capital": 0.0, "need_rebalance": False}
-# 2026-10-14 S1'：sector_analyzer 已归档冻结（→ legacy/）。占位类让路由降级为空。
-class SectorAnalyzer:        # noqa: D101
-    def analyze(self):
-        return {"all_sectors": []}
-
-    def recommend_for_portfolio(self, sectors):
-        return {}
-# 2026-10-14 S1'：historical_recommender 已归档冻结（→ legacy/）。占位类降级。
-class HistoricalRecommender:     # noqa: D101
-    def __init__(self, db=None):
-        self.db = db
-
-    def recommend(self, **kw):
-        return {"error": "historical_recommender 已归档冻结（legacy/）"}
 from src.analysis.investment_plan import get_plan, get_progress, ensure_seed
 from src.analysis import fund_boards
 from src.analysis import peer_percentile
@@ -101,7 +49,6 @@ app.json = _SafeJSONProvider(app)
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
 DB_PATH = os.path.join(BASE_DIR, "data", "fund_quant.db")
-SECTORS_CACHE_FILE = os.path.join(BASE_DIR, "data", "sectors_cache.json")
 # ⚠️ 2026-10-06 B-6：旧前端的 `app.js` / `app.css` 已删除（连同 `_archive/dashboard.html`
 # 与 `scripts/check_rise_fall.py`）。原来那个指向 `src/web/static/` 的 `STATIC_DIR` 常量
 # **从未被任何路由使用**（静态文件一直由 Flask 的默认 `/static/<path>` 提供），故一并删掉。
@@ -109,17 +56,6 @@ SECTORS_CACHE_FILE = os.path.join(BASE_DIR, "data", "sectors_cache.json")
 # `/static/favicon.svg`（Flask 默认静态路由提供），删了就是控制台一条 404。
 # 新前端（React）构建产物；由 `/` 路由托管（B-5 切换后旧仪表盘退役）
 FRONTEND_DIST = os.path.join(BASE_DIR, "frontend", "dist")
-
-# 板块数据缓存（启动时预计算）
-_sectors_cache = None
-_sectors_lock = threading.Lock()
-_sectors_computing = False        # single-flight：预计算与请求兜底只跑一次联网抓取
-_sectors_done = threading.Event()
-SECTORS_WARM_RETRY = 8.0          # 板块后台计算中，告诉前端多久后回来轮询
-# 筛选池/总览的冷算成本（2026-09-22 实测）：全市场快照后 fund_nav 2,290 万行、候选 18,617 只，
-# `screen_funds` 冷算 ≈110 秒。**绝不能同步阻塞请求**（旧行为会让 /api/all、/api/funds/board
-# 在冷启动时 180 秒超时）——改为后台预热 + warming + 前端轮询，与 /api/sectors 同一套模式。
-FUNDS_WARM_RETRY = 15.0
 
 # 聚合仪表盘缓存 —— 首个请求全量计算，之后 TTL 内刷新秒回
 _dash_cache = None
@@ -129,14 +65,8 @@ _dash_done = threading.Event()
 DASH_CACHE_TTL = 240.0          # 秒
 DASH_WAIT = 30.0                # single-flight 等待上限：远小于 TTL，避免等待者白等 4 分钟
 
-# 消息面缓存 / 扫描互斥 —— 联网扫描移到独立 /api/sentiment，不再阻塞整页
-_senti_cache = None             # {at, data, status, error}
-_senti_running = False
-_senti_lock = threading.Lock()
-SENTI_CACHE_TTL = 1800.0        # 成功后 30 分钟内不重复联网
-SENTI_RESCAN_WAIT = 25.0        # 扫描中状态下，客户端重试间隔（秒）
-
-# 通用“单槽 + 单飞 + TTL”缓存，供 /api/overview /api/funds /api/rebalance 等轻量端点复用
+# 通用“单槽 + 单飞 + TTL”缓存，供 /api/overview 等轻量端点复用
+# （T2.2：原复用方 /api/funds、/api/rebalance、/api/sectors、/api/sentiment 已删）
 _slot_store = {}                 # key -> {"at": monotonic, "data": dict}
 _slot_running = {}               # key -> threading.Event（正在计算）
 _slot_lock = threading.Lock()
@@ -316,17 +246,6 @@ def _all_plan():
         return {"error": str(e), "funds": []}
 
 
-def _all_temp():
-    """市场温度（本地，较慢，~9s）"""
-    try:
-        db = get_db()
-        t = MarketThermometer.from_profile(db).get_temperature()
-        db.close()
-        return t
-    except Exception as e:
-        return {"error": str(e)}
-
-
 def _nav_spans(codes: list) -> dict:
     """一次查询拿到一批基金的净值**日历跨度（年）**与最后净值日。
 
@@ -413,28 +332,6 @@ def _peer_block(cache: dict, code: str, fund_type: str, metrics: dict, span_info
     return block
 
 
-_PICK_METRIC_KEYS = ("annual_return", "ann_vol", "max_drawdown_1y", "momentum_3m", "sharpe")
-
-
-def _pick_metrics(res: dict) -> dict:
-    """把筛选器算出的**原始指标**注入 pick（供 B 层"绝对阈值"口径，如回撤 ≤ 25%）。
-
-    谁的数据谁注入：第 1 层只给百分位，绝对阈值需要原始值 —— 由本组合层补上。
-    非有限值（NaN/±inf）**不注入**：宁可让下游判为"缺这个指标"（→ 未评估），
-    也不要把 NaN 塞进去假装有值（本项目"五个维度全缺仍显示 50°"的反面教材）。
-    """
-    m = (res or {}).get("metrics") or {}
-    out = {}
-    for k in _PICK_METRIC_KEYS:
-        try:
-            v = float(m.get(k))
-        except (TypeError, ValueError):
-            continue
-        if v == v and abs(v) != float("inf"):
-            out[k] = round(v, 4)
-    return out
-
-
 def _user_constraints(db, codes=None):
     """装配 B 层运行时数据：持仓（库内）+ 画像（本地配置）+ 相关性（候选×持仓）→ `(built, ctx, meta)`。
 
@@ -503,70 +400,11 @@ def _apply_user_constraints(db, picks: list) -> tuple:
     return res.kept, _review_block(built, res, meta, len(picks))
 
 
-def _annotate_user_constraints(db, funds: list) -> tuple:
-    """筛选池用：**只标注、不剔除**（浏览面保持完整），返回 `(annotated, review_block)`。
-
-    为什么池子不剔除：池子是"浏览/排雷"面，被约束剔除的基金对用户仍有信息价值
-    （"这只已持有/与偏好冲突"本身是结论）；而真正的"买哪只"由调仓顾问的候选池把关
-    （那里用 `_apply_user_constraints` 过滤）。每只基金加 `constraint_status` ∈
-    kept/dropped/skipped + `constraint_reasons`（§4.6 三问之②③）。
-    """
-    built, ctx, meta = _user_constraints(db, [f.get("code") for f in (funds or [])])
-    if built is None:
-        return list(funds), {"error": meta["error"]}
-    res = user_constraint.apply_constraints(funds, built.constraints, ctx)
-    status = {}
-    for p in res.kept:
-        status[str(p.get("code"))] = ("kept", [])
-    for p in res.dropped:
-        status[str(p.get("code"))] = ("dropped", p.get("dropped_reasons", []))
-    for p in res.skipped:
-        status[str(p.get("code"))] = ("skipped", p.get("skipped_reasons", []))
-    annotated = []
-    for f in funds:
-        st, rs = status.get(str(f.get("code")), ("kept", []))
-        annotated.append(dict(f, constraint_status=st, constraint_reasons=rs))
-    review = _review_block(built, res, meta, len(funds))
-    review["mode"] = "annotate"          # 声明：本块只标注，不剔除
-    return annotated, review
-
-
-def _with_pool_constraints(data):
-    """给筛选池载荷附加用户约束**标注**（不剔除）。
-
-    ⚠️ 缓存载荷是被共享的 dict（内存 TTL / SQLite 快照都用它）→ **必须复制后再返回**，
-    否则"给响应加字段"会污染缓存（下次所有请求都带着旧持仓算出的标注）。
-    """
-    if not isinstance(data, dict) or data.get("funds") is None:
-        return data
-    try:
-        db = get_db()
-        try:
-            annotated, review = _annotate_user_constraints(db, data["funds"])
-        finally:
-            db.close()
-    except Exception as e:
-        return dict(data, constraint_review={"error": "用户约束标注失败：%s" % str(e)[:60]})
-    return dict(data, funds=annotated, constraint_review=review)
-
-
-def _with_board_constraints(data):
-    """板块总榜版（结构是 boards[].funds[]）——同上，只标注不剔除。"""
-    if not isinstance(data, dict) or not data.get("boards"):
-        return data
-    try:
-        db = get_db()
-        try:
-            all_funds = [f for b in data["boards"] for f in (b.get("funds") or [])]
-            annotated, review = _annotate_user_constraints(db, all_funds)
-        finally:
-            db.close()
-    except Exception as e:
-        return dict(data, constraint_review={"error": "用户约束标注失败：%s" % str(e)[:60]})
-    by_code = {str(f.get("code")): f for f in annotated}
-    boards = [dict(b, funds=[by_code.get(str(f.get("code")), f) for f in (b.get("funds") or [])])
-              for b in data["boards"]]
-    return dict(data, boards=boards, constraint_review=review)
+# 2026-10-16 T2.2（删壳）：原 `_annotate_user_constraints`（筛选池"只标注不剔除"）/
+# `_with_pool_constraints` / `_with_board_constraints` 已删除 —— 它们的唯一消费方
+# （/api/funds、/api/funds/board）已随旧命题删除。用户约束体系本身**保留**：
+# `_user_constraints` / `_review_block` / `_apply_user_constraints` 仍被
+# /api/explain 与调仓外场景使用（见 `src/analysis/user_constraint.py`）。
 
 
 # ══════════════════════════════════════════════════════════════════════
@@ -795,9 +633,9 @@ def _all_explain() -> dict:
         try:
             summary = PortfolioTracker(db).get_portfolio_summary()
             holds = _explain_holdings(db, summary)
-            temp, _ = _cached_get("temp", _all_temp)
+            # T2.2：温度模块已归档 → 传 None，`_explain_model` 会自动跳过"温度"行
             stages = [_explain_collect(db, holds), _explain_clean(db, holds),
-                      _explain_feature(db, holds), _explain_model(db, holds, temp),
+                      _explain_feature(db, holds), _explain_model(db, holds, None),
                       _explain_eval(db, summary, holds)]
         finally:
             db.close()
@@ -807,110 +645,9 @@ def _all_explain() -> dict:
         return {"error": "链路下钻失败：%s" % str(e)[:120], "stages": []}
 
 
-def _slot_ready(key: str) -> bool:
-    """该 key 是否有**可立即返回**的缓存：内存 TTL 命中，或 SQLite 快照存在。
-
-    用于"冷启动不阻塞"判断：没有可用缓存时，端点返回 `status=warming`，
-    由后台线程去算，前端按 retry_in 轮询 —— 而不是让请求挂 110 秒。
-    """
-    with _slot_lock:
-        c = _slot_store.get(key)
-        if c and time.monotonic() - c["at"] < SLOT_TTL:
-            return True
-    return _snap_read(key) is not None
-
-
-_warm_lock = threading.Lock()
-_warm_running = False
-_warm_pending = set()          # 待预热的 board key（必须与前端请求的 size/limit 一致）
-
-
-def _start_funds_warm(board_key: str = None):
-    """后台预热「筛选池 / 板块总榜 / 总览快照」。已在跑则只登记新 key，不重复起线程。
-
-    ⚠️ **board_key 必须由调用方按前端实际的 size/limit 传进来** —— 缓存 key 是
-    `funds_board_{size}_{limit}`，预热错 key 会让前端永远拿到 warming（踩过）。
-    """
-    global _warm_running
-    with _warm_lock:
-        if board_key:
-            _warm_pending.add(board_key)
-        if _warm_running:
-            return                        # 已有线程在跑 → 新 key 交给它排空
-        _warm_running = True
-
-    def _bg():
-        global _warm_running
-        try:
-            _precompute_snapshots()       # overview / funds / rebalance / __dash__
-            while True:
-                # ⚠️ 在锁内一次性取出待办并判断是否退出：否则"线程启动后才登记的 key"
-                #    会被漏掉（前端永远拿 warming）。退出与置位必须原子。
-                with _warm_lock:
-                    jobs = set(_warm_pending)
-                    _warm_pending.clear()
-                    if not jobs:
-                        _warm_running = False
-                        return
-                for k in jobs:
-                    parts = k.split("_")  # funds_board_{size}_{limit}
-                    try:
-                        s, l = int(parts[2]), int(parts[3])
-                    except Exception:
-                        continue
-                    _cached_get(k, (lambda s=s, l=l: lambda: _compute_board_pool(s, l))(),
-                                ttl=600.0)
-        except Exception:
-            with _warm_lock:
-                _warm_running = False
-
-    threading.Thread(target=_bg, daemon=True).start()
-
-
-def _all_funds():
-    """质量筛选池（本地，较慢；冷算 ~110s → 见 FUNDS_WARM_RETRY 说明）"""
-    try:
-        db = get_db()
-        s = FundScreener(db)
-        df = s.screen_funds(max_results=40)
-        # 同侪参照系：一次加载缓存 + 一次批量查跨度（B2/B4），三个端点共用
-        _cache = peer_percentile.load_cache()
-        _spans = _nav_spans([str(r["fund_code"]) for _, r in df.iterrows()])
-        funds = []
-        for _, row in df.iterrows():
-            m = row.get("metrics", {})
-            fee = row.get("mgt_fee")
-            if fee is None or fee != fee:      # NaN（费率缺失）→ null，不得当 0
-                fee = None
-            _code = str(row["fund_code"])
-            _peer = _peer_block(_cache, _code, row.get("fund_type", ""), m, _spans.get(_code))
-            funds.append({
-                "code": row["fund_code"],
-                "name": row.get("fund_name", "") or "",
-                "type": row.get("fund_type", ""),
-                "fee": fee,
-                "score": row.get("quality_score"),
-                "risk": row["risk_label"],
-                "purchase_status": row.get("purchase_status", "") or "",
-                "purchasable": row.get("quality_checks", {}).get("申购状态", ""),
-                "group": _peer["group"], "group_n": _peer["group_n"],
-                "percentiles": _peer["percentiles"], "nav_asof": _peer["nav_asof"],
-                "insufficient_data": _peer["insufficient_data"], "reason": _peer["reason"],
-                "percentiles_scale": _peer["percentiles_scale"],
-                "momentum_3m": m.get("momentum_3m"),
-                "max_dd_1y": m.get("max_drawdown_1y"),
-                "sharpe": m.get("sharpe"),
-                "ann_vol": m.get("ann_vol"),
-                "reasons": row.get("risk_reasons", []),
-                # B 层绝对阈值口径需要原始指标（只增字段，向后兼容）
-                "metrics": _pick_metrics({"metrics": m}),
-                "nav_trend": _get_nav_trend(db, row["fund_code"]),
-            })
-        summary = s.get_pool_summary(df)
-        db.close()
-        return {"funds": funds, "summary": summary}
-    except Exception as e:
-        return {"error": str(e), "funds": [], "summary": {}}
+# 2026-10-16 T2.2（删壳）：原 `_slot_ready` / `_start_funds_warm`（筛选池后台预热）/
+# `_all_funds` 已删除 —— 它们只服务 /api/funds、/api/funds/board 与旧聚合预热，
+# 随死路由一并移除（旧命题模块仍在 `legacy/`）。
 
 
 def _holdings_payload(data: dict) -> list:
@@ -993,140 +730,28 @@ def _all_portfolio():
         return {"error": str(e), "has_holdings": False, "holdings": []}
 
 
-def _all_rebalance():
-    """调仓建议（本地，最慢，~17s，含温度/筛选重算）"""
-    try:
-        db = get_db()
-        holdings = db.get_current_holdings()
-        if not holdings:
-            db.close()
-            return {"need_rebalance": False, "instructions": [], "summary": {"verdict": "暂无持仓"}}
-        # ⚠️ 2026-09-25：**复用筛选池缓存**，不要自己再跑一次全市场筛选。
-        # 调仓顾问只是为了在"权益不足"时**挑一只**🟢稳健基金，而它原先会独立调
-        # `screen_funds()` —— 等于把全市场 1.8 万只重算一遍（当前规模约 85 秒），
-        # 而同一 dashboard 的 `funds` worker 已经算过。`_cached_get` 是单飞的：
-        # 两条 worker 谁先到谁算，另一个等它并复用，**全流程只算一次**。
-        try:
-            _funds_payload, _ = _cached_get("funds", _all_funds)
-            _pool = (_funds_payload or {}).get("funds")
-        except Exception:
-            _pool = None                       # 拿不到就回退旧路径（自己算），不静默出错
-        # B 层（§4.4 第 3 层）：买入候选 = 筛选池 ∩ 用户约束。
-        # ⚠️ 这里与筛选池的"只标注不剔除"不同 —— **这里才是"买哪只"，必须过滤**：
-        # 明确不通过（dropped）与无法评估（skipped）都不进候选；被剔除的连同理由回报，
-        # 若因此一个候选都不剩，前端要能说出"不是无需调仓，是候选都被约束挡住"。
-        constraint_review = None
-        if _pool:
-            _pool, constraint_review = _apply_user_constraints(db, _pool)
-        advisor = RebalanceAdvisor(db, pool=_pool)
-        # 总资金口径 = 持仓市值 + 计划现金弹药（cash_reserve）。
-        # 旧版用 total_invested * 1.1 拍脑袋估算，与计划卡数字互相打架。
-        # 读不到就退回 0（总资金被低估、仓位被高估），但**必须声明** ——
-        # 静默填 0 会让"缺失"伪装成一个看起来正常的仓位建议。
-        degraded = []
-        try:
-            ensure_seed(db)
-            plan = get_plan(db) or {}
-            raw_cash = plan.get("cash_reserve")
-            if raw_cash is None or str(raw_cash).strip() == "":
-                raise ValueError("plan.cash_reserve 缺失")
-            cash_reserve = float(raw_cash)
-        except Exception:
-            cash_reserve = 0.0
-            degraded.append("cash_reserve")
-        # 用户可在本地画像里覆盖温度模型给出的目标权益仓位
-        # （config/user_profile.local.yaml 的 `target_equity_pct`）。
-        # 读不到 / 非数值 → None（用温度），**不编造默认值**。
-        target_override = None
-        try:
-            from src.analysis.user_profile import load_profile
-            _prof, _ = load_profile()
-            _raw = _prof.get("target_equity_pct")
-            if _raw is not None and str(_raw).strip() != "":
-                target_override = float(_raw)
-                if not (0 <= target_override <= 100):
-                    degraded.append("target_equity_pct_out_of_range")
-                    target_override = None
-        except Exception:
-            target_override = None
-        # ⚠️ 只在**确有覆盖**时才传这个 kwarg：值为 None 时省略，等价于用温度模型。
-        # 为什么要这样写：`analyze()` 的既有调用契约是 `(cash_reserve=...)`，
-        # 无条件多传一个 kwarg 会让任何按旧签名包装/打桩 analyze 的地方抛 TypeError，
-        # 而 _all_rebalance 的 `except` 会把它吞成 {"error": ...} —— 表现为
-        # 一堆看似无关的 KeyError（实测 11 个测试同时挂）。少传一个 None 就能避开。
-        if target_override is None:
-            rb = advisor.analyze(cash_reserve=cash_reserve)
-        else:
-            rb = advisor.analyze(cash_reserve=cash_reserve,
-                                 target_equity_override=target_override)
-        # 本应加仓（权益不足）却没有候选 → 是**约束挡住的**还是本来就没有？
-        # 这个布尔值让前端能说实话（而不是显示"当前无需调仓"）。
-        counts = (constraint_review or {}).get("counts") or {}
-        blocked = bool(constraint_review and counts.get("before", 0) > 0 and counts.get("kept") == 0
-                       and rb.get("need_rebalance")
-                       and (rb.get("current_equity_pct") or 0) < (rb.get("target_equity_pct") or 0))
-        db.close()
-        return {
-            "need_rebalance": rb["need_rebalance"],
-            "current_equity_pct": rb["current_equity_pct"],
-            "target_equity_pct": rb["target_equity_pct"],
-            # 目标是谁定的：'temperature' = 温度模型，'user_profile' = 用户在画像里覆盖。
-            # 前端**必须**能说出这一点 —— 否则用户看到一个与温度不符的目标会以为模型算错。
-            "target_source": rb.get("target_source"),
-            "gap_pct": rb["gap_pct"],
-            # 差额金额与百分比**同基数**（total_capital = 持仓市值 + 现金弹药）。
-            # 旧前端（app.js:650）用 portfolio.total_invested 自己乘，基数差 33% —— 不要再犯。
-            "gap_amount": rb.get("gap_amount"),
-            # 调仓容忍带（±百分点）。前端要用它把"差额"说成"在容忍范围内"而不是一个待办。
-            "rebalance_pp": rb.get("rebalance_pp"),
-            # 口径透明化：这三个数必须一起给出，前端才能算出与百分比同基数的金额。
-            # 只给百分比、让前端自己找基数 —— 正是旧前端算出 ¥314.72（应为 ¥418.63）的原因。
-            "total_capital": rb.get("total_capital"),
-            "portfolio_value": rb.get("portfolio_value"),
-            "summary": rb["summary"],
-            "instructions": rb["instructions"],
-            "cash_reserve": cash_reserve,
-            "degraded": degraded,
-            "constraint_review": constraint_review,
-            "constraint_blocked_buy": blocked,
-            # 口径透明化：权益占比只算温度**适用**的 A 股权益，另有 non_applicable_pct
-            # 属 QDII/黄金等（温度不覆盖、不参与判断）—— 前端必须能说出这一点，
-            # 否则用户看到 45% 会以为漏算了纳指和黄金。
-            "non_applicable_pct": rb.get("non_applicable_pct"),
-            "scope_note": rb.get("scope_note"),
-        }
-    except Exception as e:
-        return {"error": str(e), "instructions": [], "summary": {"verdict": "分析失败"}}
+# 2026-10-16 T2.2（删壳）：原 `_all_rebalance`（调仓建议，最慢 ~17s，含温度/筛选重算）
+# 已删除 —— 它由已归档的 `RebalanceAdvisor` 占位类驱动，且其消费路由 /api/rebalance 已删。
+# 旧命题模块仍在 `legacy/`。
 
 
 def _compute_dashboard():
-    """并行计算本地慢分析 + 快速投资计划。不含任何联网调用。
+    """聚合总览（T2.2 瘦身）：内容 = `_overview_compute`（投资计划 + 持仓 + 统计 + 曲线）。
 
-    ⚠️ `funds` 走 `_cached_get` **复用筛选池缓存**（2026-09-22）：原先直接调
-    `_all_funds()`，而筛选池冷算在全市场后要 ~85 秒 —— 导致 `__dash__` 与 `funds`
-    各算一遍，总预热时间翻倍（实测 ~210s）。复用后只算一次。
+    原实现并行计算 temperature / funds / rebalance 三块重活（funds 冷算 ~110s）——
+    三块均已随旧命题删除；现聚合内容与 overview 相同，但**保留本函数名与 `__dash__`
+    缓存槽**（/api/all 的缓存/快照协议不动，前端只读字段不受影响）。
     """
-    # ⚠️ 先把**最贵的 funds** 串行算出来，再并行跑其余（2026-09-25）。
-    # 为什么不能一起并行：`_all_rebalance` 也要筛选池，若与 funds 同时起跑，
-    # 两者都在 cache miss 上，而 `_cached_get` 的单飞等待上限 SLOT_WAIT=30s
-    # **小于**筛选池冷算的 ~85s → 等待方超时后自己又算一遍，等于跑两次全市场筛选
-    # （实测冷启 141s/2 次）。串行预热后调仓直接命中槽位，**只算一次**。
-    out = {"plan": _all_plan()}
-    out["funds"], _ = _cached_get("funds", _all_funds)
-    workers = {"temp": _all_temp, "portfolio": _all_portfolio, "rebalance": _all_rebalance}
-    with ThreadPoolExecutor(max_workers=3) as ex:
-        fut = {ex.submit(fn): key for key, fn in workers.items()}
-        for f in fut:
-            out[fut[f]] = f.result()
-    out["stats"] = _overview_stats(out.get("portfolio") or {}, out.get("plan") or {})
-    out["curve"] = _portfolio_curve()
-    return out
+    return _overview_compute()
 
 
 @app.route("/api/all")
 def api_all():
-    """聚合 API：温度/基金池/持仓/调仓建议（本地并行 + TTL 缓存，秒级刷新）。
-    消息面已独立到 /api/sentiment，避免联网阻塞整页。"""
+    """聚合 API：投资计划 + 持仓（本地并行 + TTL 缓存；T2.2 后内容 = `_overview_compute`）。
+
+    历史：原含 温度 / 基金池 / 调仓建议 / 消息面 —— 均已随旧命题删除；
+    保留独立 `__dash__` 缓存槽与快照协议（向后兼容，前端只读字段不受影响）。
+    """
     global _dash_cache, _dash_computing
     fresh = request.args.get("fresh") == "1"
     # 1) 新鲜缓存 -> 直接返回（fresh=1 时跳过，强制重算）
@@ -1141,11 +766,8 @@ def api_all():
                 _dash_cache = {"at": time.monotonic(), "data": snap}
             return jsonify({"ok": True, "data": snap, "source": "snapshot"})
 
-        # 1.6) 冷启动（无缓存也无快照）→ **不阻塞**，返回 warming 并后台预热。
-        # 全市场快照后 __dash__ 冷算含筛选池（~110s），同步算会让请求 180s 超时。
-        _start_funds_warm()
-        return jsonify({"ok": True, "data": None, "status": "warming",
-                        "retry_in": FUNDS_WARM_RETRY, "source": "warming"})
+        # 1.6) T2.2：聚合内容已是轻量 overview（秒级）→ 冷启动直接落入下方同步计算，
+        # 不再需要 warming 协议（原"筛选池冷算 ~110s 会拖垮请求"的前提已不存在）。
 
     # 2) single-flight：并发 cache miss 时只有第一个真算，其余等它算完复用
     with _dash_lock:
@@ -1170,10 +792,7 @@ def api_all():
         data = _compute_dashboard()
     except Exception as e:
         # 顶层带 error：既告知前端，也让 _snap_write 拒绝把这个失败结果落成快照
-        data = {"error": f"compute failed: {e}", "plan": [], "temp": {"error": "compute failed"},
-                "funds": {"funds": [], "summary": {}},
-                "portfolio": {"has_holdings": False, "holdings": []},
-                "rebalance": {"instructions": [], "summary": {"verdict": "分析失败"}}}
+        data = {"error": f"compute failed: {e}", "plan": []}
     with _dash_lock:
         _dash_cache = {"at": time.monotonic(), "data": data}
         _dash_computing = False
@@ -1183,11 +802,13 @@ def api_all():
 
 
 def _overview_compute() -> dict:
-    """轻量总览：投资计划 + 温度 + 持仓（并行，约 2~3s），不含筛选/调仓等重计算。"""
+    """轻量总览：投资计划 + 持仓（并行，约 1~2s）。
+
+    T2.2：温度模块已归档 → 原 `temp` 字段删除（前端不应再依赖该键）。
+    """
     out = {}
-    with ThreadPoolExecutor(max_workers=3) as ex:
+    with ThreadPoolExecutor(max_workers=2) as ex:
         fs = {ex.submit(_all_plan): "plan",
-              ex.submit(_all_temp): "temp",
               ex.submit(_all_portfolio): "portfolio"}
         for f in fs:
             out[fs[f]] = f.result()
@@ -1493,293 +1114,17 @@ def api_overview():
     return jsonify({"ok": True, "data": data, "source": source})
 
 
-@app.route("/api/funds")
-def api_funds():
-    """基金筛选池 —— 重计算（全市场后冷算 ~110s）。
-
-    冷启动**不阻塞**：无可立即返回的缓存时返回 `status=warming` + retry_in，
-    后台线程预热，前端轮询（与 /api/sectors 同一套模式）。
-    """
-    fresh = request.args.get("fresh") == "1"
-    if not fresh and not _slot_ready("funds"):
-        _start_funds_warm()
-        return jsonify({"ok": True, "data": None, "status": "warming",
-                        "retry_in": FUNDS_WARM_RETRY, "source": "warming"})
-    data, source = _cached_get("funds", _all_funds, fresh=fresh)
-    # B 层（§4.4/§4.6）：池子只**标注**用户约束、不剔除（浏览面保持完整）
-    return jsonify({"ok": True, "data": _with_pool_constraints(data), "source": source})
+# 2026-10-16 T2.2（删壳）：原 /api/funds（质量筛选池）、/api/rebalance（调仓建议）、
+# /api/sentiment（消息面）三个死路由 + 其辅助（`_serialize_senti`、`_get_nav_trend`）
+# 已删除 —— 它们由已归档的占位类驱动（fund_scorer / rebalance_advisor / sentiment_monitor）。
+# 旧命题模块仍在 `legacy/`。
 
 
-@app.route("/api/rebalance")
-def api_rebalance():
-    """调仓建议 —— 重计算，仅在用户打开持仓/调仓面板时触发并缓存。"""
-    data, source = _cached_get("rebalance", _all_rebalance, fresh=request.args.get("fresh") == "1")
-    return jsonify({"ok": True, "data": data, "source": source})
-
-
-def _serialize_senti(sd: dict) -> dict:
-    return {
-        "all_clear": sd.get("all_clear", True),
-        "signal_summary": sd.get("signal_summary", ""),
-        "alerts": [{
-            "level": a.level, "category": a.category,
-            "title": a.title, "detail": a.detail, "timestamp": a.timestamp,
-        } for a in sd.get("alerts", [])],
-    }
-
-
-@app.route("/api/sentiment")
-def api_sentiment():
-    """消息面 —— 独立端点，联网扫描放后台线程；首次返回 scanning，前台轮询。
-    不阻塞仪表盘其它板块的加载。"""
-    global _senti_cache, _senti_running
-    with _senti_lock:
-        c = _senti_cache
-        running = _senti_running
-    now = time.monotonic()
-    # 命中成功的缓存 -> 直接返回
-    if c and c["status"] == "ok" and now - c["at"] < SENTI_CACHE_TTL:
-        return jsonify({"ok": True, "data": c["data"], "status": "ok", "cached": True})
-    # 上次扫描失败（3 分钟内）-> 直接报错，避免前台轮询反复触发联网扫描
-    if c and c["status"] == "error" and now - c["at"] < 180.0:
-        return jsonify({"ok": False, "error": c.get("error") or "消息面扫描失败，请稍后重试"})
-    # 正在后台扫描 -> 提示客户端稍后再轮询
-    if running:
-        prev = c["data"] if c and c["status"] == "ok" else None
-        return jsonify({"ok": True, "data": prev, "status": "scanning"})
-
-    # 启动后台扫描
-    try:
-        db = get_db()
-        codes = [h["fund_code"] for h in db.get_current_holdings()]
-        db.close()
-    except Exception:
-        codes = []
-    with _senti_lock:
-        if _senti_running:
-            return jsonify({"ok": True, "data": None, "status": "scanning"})
-        _senti_running = True
-
-    def _background_scan():
-        global _senti_cache, _senti_running
-        try:
-            sd = SentimentMonitor().full_scan(holding_codes=codes)
-            data, status, err = _serialize_senti(sd), "ok", None
-        except Exception as e:
-            data, status, err = None, "error", str(e)
-        with _senti_lock:
-            _senti_cache = {"at": time.monotonic(), "data": data, "status": status, "error": err}
-            _senti_running = False
-
-    threading.Thread(target=_background_scan, daemon=True).start()
-    return jsonify({"ok": True, "data": None, "status": "scanning", "retry_in": SENTI_RESCAN_WAIT})
-
-
-def _get_nav_trend(db: Database, fund_code: str, days: int = 30) -> list:
-    """获取最近N天的净值序列，用于前端迷你趋势图（SQL LIMIT，不再全量加载整段历史）"""
-    try:
-        navs = db.get_recent_fund_nav(fund_code, days)
-    except Exception:
-        return []
-    if len(navs) < 5:
-        return []
-    out = []
-    for r in navs:
-        raw = r.get("unit_nav")
-        if raw is None:          # unit_nav 允许 NULL，跳过避免 TypeError 拖垮整个基金区
-            continue
-        out.append({"date": str(r.get("nav_date", ""))[-5:],
-                    "nav": round(float(raw), 4)})
-    return out
-
-
-# =================================================================
-# 板块数据缓存
-# =================================================================
-
-def _format_sectors(result: dict) -> dict:
-    """将 SectorAnalyzer 结果格式化为前端需要的精简结构"""
-    sectors = []
-    for s in result.get("all_sectors", []):
-        sectors.append({
-            "name": s["name"],
-            "rank": s.get("rank", 0),
-            "score": round(s.get("score", 0), 2),
-            "ret_1m": s["ret_1m"],
-            "ret_3m": s["ret_3m"],
-            "ret_6m": s["ret_6m"],
-            "volatility": s["volatility"],
-            "max_dd_6m": s["max_dd_6m"],
-            "ma_ratio": s["ma_ratio"],
-        })
-
-    return {
-        "sectors": sectors,
-        "momentum_leaders": [
-            {"name": s["name"], "ret_1m": s["ret_1m"], "ret_3m": s["ret_3m"]}
-            for s in result.get("momentum_leaders", [])[:5]
-        ],
-        "value_candidates": [
-            {"name": s["name"], "ret_1m": s["ret_1m"], "ret_6m": s["ret_6m"], "max_dd": s["max_dd_6m"]}
-            for s in result.get("value_candidates", [])[:5]
-        ],
-        "cached_at": time.strftime("%Y-%m-%d %H:%M"),
-    }
-
-
-def _save_sectors_cache(data: dict):
-    """将板块数据写入文件缓存"""
-    try:
-        os.makedirs(os.path.dirname(SECTORS_CACHE_FILE), exist_ok=True)
-        with open(SECTORS_CACHE_FILE, "w", encoding="utf-8") as f:
-            json.dump(data, f, ensure_ascii=False, default=str)
-    except Exception:
-        pass
-
-
-def _start_sectors_warm():
-    """single-flight 启动后台板块计算。已在算则不作声。"""
-    global _sectors_computing
-    with _sectors_lock:
-        if _sectors_computing:
-            return False
-        _sectors_computing = True
-        _sectors_done.clear()
-    threading.Thread(target=_compute_sectors_bg, daemon=True).start()
-    return True
-
-
-def _compute_sectors_bg():
-    """后台抓取并计算 31 行业板块 → 内存 + 文件 + SQLite 快照。"""
-    global _sectors_cache, _sectors_computing
-    try:
-        result = SectorAnalyzer().analyze()
-        if "error" not in result:
-            data = _format_sectors(result)
-            with _sectors_lock:
-                _sectors_cache = data
-            _save_sectors_cache(data)
-            _snap_write("sectors", data)      # 重启后也能秒回
-            print(f"  ✅ 板块数据已就绪 ({len(data['sectors'])}个行业)")
-        else:
-            print(f"  ⚠️ 板块计算失败: {result['error']}")
-    except Exception as e:
-        print(f"  ⚠️ 板块计算异常: {e}")
-    finally:
-        with _sectors_lock:
-            _sectors_computing = False
-        _sectors_done.set()
-
-
-def _precompute_sectors():
-    """启动时后台预热板块数据（已新鲜则跳过一次抓取）"""
-    _start_sectors_warm()
-
-
-@app.route("/api/sectors")
-def api_sectors():
-    """板块分析：内存 → 文件 → SQLite 快照 → **后台计算（不阻塞请求）**。
-
-    联网抓 31 个行业可能耗时几十秒。原实现会在请求线程里等它算完（实测断网时
-    卡 50s+ 都出不来），这里改成：冷启动只**启动后台任务**并立刻返回
-    `status=warming`，前端按 retry_in 轮询 —— 与 /api/sentiment 同一套模式。
-    """
-    global _sectors_cache
-
-    # 1) 内存缓存（锁内取引用，序列化在锁外）
-    with _sectors_lock:
-        cached = _sectors_cache
-    if cached is not None:
-        return jsonify({"ok": True, "data": cached, "source": "memory"})
-
-    # 2) 文件缓存
-    if os.path.exists(SECTORS_CACHE_FILE):
-        try:
-            with open(SECTORS_CACHE_FILE, "r", encoding="utf-8") as f:
-                cached = json.load(f)
-            with _sectors_lock:
-                if _sectors_cache is None:
-                    _sectors_cache = cached
-            return jsonify({"ok": True, "data": cached, "source": "file"})
-        except Exception:
-            pass
-
-    # 3) SQLite 快照（跨重启）
-    snap = _snap_read("sectors")
-    if snap is not None:
-        with _sectors_lock:
-            if _sectors_cache is None:
-                _sectors_cache = snap
-        return jsonify({"ok": True, "data": snap, "source": "snapshot"})
-
-    # 4) 都没有 → 后台算，立刻返回，让前端轮询（绝不阻塞请求线程）
-    _start_sectors_warm()
-    return jsonify({"ok": True, "data": None, "status": "warming",
-                    "retry_in": SECTORS_WARM_RETRY})
-
-
-@app.route("/api/recommend")
-def api_recommend():
-    """历史回测验证（**辅助参考路径**，批次 4.9 分工）—— 加载约15-20秒。
-
-    与主推荐的分工：
-    - 主路径 = 温度驱动的实时筛选（`/api/strategy` → `screen_funds`，带类型过滤）；
-    - 本端点 = 历史回测验证，回答「过去哪些基金被反复选中且真的赚了钱」。
-    两者结论可能不同，**不是同一件事**，前端/调用方不得混称“推荐”。
-
-    §4.4 第 3 层（2026-09-26 接入）：本端点同时是「同类百分位 ∩ 用户约束」的组合点 ——
-    `current_picks` 已过用户约束；落选与"未评估"的候选连同理由进 `constraint_review`
-    （§4.6 可解释性三问），**不得**把它们静默丢掉。
-    """
-    try:
-        db = get_db()
-        hr = HistoricalRecommender(db)
-        result = hr.recommend(lookback_years=1.5)
-
-        picks = result.get("current_picks", [])[:10]
-        # B4：给 picks 补同侪块（group/group_n/percentiles/nav_asof/样本是否充足）。
-        # 这里只有基金代码，指标需现算 —— 只 10 只，成本可接受。
-        # 任何一只算不出来都不影响整体（try 包住，缺失就按 B2 显式声明）。
-        try:
-            s = FundScreener(db)
-            cache = peer_percentile.load_cache()
-            spans = _nav_spans([str(p.get("code")) for p in picks])
-            for p in picks:
-                code = str(p.get("code"))
-                info = db.get_fund_info(code) or {}
-                if not isinstance(info, dict):
-                    info = dict(info)
-                res = s._screen_single_fund(code, info) or {}
-                pb = _peer_block(cache, code, info.get("fund_type", ""),
-                                 res.get("metrics", {}), spans.get(code))
-                p.update({"group": pb["group"], "group_n": pb["group_n"],
-                          "percentiles": pb["percentiles"], "nav_asof": pb["nav_asof"],
-                          "insufficient_data": pb["insufficient_data"], "reason": pb["reason"],
-                          "metrics": _pick_metrics(res)})
-        except Exception as _e:
-            for p in picks:
-                p.setdefault("insufficient_data", True)
-                p.setdefault("reason", "同侪参照系计算失败：%s" % str(_e)[:60])
-
-        # §4.4 第 3 层：用户约束（只读；失败不阻断，见 _apply_user_constraints）
-        kept, constraint_review = _apply_user_constraints(db, picks)
-        db.close()
-
-        # 精简输出
-        return jsonify({"ok": True, "data": {
-            "stats": result.get("stats", {}),
-            "proven_winners": result.get("proven_winners", [])[:15],
-            "current_picks": kept,
-            "constraint_review": constraint_review,
-        }, "purpose": "历史回测验证（样本内）——辅助参考，不是主推荐。"
-                      "批次 4.3 已做滚动样本外验证（`oos` 命令，51 个不重叠窗口）："
-                      "该口径超额中位仅 +0.11pp、逐窗胜率 51.0%，看不出选基能力，"
-                      "`proven_winners` 宜读作「打分法偏好的类型分布」。",
-           "methodology_note": ("以下为**样本内**历史表现：用已实现的前向收益筛选"
-                                "“赢家”存在同义反复，不构成样本外的选基能力证据。"
-                                "主推荐请看温度驱动的实时筛选。")})
-    except Exception as e:
-        return jsonify({"ok": False, "error": str(e)})
+# 2026-10-16 T2.2（删壳）：原「板块数据缓存」整组（`_format_sectors` / `_save_sectors_cache` /
+# `_start_sectors_warm` / `_compute_sectors_bg` / `_precompute_sectors` / `/api/sectors`）与
+# `/api/recommend`（历史回测推荐）已删除 —— 它们由已归档的占位类驱动
+# （sector_analyzer / historical_recommender），且属旧命题产品面。
+# 旧命题模块仍在 `legacy/`；`_clean_recs` 保留（/api/research 仍用它读离线 CSV）。
 
 
 def _clean_recs(df, keep=None, scale_pct=()):
@@ -2152,7 +1497,7 @@ def api_nav_update():
     finally:
         db.close()
         # 净值变了 → 依赖 fund_nav 的筛选池/板块总榜也失效
-        _invalidate_caches("funds", "funds_board_all", "rebalance")
+        _invalidate_caches()     # T2.2：原参数 funds/funds_board_* 随死路由删除；净值变了 → 清聚合缓存
 
 
 @app.route("/api/plan", methods=["GET", "POST"])
@@ -2234,20 +1579,7 @@ def api_plan():
             _invalidate_caches("rebalance")     # 计划变了 → 总览/调仓建议失效（GET 读不失效）
 
 
-@app.route("/api/funds/board")
-def api_funds_board():
-    """筛选池总榜（第 8 项）：按行业板块分类，每板块前 N（默认 20），不截断。"""
-    size = max(1, min(100, int(request.args.get("size", 20))))
-    limit = max(50, min(600, int(request.args.get("limit", 300))))
-    key = f"funds_board_{size}_{limit}"
-    fresh = request.args.get("fresh") == "1"
-    if not fresh and not _slot_ready(key):             # 冷启动不阻塞（同上）
-        _start_funds_warm(board_key=key)               # ← 预热**同一把 key**，否则永远 warming
-        return jsonify({"ok": True, "data": None, "status": "warming",
-                        "retry_in": FUNDS_WARM_RETRY, "source": "warming"})
-    data, source = _cached_get(key, lambda: _compute_board_pool(size, limit),
-                               ttl=600.0, fresh=fresh)
-    return jsonify({"ok": True, "data": _with_board_constraints(data), "source": source})
+# 2026-10-16 T2.2（删壳）：原 /api/funds/board（筛选池板块总榜）已删除。
 
 
 @app.route("/api/explain")
@@ -2258,54 +1590,8 @@ def api_explain():
     return jsonify({"ok": True, "data": data, "source": source})
 
 
-def _compute_board_pool(size: int, limit: int) -> dict:
-    """按板块把筛选池分组（每板块取前 size 只，组内稳健优先→夏普→动量）"""
-    try:
-        db = get_db()
-        s = FundScreener(db)
-        df = s.screen_funds(max_results=limit)
-        # B2/B4：同侪块（与 /api/funds 共用同一实现与缓存，口径必须一致）
-        _cache = peer_percentile.load_cache()
-        _spans = _nav_spans([str(r["fund_code"]) for _, r in df.iterrows()])
-        funds = []
-        for _, row in df.iterrows():
-            m = row.get("metrics", {}) or {}
-            fee = row.get("mgt_fee")
-            if fee is None or fee != fee:      # NaN（费率缺失）→ null，不得当 0
-                fee = None
-            _code = str(row["fund_code"])
-            _peer = _peer_block(_cache, _code, row.get("fund_type", ""), m, _spans.get(_code))
-            funds.append({
-                "code": row["fund_code"], "name": row.get("fund_name", "") or "",
-                "type": row.get("fund_type", ""), "risk": row["risk_label"],
-                "fee": fee,
-                "score": row.get("quality_score"),
-                "purchase_status": row.get("purchase_status", "") or "",
-                "purchasable": (row.get("quality_checks") or {}).get("申购状态", ""),
-                "momentum_3m": m.get("momentum_3m"), "max_dd_1y": m.get("max_drawdown_1y"),
-                "sharpe": m.get("sharpe"), "ann_vol": m.get("ann_vol"),
-                "group": _peer["group"], "group_n": _peer["group_n"],
-                "percentiles": _peer["percentiles"], "nav_asof": _peer["nav_asof"],
-                "insufficient_data": _peer["insufficient_data"], "reason": _peer["reason"],
-                "percentiles_scale": _peer["percentiles_scale"],
-                "metrics": _pick_metrics({"metrics": m}),
-                "nav_trend": _get_nav_trend(db, row["fund_code"]),
-            })
-        db.close()
-    except Exception as e:
-        return {"boards": [], "total_funds": 0, "size": size, "error": str(e)}
-
-    groups = {}
-    for f in funds:
-        # 传类型：结构化字段优先（只传名称会把「政策性金融债」误判成「金融地产」）
-        b = fund_boards.classify(f.get("name") or f.get("code"), f.get("type"))
-        groups.setdefault(b, []).append(f)
-    for g in groups.values():
-        g.sort(key=lambda x: (0 if "稳健" in (x.get("risk") or "") else 1,
-                              -(x.get("sharpe") or 0), -(x.get("momentum_3m") or 0)))
-    boards = [{"board": b, "total": len(g), "funds": g[:size]}
-              for b, g in sorted(groups.items(), key=lambda kv: -len(kv[1]))]
-    return {"boards": boards, "total_funds": len(funds), "size": size}
+# 2026-10-16 T2.2（删壳）：原 `_compute_board_pool`（筛选池板块总榜）已删除 ——
+# 它由占位 FundScreener 驱动，属旧命题产品面。
 
 
 @app.route("/api/dca", methods=["GET", "POST"])
@@ -2401,9 +1687,12 @@ def api_dca():
 
 
 def _precompute_snapshots():
-    """启动时后台预热快照：快照还新鲜就跳过，不与首屏请求抢资源。"""
-    jobs = [("overview", _overview_compute), ("funds", _all_funds),
-            ("rebalance", _all_rebalance), ("__dash__", _compute_dashboard)]
+    """启动时后台预热快照：快照还新鲜就跳过，不与首屏请求抢资源。
+
+    T2.2：原 jobs 还含 funds / rebalance（筛选池等重算，~110s）—— 随旧命题删除；
+    只剩 overview，顺带把 `__dash__`（内容 = overview）也预热。
+    """
+    jobs = [("overview", _overview_compute), ("__dash__", _compute_dashboard)]
     for key, fn in jobs:
         try:
             db = get_db()
@@ -2449,13 +1738,11 @@ def main():
     print("   http://localhost:%d" % port)
     print("=" * 50)
 
-    # 预计算板块数据（后台线程，不阻塞启动）
-    threading.Thread(target=_precompute_sectors, daemon=True).start()
-    # 预热分析快照（同上；已新鲜则跳过）
+    # 预热分析快照（后台线程；已新鲜则跳过。T2.2：板块预热已随旧命题删除）
     threading.Thread(target=_precompute_snapshots, daemon=True).start()
 
     # 只监听回环地址：本系统无鉴权且管的是真实资金记录，绝不能被同网段其它设备读写。
-    # threaded=True：允许 /api/all 全量计算时，量化模型/板块/消息面卡片仍并发加载
+    # threaded=True：允许 /api/all 计算时其它轻量端点并发加载
     app.run(host="127.0.0.1", port=port, debug=False, threaded=True)
 
 
