@@ -41,11 +41,14 @@
 - **T2.2 已完成**：删壳 —— 6 个占位类 + 6 个死路由（funds / rebalance / sectors / sentiment /
   recommend / funds·board）+ 全部连带辅助/常量/后台预热；`precompute` 只剩 overview（**0.2s**）；
   删 `test_api_degraded.py` 等 **15** 个死路由测试（EXCEPTIONS 登记）；死缓存快照已清。
-- **下一步**：T2.3（`main.py` 无参数修复）→ 阶段 3（前端决策台三页，§3 契约为交接依据）→ 阶段 4/5。
+- **T2.3 已完成**：`main.py` 无参数改为打印帮助（退出码 0，原调已删的 `report` 会崩）；
+  docstring 对齐真实 25 命令。**阶段 2 收口**。
+- **下一步**：阶段 3（前端决策台三页：T3.1 三页重做 → T3.2 前端重建）→ 阶段 4/5。
 
 ## 门禁（实测）
 - `pytest -q` → **534 passed**（S1' 后 538；T0.3 +3、T2.1 +8、T2.2 −15〔死路由测试随删壳移除〕）。
 - `python src/main.py precompute` → 只剩 overview，**0.2s**（原含筛选池 ~110s）。
+- `python src/main.py`（无参数）→ 打印帮助，**退出码 0**；输出含 `behavior`/`counterfactual`、不含 `score`/`temp`（T2.3）。
 - `pytest tests/test_web_behavior_api.py -q` → **8 passed**（决策台 7 路由：真实锚点 + 同源一致）。
 - `pytest tests/test_data_contract.py -q` → **15 passed**（T0.3 负对照含"红→恢复→绿"完整演绎）。
 - `pytest tests/test_boot_budget.py -q` → **3 passed**。

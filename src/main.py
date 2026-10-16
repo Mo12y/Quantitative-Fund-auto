@@ -1,54 +1,44 @@
-"""🚀 量化基金系统 v3.0
+"""🚀 个人基金投资决策支持系统 CLI
 
 用法:
-    python src/main.py                          # 默认生成周报
-    python src/main.py <命令> [--help]           # 命令后加 --help/-h 查看总帮助
+    python src/main.py                # 打印本帮助
+    python src/main.py <命令>          # 命令后加 --help/-h 查看本帮助
 
 数据准备（首次/日常）:
-    init        一键初始化
+    init        一键初始化（自检 → 采集列表/估值 → 日历 → 净值 → 详情）
     test        数据源连通自检
     collect     采集全市场基金列表 + 指数估值
     index       更新指数估值(PE/PB)
-    nav         采集候选基金净值历史（评分需要）
-    snapshot    全市场当日净值快照（1 次请求约 10 秒，日常增量主路径）
+    nav         采集基金净值历史
+    snapshot    全市场当日净值快照（日常增量主路径）
     enrich      补充基金详情（经理/费率等）
-    hithink     同花顺 HiThink 连通测试
+    hithink     同花顺 HiThink 连通自检（未接入采集链路）
     calendar    刷新交易日历（T+1 确认 / 定投跳过节假日）
+    fees        补采真·运作费率（管理费/托管费/销售服务费；可断点续采）
 
-每日决策:
-    temp        市场温度 + 仓位建议
-    score       基金质量筛选(🟢🟡🔴 排除有坑的)
-    sector      31 个行业板块排名 + 推荐
-    sentiment   消息面监控(宏观 LPR/PMI / 基金公告)
-    recommend   历史验证基金推荐(回测)
-    strategy    策略引擎(温度阈值/是否调仓)
-    backtest3   严谨回测 v3(防未来函数/多基准/显著性)
-    backtest4   严谨回测 v4
-    backtest / backtest2   旧版回测(兼容, 已被 v3/v4 取代)
+行为审计（只读；回答「我自己的操作值多少」）:
+    behavior        行为画像(追高 / 割肉 / 卖飞 / 交易频率 ↔ 收益)
+    counterfactual  反事实归因(当时不动 / 只定投 / 照温度动)
+    sell_rules      同标的卖出规则对比(冻结买入，只变卖出规则)
+    breakeven       回本门槛(这笔操作要涨多少才不亏)
+    drift           风格漂移检测(CUSUM-of-squares + PELT；名称与类型不变、风险特征变了)
 
-持仓 / 组合管理:
+持仓 / 计划:
     portfolio   持仓盈亏与资产配置
     buy         录入买入
     sell        卖出
     update      修改持仓(金额/日期)
     delete      删除持仓(重复录入等)
-    rebalance   持仓调仓建议
     dca         定投管理(list/add/run/pause/resume)
     plan        投资计划 + 进度
-    report      周度报告
-
-自我审计（只读；回答「我自己的操作值多少」，不是「策略在池子上行不行」）:
-    oos             滚动样本外验证(选择期与验证期不重叠)
-    counterfactual  反事实归因(如果我当时不动 / 只定投 / 照温度动)
-    sell_rules      同标的卖出规则对比(冻结买入，只变卖出规则)
-    breakeven       回本门槛(这笔操作要涨多少才不亏)
-    behavior        行为画像(追高 / 割肉 / 交易频率 ↔ 收益)
-    drift           风格漂移检测(CUSUM-of-squares + PELT；名称与类型不变、风险特征变了)
 
 看板 / 自动化:
-    web         启动 Web 仪表盘(http://localhost:5020；端口可用 QFA_PORT=5021 或 `web 5021` 覆盖)
-    precompute  预计算快照(温度/筛选池/板块总榜)，让 Web 首屏免冷算
-    schedule    定时调度(每周日 20:00 自动生成周报)
+    web         启动 Web 界面(http://localhost:5020；端口可用 QFA_PORT=5021 或 `web 5021` 覆盖)
+    precompute  预计算快照(聚合总览)，让 Web 首屏免冷算
+    schedule    定时调度(每周日 20:00)
+
+⚠️ 2026-10-16 T2.2/T2.3：旧命题的一批命令已随模块归档删除（清单见
+`docs/05-重构/01_决策支持系统_执行计划书.md` §10 与 git 历史）。
 """
 
 import sys
@@ -76,8 +66,10 @@ def print_help():
 def main():
     """主入口: 根据命令行参数分发到不同子命令"""
     if len(sys.argv) < 2:
-        # 无参数: 默认生成报告
-        COMMANDS["report"]()
+        # 无参数：打印帮助并正常退出。
+        # 2026-10-16 T2.3：原为"默认生成周报"（COMMANDS["report"]()）—— report 命令已随
+        # 旧命题删除，无参数曾抛 KeyError；现改为打印帮助（退出码 0）。
+        print_help()
         return
 
     cmd = sys.argv[1].lower()
