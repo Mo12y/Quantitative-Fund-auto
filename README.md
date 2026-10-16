@@ -280,7 +280,7 @@ CODEBUDDY_SAFE_DELETE_BULK_THRESHOLD=100000 python -m pytest tests/ -q
 | 多重检验校正（因子检验的 Bonferroni 等） | White H. *A reality check for data snooping*. Econometrica, 2000, 68(5): 1097-1126 | ✅ 奠基文献 |
 | 回测过拟合风险 | Bailey D H, Borwein J M, López de Prado M, et al. *The probability of backtest overfitting*. Journal of Portfolio Management, 2022, 48(5): 120-131 | ⚠️ 主题确凿（López de Prado 系列），**具体卷期待核** |
 | ML 做资产定价的经济价值与显著性分离 | Gu S, Kelly B, Xiu D. *Empirical asset pricing via machine learning*. The Review of Financial Studies, 2020, 33(5): 2223-2273 | ✅ 高被引，DOI 可查 |
-| **费率（TER）是预测后续净回报最有效的单变量之一** | Morningstar：Kinnel R. (2016) 标杆研究 + 2025 年 20 年复现（Russel Kinnel / Jeffrey Ptak）；晨星中国 TER 口径 | ✅ **本项目独立核验过**（见 `docs/参照系接入执行报告.md` §8.5） |
+| **费率（TER）是预测后续净回报最有效的单变量之一** | Morningstar：Kinnel R. (2016) 标杆研究 + 2025 年 20 年复现（Russel Kinnel / Jeffrey Ptak）；晨星中国 TER 口径 | ✅ **本项目独立核验过**（见 `docs/_archive/参照系接入执行报告.md` §8.5） |
 | 同侪百分位 / 组内分位（不做单一绝对阈值） | 同上（晨星"同类内比较"方法），外加本项目实测：TER 中位权益 1.40% vs 债券 0.50%（差 2.8 倍） | ✅ 实测支撑 |
 
 > ⚠️ **关于课程作业那份 25 篇文献清单**（`D:\DSH\courses\wenxianjiansuo\...\参考文献清单.md`）：

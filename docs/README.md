@@ -30,11 +30,16 @@
 |:---|:---|
 | `README.md` | 归档规则 + 归档物索引 |
 
-## 旧有文档（未归并）
-> ⚠️ 以下为本项目历史文档，**状态标注长期滞后**，引用前先 grep 代码核实。
-> S1 归档已完成（命题层进 `legacy/`）；本层文档的「权威 / 归档」二分归位**尚未执行**。
-- `前端重构计划书.md` / `审计修复记录.md` / `基金推荐系统设计方案.md` / `数据源扩展计划书.md` 等
-- 归位规则：权威的进 `00-规范/`，过期的进 `_archive/`。
+## 顶层保留（现行文件）
+> **2026-10-16 归并后，`docs/` 顶层只保留现行文件**：
+> - **脚本生成的研究报告 ×5**（复现命令见根 `README.md` 的「离线研究模块」表）：
+>   `vol_prediction_report.md` / `drawdown_warning_report.md` / `portfolio_simulation_report.md` /
+>   `vol_model_comparison_report.md` / `factor_test_report.md`；
+> - **运行产物 json ×4**（脚本读写用，非文档）：`coverage_attribution.json` /
+>   `data_quality_report.json` / `peer_validation.json` / `threshold_relocation.json`。
+>
+> **历史文档已全部归并 `_archive/`**（33 份任务书/审计报告/复盘/参考 + 诊断碎片 —— 索引见
+> `_archive/README.md`）。⚠️ 归档区可 `rg` 追溯，但**不作为口径**；引用前先 grep 代码核实。
 
 ---
 
